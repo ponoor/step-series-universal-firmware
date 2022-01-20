@@ -1,0 +1,102 @@
+//
+// !!! WARNING !!! AUTO-GENERATED FILE!
+// PLEASE DO NOT MODIFY IT AND USE "platformio.ini":
+// https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags
+//
+{
+    "configurations": [
+        {
+            "name": "PlatformIO",
+            "includePath": [
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/include",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/src",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Ponoor PowerSTEP01 Library/src",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Ponoor L6470 Library/src",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/ArduinoJson/src",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Adafruit SleepyDog Library",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Adafruit SleepyDog Library/utility",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/OSC",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/SD/src",
+                "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Ethernet/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SPI",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/cores/arduino/api/deprecated",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/cores/arduino/api/deprecated-avr-comp",
+                "C:/Users/kanta/.platformio/packages/framework-cmsis@1.40500.0/CMSIS/Include",
+                "C:/Users/kanta/.platformio/packages/framework-cmsis-atmel/CMSIS/Device/ATMEL",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/cores/arduino",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/variants/arduino_zero",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/USBHost/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/HID",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/I2S/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SAMD_AnalogCorrection/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SAMD_BootloaderUpdater/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SBU/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SDU/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SFU/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SNU/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SSU/src",
+                "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/Wire",
+                "C:/Users/kanta/.platformio/packages/tool-unity",
+                ""
+            ],
+            "browse": {
+                "limitSymbolsToIncludedHeaders": true,
+                "path": [
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/include",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/src",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Ponoor PowerSTEP01 Library/src",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Ponoor L6470 Library/src",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/ArduinoJson/src",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Adafruit SleepyDog Library",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Adafruit SleepyDog Library/utility",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/OSC",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/SD/src",
+                    "c:/Users/kanta/Dropbox/data/StepperProject/step-series-unified-firmware/.pio/libdeps/zeroUSB/Ethernet/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SPI",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/cores/arduino/api/deprecated",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/cores/arduino/api/deprecated-avr-comp",
+                    "C:/Users/kanta/.platformio/packages/framework-cmsis@1.40500.0/CMSIS/Include",
+                    "C:/Users/kanta/.platformio/packages/framework-cmsis-atmel/CMSIS/Device/ATMEL",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/cores/arduino",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/variants/arduino_zero",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/USBHost/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/HID",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/I2S/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SAMD_AnalogCorrection/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SAMD_BootloaderUpdater/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SBU/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SDU/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SFU/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SNU/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/SSU/src",
+                    "C:/Users/kanta/.platformio/packages/framework-arduino-samd/libraries/Wire",
+                    "C:/Users/kanta/.platformio/packages/tool-unity",
+                    ""
+                ]
+            },
+            "defines": [
+                "PLATFORMIO=50204",
+                "ARDUINO_SAMD_ZERO",
+                "__SAMD21G18A__",
+                "ARDUINO=10805",
+                "F_CPU=48000000L",
+                "USBCON",
+                "USB_VID=0x2341",
+                "USB_PID=0x804D",
+                "USB_PRODUCT=\"Arduino Zero\"",
+                "USB_MANUFACTURER=\"Arduino\"",
+                "ARDUINO_ARCH_SAMD",
+                ""
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++11",
+            "compilerPath": "C:/Users/kanta/.platformio/packages/toolchain-gccarmnoneeabi@1.70201.0/bin/arm-none-eabi-gcc.exe",
+            "compilerArgs": [
+                "-mcpu=cortex-m0plus",
+                "-mthumb",
+                ""
+            ]
+        }
+    ],
+    "version": 4
+}

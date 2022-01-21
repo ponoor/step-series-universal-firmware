@@ -14,11 +14,18 @@
 
 #include <SPI.h>
 
+// Products
 // #define STEP400_R1
-#define STEP400_PROTO_R4
 // #define STEP800_R1
+
+// Prototypes
+#define STEP400_PROTO_R4
 //#define STEP800_PROTO_R3
 //#define STEP800_PROTO_R1
+
+// X-Nucleos
+// #define STEP100_R1 // PowerSTEP01 x1
+// #define STEP200_R1 // L6470 x2 
 
 #ifdef STEP400_R1
     #define PRODUCT_NAME    "STEP400"

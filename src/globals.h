@@ -9,12 +9,11 @@
 	#include "WProgram.h"
 #endif
 #include <SPI.h>
-// #include <Ponoor_L6470Library.h>
 #include <Ethernet.h>
 #include "boardsDef.h"
 #ifdef DRIVER_POWERSTEP01
 #include <Ponoor_PowerSTEP01Library.h>
-#else
+#elif defined(DRIVER_L6470)
 #include <Ponoor_L6470Library.h>
 #endif
 

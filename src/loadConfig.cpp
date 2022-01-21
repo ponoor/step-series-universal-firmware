@@ -142,7 +142,7 @@ void loadConfig() {
     JsonArray driverSettings_brakeTransitionDuration = driverSettings["brakeTransitionDuration"];
 #ifdef DRIVER_POWERSTEP01
     uint16_t slewRateVal[6] = { SR_114V_us, SR_220V_us, SR_400V_us, SR_520V_us, SR_790V_us, SR_980V_us };
-#else
+#elif defined(DRIVER_L6470)
     uint16_t slewRateVal[3] = { SR_180V_us, SR_290V_us, SR_530V_us };
 #endif
     for (i = 0; i < NUM_OF_MOTOR; i++) {
@@ -161,7 +161,7 @@ void loadConfig() {
 #ifdef DRIVER_POWERSTEP01
         isCurrentMode[i] = driverSettings_isCurrentMode[i] | false;
         slewRateNum[i] = constrain((driverSettings_slewRate[i] | 5), 0, 5); // default SR_980V_us
-#else
+#elif defined(DRIVER_L6470)
         slewRateNum[i] = constrain((driverSettings_slewRate[i] | 2), 0, 2); // default SR_530V_us
 #endif
         slewRate[i] = slewRateVal[slewRateNum[i]];
@@ -212,7 +212,7 @@ void loadConfig() {
         decFinalSlope[i] = voltageMode_FN_SLP_DEC[i] | 0x29;
 #ifdef DRIVER_POWERSTEP01
         stallThreshold[i] = voltageMode_STALL_TH[i] | 0x1F;
-#else
+#elif defined(DRIVER_L6470)
         stallThreshold[i] = voltageMode_STALL_TH[i] | 0x7F;
 #endif
         lowSpeedOptimizeEnable[i] = voltageMode_lowSpeedOptimizeEnable[i] | false;

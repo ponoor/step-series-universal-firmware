@@ -52,14 +52,14 @@ void initDipSw()
 {
 #ifdef STEP400_R1
 #elif defined(STEP400_PROTO_R4)
-#elif defined(STEP800_R1)  
-    pinMode(PIN_DIPSW_LATCH, OUTPUT);
-    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+#elif defined(STEP800_R1)
     shiftRegisterSPI.begin();
     pinPeripheral(PIN_DIPSW_MISO, EPIO_DIPSW_MISO);
     pinPeripheral(PIN_DIPSW_MOSI, EPIO_DIPSW_MOSI);
     pinPeripheral(PIN_DIPSW_SCK, EPIO_DRIVER_SCK);
     shiftRegisterSPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+    pinMode(PIN_DIPSW_LATCH, OUTPUT);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
 #elif defined(STEP800_PROTO_R3)
     pinMode(SETUP_SW_PIN, INPUT_PULLUP);
 #elif defined(STEP800_PROTO_R1)

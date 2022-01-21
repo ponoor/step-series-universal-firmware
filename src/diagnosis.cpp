@@ -217,7 +217,7 @@ void printCurrentState() {
 			}
 			// ADC
 			temp = stepper[i].getParam(ADC_OUT);
-			p("\tADC_OUT: %d ", temp);
+			p("\tADC_OUT: %d\n", temp);
 		}
 	}
 	

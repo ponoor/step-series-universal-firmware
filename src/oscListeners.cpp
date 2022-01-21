@@ -145,8 +145,8 @@ void OSCMsgReceive() {
             bMsgRouted |= msgIN.route("/setCurrentMode", setCurrentMode);
             bMsgRouted |= msgIN.route("/setDecayModeParam", setDecayModeParam);
             bMsgRouted |= msgIN.route("/getDecayModeParam", getDecayModeParam);
-            bMsgRouted |= msgIN.route("/getAdcVal", getAdcVal);
 #endif
+            bMsgRouted |= msgIN.route("/getAdcVal", getAdcVal);
             bMsgRouted |= msgIN.route("/setGoUntilTimeout", setGoUntilTimeout);
             bMsgRouted |= msgIN.route("/getGoUntilTimeout", getGoUntilTimeout);
             bMsgRouted |= msgIN.route("/setReleaseSwTimeout", setReleaseSwTimeout);

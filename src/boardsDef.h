@@ -14,8 +14,8 @@
 
 #include <SPI.h>
 
-#define STEP400_R1
-// #define STEP400_PROTO_R4
+// #define STEP400_R1
+#define STEP400_PROTO_R4
 // #define STEP800_R1
 //#define STEP800_PROTO_R3
 //#define STEP800_PROTO_R1
@@ -86,7 +86,6 @@
     #define W5500_RESET_PIN A3
 
     #define DRIVER_SERCOM sercom3
-    SPIClass driverSPI(&DRIVER_SERCOM, PIN_DRIVER_MISO, PIN_DRIVER_SCK, PIN_DRIVER_MOSI, PAD_DRIVER_SPI, PAD_DRIVER_RX);
 #elif defined(STEP800_R1)
     #define PRODUCT_NAME    "STEP800"
     #define FIRMWARE_NAME   "STEP800_R1_UNIFIED"

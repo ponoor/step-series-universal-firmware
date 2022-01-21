@@ -179,8 +179,10 @@ void softStop(OSCMessage& msg, int addrOffset);
 void hardStop(OSCMessage& msg, int addrOffset);
 void softHiZ(OSCMessage& msg, int addrOffset);
 void hardHiZ(OSCMessage& msg, int addrOffset);
+#ifdef HAVE_BRAKE
 void activate(OSCMessage& msg, int addrOffset);
 void free(OSCMessage& msg, int addrOffset);
+#endif
 
 // servo_commands_osc_listener
 void setTargetPosition(OSCMessage& msg, int addrOffset);

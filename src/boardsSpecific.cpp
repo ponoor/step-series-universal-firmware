@@ -1,13 +1,7 @@
 #include "boardsSpecific.h"
 #include "wiring_private.h" // pinPeripheral() function
 
-#ifdef STEP400_R1
-powerSTEP stepper[] = {
-    powerSTEP(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    powerSTEP(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    powerSTEP(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    powerSTEP(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
-#elif defined(STEP400_PROTO_R4)
+#if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
 powerSTEP stepper[] = {
     powerSTEP(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     powerSTEP(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
@@ -51,12 +45,11 @@ AutoDriver stepper[] = {
 
 void initDipSw()
 {
-#ifdef STEP400_R1
+#if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
     for (uint8_t i = 0; i < 8; i++)
     {
         pinMode(dipSwPin[i], INPUT_PULLUP);
     }
-#elif defined(STEP400_PROTO_R4)
 
 #elif defined(STEP800_R1)
     shiftRegisterSPI.begin();
@@ -124,12 +117,11 @@ void setBrake(uint8_t motorId, bool state)
 uint8_t getMyId()
 {
     uint8_t _id = 0;
-#ifdef STEP400_R1
+#if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
     for (auto i = 0; i < 8; ++i)
     {
         _id |= (!digitalRead(dipSwPin[i])) << i;
     }
-#elif defined(STEP400_PROTO_R4)
 #elif defined(STEP800_R1)
     digitalWrite(PIN_DIPSW_LATCH, LOW);
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
@@ -164,6 +156,16 @@ uint8_t getMyId()
 }
 
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+
+#ifdef HAVE_LIMIT_GPIO
+void initLimitSw()
+{
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        pinMode(limitSwPin[i], INPUT_PULLUP);
+    }
+}
+#endif
 void checkLimitSw()
 {
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)

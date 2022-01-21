@@ -32,6 +32,10 @@ void initBrake();
 void setBrake(uint8_t motorId, bool state);
 #endif
 
+#ifdef HAVE_LIMIT_GPIO
+void initLimitSw();
+#endif
+
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
 void checkLimitSw();
 #endif

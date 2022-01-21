@@ -25,9 +25,10 @@ int getInt(OSCMessage &msg, uint8_t offset);
 float getFloat(OSCMessage &msg, uint8_t offset);
 bool getBool(OSCMessage &msg, uint8_t offset);
 
-
+#ifdef HAVE_BRAKE
 bool isBrakeDisEngaged(uint8_t motorId);
 void updateBrake(uint32_t _currentTimeMillis);
+#endif
 
 bool checkMotionStartConditions(uint8_t motorId, bool dir);
 void sendCommandError(uint8_t motorID, uint8_t errorNum);

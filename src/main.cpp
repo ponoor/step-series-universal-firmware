@@ -67,7 +67,12 @@ void setup()
     driverSPI.setDataMode(SPI_MODE3);
 
     initDipSw();
+#ifdef HAVE_BRAKE
     initBrake();
+#endif
+#ifdef HAVE_LIMIT_GPIO
+    initLimitSw();
+#endif
     loadConfig();
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
@@ -174,11 +179,13 @@ void checkStatus()
             motorStatus[i] = t;
             if (reportMotorStatus[i])
                 sendTwoData("/motorStatus", i + MOTOR_ID_FIRST, motorStatus[i]);
+#ifdef HAVE_BRAKE
             if (bBrakeDecWaiting[i] && (motorStatus[i] == 0)) // motor stopped
             {
                 activate(i, false);
                 bBrakeDecWaiting[i] = false;
             }
+#endif
         }
         // CMD_ERROR, active high, latched
 #ifdef DRIVER_L6470

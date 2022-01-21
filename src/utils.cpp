@@ -215,7 +215,7 @@ void sendBootMsg(uint32_t _currentTime) {
     turnOnTXL();
     isWaitingSendBootMsg = false;
 }
-
+#ifdef HAVE_BRAKE
 bool isBrakeDisEngaged(uint8_t motorId) {
     bool state = electromagnetBrakeEnable[motorId] && (brakeStatus[motorId] != BRAKE_DISENGAGED);
     if (state) {
@@ -240,14 +240,17 @@ void updateBrake(uint32_t _currentTimeMillis) {
             }
         }
     }
-    
 }
+#endif
 
 bool checkMotionStartConditions(uint8_t motorId, bool dir) {
+#ifdef HAVE_BRAKE
     if (!isBrakeDisEngaged(motorId)) {
         return false;
     }
-    else if ( isServoMode[motorId] ) {
+    else 
+#endif
+    if ( isServoMode[motorId] ) {
         sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_IN_SERVO_MODE);
         return false;
     }

@@ -41,10 +41,7 @@ void checkLimitSw();
 void setup()
 {
     SerialUSB.begin(9600);
-    while (!SerialUSB)
-    {
-        /* code */
-    }
+    // while (!SerialUSB);
 
     pinMode(ledPin, OUTPUT);
     pinMode(W5500_RESET_PIN, OUTPUT);

@@ -84,7 +84,6 @@ extern bool
 // Brake
 #ifdef HAVE_BRAKE
 extern uint8_t brakeOut;
-#endif
 extern uint8_t brakeStatus[NUM_OF_MOTOR];
 enum {
     BRAKE_ENGAGED = 0,
@@ -94,6 +93,7 @@ enum {
 };
 extern uint32_t brakeTransitionTrigTime[NUM_OF_MOTOR];
 extern bool bBrakeDecWaiting[NUM_OF_MOTOR]; // Waiting deceleration for the brake engaging procedure
+#endif
 
 // Homing
 extern uint32_t homingStartTime[NUM_OF_MOTOR];
@@ -187,7 +187,7 @@ extern uint8_t
     decFinalSlope[NUM_OF_MOTOR], // FN_SLP_DEC
     stallThreshold[NUM_OF_MOTOR]; // STALL_TH
 #ifdef DRIVER_POWERSTEP01
-// extern uint8_t
+extern uint8_t
     fastDecaySetting[NUM_OF_MOTOR], // T_FAST
     minOnTime[NUM_OF_MOTOR], // TON_MIN
     minOffTime[NUM_OF_MOTOR]; // TOFF_MIN

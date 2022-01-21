@@ -174,7 +174,7 @@ void printCurrentState() {
         	t = (status[i] & (STATUS_TH_WRN|STATUS_TH_SD)) >> 10;
        	 	t = (~t)&0x0003U;
 #elif defined(DRIVER_POWERSTEP01)
-        	t = (status & STATUS_TH_STATUS) >> 11;
+        	t = (status[i] & STATUS_TH_STATUS) >> 11;
 #endif
 			switch (t)
 			{
@@ -297,7 +297,7 @@ void printConfigurations() {
 	printAllBools(F("prohibitMotionOnHomeSw"),bProhibitMotionOnHomeSw);
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
 	printAllData(F("limitSwMode"), limitSwMode);
-	showAllBools(F("prohibitMotionOnLimitSw"),bProhibitMotionOnLimitSw);
+	printAllBools(F("prohibitMotionOnLimitSw"),bProhibitMotionOnLimitSw);
 #endif
 	printAllData(F("goUntilTimeout"), goUntilTimeout);
 	printAllData(F("releaseSwTimeout"), releaseSwTimeout);

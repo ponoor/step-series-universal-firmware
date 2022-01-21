@@ -14,9 +14,9 @@
 
 #include <SPI.h>
 
-//#define STEP400_R1
+#define STEP400_R1
 // #define STEP400_PROTO_R4
-#define STEP800_R1
+// #define STEP800_R1
 //#define STEP800_PROTO_R3
 //#define STEP800_PROTO_R1
 

@@ -151,6 +151,8 @@ void loadConfig() {
         homingSpeed[i] = driverSettings_homingSpeed[i] | 50.0;
         homeSwMode[i] = (int)driverSettings_homeSwMode[i] | true; // true: SW_USER, false: SW_HARDSTOP
         bProhibitMotionOnHomeSw[i] = (int)driverSettings_prohibitMotionOnHomeSw[i] | false;
+        homingStatus[i] = 0;
+        bHoming[i] = false;
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
         limitSwMode[i] = (int)driverSettings_limitSwMode[i] | true;
         bProhibitMotionOnLimitSw[i] = (int)driverSettings_prohibitMotionOnLimitSw[i] | false;
@@ -167,6 +169,8 @@ void loadConfig() {
         slewRate[i] = slewRateVal[slewRateNum[i]];
 #ifdef HAVE_BRAKE
         electromagnetBrakeEnable[i] = (int)driverSettings_electromagnetBrakeEnable[i] | false;
+        brakeStatus[i] = 0;
+        bBrakeDecWaiting[i] = false;
 #else
         electromagnetBrakeEnable[i] = false;
 #endif

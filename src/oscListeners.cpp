@@ -1220,18 +1220,19 @@ void setHoldKval(OSCMessage& msg, int addrOffset) {
     uint8_t motorID = getInt(msg, 0);
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
     if(isCorrectMotorId(motorID)) {
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
 #ifdef DRIVER_POWERSTEP01
         if (!isCurrentMode[motorId]) 
 #endif
         {
-            stepper[motorID - MOTOR_ID_FIRST].setHoldKVAL(kvalInput);
+            stepper[motorId].setHoldKVAL(kvalInput);
         }
-        kvalHold[motorID - MOTOR_ID_FIRST] = kvalInput;
+        kvalHold[motorId] = kvalInput;
     }
     else if (motorID == MOTOR_ID_ALL) {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
 #ifdef DRIVER_POWERSTEP01
-            if (!isCurrentMode[motorId]) 
+            if (!isCurrentMode[i]) 
 #endif 
             {
                 stepper[i].setHoldKVAL(kvalInput);
@@ -1245,18 +1246,19 @@ void setRunKval(OSCMessage& msg, int addrOffset) {
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
 
     if(isCorrectMotorId(motorID)) {
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
 #ifdef DRIVER_POWERSTEP01
         if (!isCurrentMode[motorId]) 
 #endif
         {
-            stepper[motorID - MOTOR_ID_FIRST].setRunKVAL(kvalInput);
+            stepper[motorId].setRunKVAL(kvalInput);
         }
-        kvalRun[motorID - MOTOR_ID_FIRST] = kvalInput;
+        kvalRun[motorId] = kvalInput;
     }
     else if (motorID == MOTOR_ID_ALL) {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
 #ifdef DRIVER_POWERSTEP01
-            if (!isCurrentMode[motorId]) 
+            if (!isCurrentMode[i]) 
 #endif
             {
                 stepper[i].setRunKVAL(kvalInput);
@@ -1269,18 +1271,19 @@ void setAccKval(OSCMessage& msg, int addrOffset) {
     uint8_t motorID = getInt(msg, 0);
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
     if(isCorrectMotorId(motorID)) {
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
 #ifdef DRIVER_POWERSTEP01
         if (!isCurrentMode[motorId]) 
 #endif
         {
-            stepper[motorID - MOTOR_ID_FIRST].setAccKVAL(kvalInput);
+            stepper[motorId].setAccKVAL(kvalInput);
         }
-        kvalAcc[motorID - MOTOR_ID_FIRST] = kvalInput;
+        kvalAcc[motorId] = kvalInput;
     }
     else if (motorID == MOTOR_ID_ALL) {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
 #ifdef DRIVER_POWERSTEP01
-            if (!isCurrentMode[motorId]) 
+            if (!isCurrentMode[i]) 
 #endif
             {
                 stepper[i].setAccKVAL(kvalInput);
@@ -1293,18 +1296,19 @@ void setDecKval(OSCMessage& msg, int addrOffset) {
     uint8_t motorID = getInt(msg, 0);
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
     if(isCorrectMotorId(motorID)) {
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
 #ifdef DRIVER_POWERSTEP01
         if (!isCurrentMode[motorId]) 
 #endif 
         {
-            stepper[motorID - MOTOR_ID_FIRST].setDecKVAL(kvalInput);
+            stepper[motorId].setDecKVAL(kvalInput);
         }
-        kvalDec[motorID - MOTOR_ID_FIRST] = kvalInput;
+        kvalDec[motorId] = kvalInput;
     }
     else if (motorID == MOTOR_ID_ALL) {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
 #ifdef DRIVER_POWERSTEP01
-            if (!isCurrentMode[motorId]) 
+            if (!isCurrentMode[i]) 
 #endif 
             {
                 stepper[i].setDecKVAL(kvalInput);

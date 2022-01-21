@@ -2,13 +2,17 @@
 #include "wiring_private.h" // pinPeripheral() function
 
 #ifdef STEP400_R1
+powerSTEP stepper[] = {
+    powerSTEP(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
+    powerSTEP(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
+    powerSTEP(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
+    powerSTEP(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #elif defined(STEP400_PROTO_R4)
 powerSTEP stepper[] = {
     powerSTEP(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     powerSTEP(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     powerSTEP(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    powerSTEP(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)
-};
+    powerSTEP(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #elif defined(STEP800_R1)
 SPIClass shiftRegisterSPI(&DIPSW_SERCOM, PIN_DIPSW_MISO, PIN_DIPSW_SCK, PIN_DIPSW_MOSI, PAD_DIPSW_SPI, PAD_DIPSW_RX);
 AutoDriver stepper[] = {
@@ -19,8 +23,7 @@ AutoDriver stepper[] = {
     AutoDriver(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     AutoDriver(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     AutoDriver(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)
-};
+    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #elif defined(STEP800_PROTO_R3)
 SPIClass shiftRegisterSPI(&DIPSW_SERCOM, PIN_DIPSW_MISO, PIN_DIPSW_SCK, PIN_DIPSW_MOSI, PAD_DIPSW_SPI, PAD_DIPSW_RX);
 AutoDriver stepper[] = {
@@ -31,8 +34,7 @@ AutoDriver stepper[] = {
     AutoDriver(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     AutoDriver(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     AutoDriver(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)
-};
+    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #elif defined(STEP800_PROTO_R1)
 AutoDriver stepper[] = {
     AutoDriver(7, PIN_DRIVER_CS, PIN_DRIVER_RESET),
@@ -42,8 +44,7 @@ AutoDriver stepper[] = {
     AutoDriver(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     AutoDriver(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     AutoDriver(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)
-};
+    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #elif defined(STEP100_R1)
 #elif defined(STEP200_R1)
 #endif
@@ -51,7 +52,12 @@ AutoDriver stepper[] = {
 void initDipSw()
 {
 #ifdef STEP400_R1
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        pinMode(dipSwPin[i], INPUT_PULLUP);
+    }
 #elif defined(STEP400_PROTO_R4)
+
 #elif defined(STEP800_R1)
     shiftRegisterSPI.begin();
     pinPeripheral(PIN_DIPSW_MISO, EPIO_DIPSW_MISO);
@@ -69,15 +75,22 @@ void initDipSw()
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
 #elif defined(STEP100_R1)
 #elif defined(STEP200_R1)
-#endif  
+#endif
 }
 
 #ifdef HAVE_BRAKE
 void initBrake()
 {
 #ifdef STEP400_R1
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (electromagnetBrakeEnable[i])
+        {
+            pinMode(brakePin[i], OUTPUT);
+        }
+    }
 #elif defined(STEP400_PROTO_R4)
-#elif defined(STEP800_R1)    
+#elif defined(STEP800_R1)
     pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
     digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, HIGH);
 
@@ -88,15 +101,21 @@ void initBrake()
 #endif
 }
 
-void setBrake(uint8_t motorId, bool state) {
-#ifdef STEP800_R1
-    if (state) {
+void setBrake(uint8_t motorId, bool state)
+{
+#ifdef STEP400_R1
+    digitalWrite(brakePin[motorId], state);
+#elif defined(STEP800_R1)
+    if (state)
+    {
         bitSet(brakeOut, motorId);
-    } else {
+    }
+    else
+    {
         bitClear(brakeOut, motorId);
     }
 #elif defined(STEP400_R1)
-    digitalWrite(brakePin[i], state);
+    digitalWrite(brakePin[motorId], state);
 #endif
 }
 
@@ -106,6 +125,10 @@ uint8_t getMyId()
 {
     uint8_t _id = 0;
 #ifdef STEP400_R1
+    for (auto i = 0; i < 8; ++i)
+    {
+        _id |= (!digitalRead(dipSwPin[i])) << i;
+    }
 #elif defined(STEP400_PROTO_R4)
 #elif defined(STEP800_R1)
     digitalWrite(PIN_DIPSW_LATCH, LOW);
@@ -117,7 +140,8 @@ uint8_t getMyId()
     byte shiftInByte[3];
     digitalWrite(PIN_DIPSW_LATCH, LOW);
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
-    for (uint8_t i = 0; i < 3; i++) {
+    for (uint8_t i = 0; i < 3; i++)
+    {
         shiftInByte[i] = shiftRegisterSPI.transfer(0);
     }
     _id = shiftInByte[2];
@@ -126,9 +150,10 @@ uint8_t getMyId()
     digitalWrite(PIN_DIPSW_LATCH, LOW);
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
     shiftInByte = !digitalRead(PIN_DIPSW_MISO);
-    for (uint8_t i = 1; i < 24; i++) {
+    for (uint8_t i = 1; i < 24; i++)
+    {
         digitalWrite(PIN_DIPSW_SCK, HIGH);
-        shiftInByte |= (!digitalRead(PIN_DIPSW_SCK))<<i;
+        shiftInByte |= (!digitalRead(PIN_DIPSW_SCK)) << i;
         digitalWrite(PIN_DIPSW_SCK, LOW);
     }
     _id = shiftInByte >> 16;
@@ -139,7 +164,8 @@ uint8_t getMyId()
 }
 
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-void checkLimitSw() {
+void checkLimitSw()
+{
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         bool t;
@@ -148,7 +174,7 @@ void checkLimitSw() {
 #elif defined(HAVE_LIMIT_GPIO)
         t = !digitalRead(limitSwPin[i]);
 #endif
-        if ( limitSwState[i] != t )
+        if (limitSwState[i] != t)
         {
             limitSwState[i] = !limitSwState[i];
             if (limitSwState[i] && (limitSwMode[i] == SW_HARD_STOP))

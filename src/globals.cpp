@@ -41,15 +41,15 @@ boolean
 boolean isWaitingSendBootMsg = false;
 #ifdef HAVE_BRAKE
 uint8_t brakeOut = 0;
-#endif
-uint8_t brakeStatus[NUM_OF_MOTOR] = { 0,0,0,0,0,0,0,0 }; 
+uint8_t brakeStatus[NUM_OF_MOTOR]; 
 uint32_t brakeTransitionTrigTime[NUM_OF_MOTOR];
-bool bBrakeDecWaiting[NUM_OF_MOTOR] = { 0,0,0,0,0,0,0,0 };
+bool bBrakeDecWaiting[NUM_OF_MOTOR];
+#endif
 
 // Homing
 uint32_t homingStartTime[NUM_OF_MOTOR];
-uint8_t homingStatus[NUM_OF_MOTOR] = { 0,0,0,0,0,0,0,0 };
-bool bHoming[NUM_OF_MOTOR] = { 0,0,0,0,0,0,0,0 };
+uint8_t homingStatus[NUM_OF_MOTOR];
+bool bHoming[NUM_OF_MOTOR];
 // Motor settings
 bool 
     busy[NUM_OF_MOTOR],

@@ -16,7 +16,7 @@ Also trying to cover some variants and X-Nucleos.
 <img src="https://www.st.com/bin/ecommerce/api/image.PF262214.en.feature-description-include-personalized-no-cpn-large.jpg" width="50%" /><img src="https://www.st.com/bin/ecommerce/api/image.PF261319.en.feature-description-include-personalized-no-cpn-large.jpg" width="50%" />
 
 ## Compile
-This project is based on PlatformIO with Arduino framework. There are a board definitions list in `boardsDef.h` and uncomment one of them.
+This project is based on PlatformIO with Arduino framework. Uncomment one of board definitions listed in `boardsDef.h`.
 
 ```
 // Products

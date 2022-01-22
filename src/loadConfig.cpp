@@ -138,8 +138,10 @@ void loadConfig() {
     JsonArray driverSettings_isCurrentMode = driverSettings["isCurrentMode"];
 #endif
     JsonArray driverSettings_slewRate = driverSettings["slewRate"];
+#ifdef HAVE_BRAKE
     JsonArray driverSettings_electromagnetBrakeEnable = driverSettings["electromagnetBrakeEnable"];
     JsonArray driverSettings_brakeTransitionDuration = driverSettings["brakeTransitionDuration"];
+#endif
 #ifdef DRIVER_POWERSTEP01
     uint16_t slewRateVal[6] = { SR_114V_us, SR_220V_us, SR_400V_us, SR_520V_us, SR_790V_us, SR_980V_us };
 #elif defined(DRIVER_L6470)
@@ -171,10 +173,9 @@ void loadConfig() {
         electromagnetBrakeEnable[i] = (int)driverSettings_electromagnetBrakeEnable[i] | false;
         brakeStatus[i] = 0;
         bBrakeDecWaiting[i] = false;
-#else
         electromagnetBrakeEnable[i] = false;
-#endif
         brakeTransitionDuration[i] = driverSettings_brakeTransitionDuration[i] | 100;
+#endif
     }
 
     // Speed profile

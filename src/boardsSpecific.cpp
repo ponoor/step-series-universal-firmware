@@ -86,11 +86,6 @@ void initBrake()
 #elif defined(STEP800_R1)
     pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
     digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, HIGH);
-
-#elif defined(STEP800_PROTO_R3)
-#elif defined(STEP800_PROTO_R1)
-#elif defined(STEP100_R1)
-#elif defined(STEP200_R1)
 #endif
 }
 

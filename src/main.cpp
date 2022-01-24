@@ -44,10 +44,12 @@ void setup()
     // while (!SerialUSB);
 
     pinMode(ledPin, OUTPUT);
-    pinMode(W5500_RESET_PIN, OUTPUT);
+
 #ifdef HAVE_SD
     pinMode(SD_CS_PIN, OUTPUT);
+#ifdef SD_DETECT_PIN
     pinMode(SD_DETECT_PIN, INPUT_PULLUP);
+#endif
 #endif
     pinMode(PIN_DRIVER_CS, OUTPUT);
     pinMode(PIN_DRIVER_MOSI, OUTPUT);
@@ -84,12 +86,10 @@ void setup()
         delay(5);
     }
 
-    // Configure W5500
-    digitalWrite(W5500_RESET_PIN, HIGH);
     myId = getMyId();
     p("myId:%ld\n", myId);
     delay(1);
-    resetEthernet();
+    initEthernet();
     p("eth ok\n");
     isWaitingSendBootMsg = bootedMsgEnable;
 
@@ -269,7 +269,7 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
 
 void updatePositionReport(uint32_t _currentTimeMillis)
 {
-    static uint32_t lastPollTime[NUM_OF_MOTOR] = {0, 0, 0, 0};
+    static uint32_t lastPollTime[NUM_OF_MOTOR] = {0};
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         if (reportPosition[i])
@@ -296,9 +296,9 @@ void updatePositionReportList(uint32_t _currentTimeMillis)
 void updateServo(uint32_t currentTimeMicros)
 {
     static uint32_t lastServoUpdateTime = 0;
-    static float eZ1[NUM_OF_MOTOR] = {0, 0, 0, 0},
-                 eZ2[NUM_OF_MOTOR] = {0, 0, 0, 0},
-                 integral[NUM_OF_MOTOR] = {0, 0, 0, 0};
+    static float eZ1[NUM_OF_MOTOR] = {0.0},
+                 eZ2[NUM_OF_MOTOR] = {0.0},
+                 integral[NUM_OF_MOTOR] = {0.0};
     float spd = 0.0;
     if ((uint32_t)(currentTimeMicros - lastServoUpdateTime) >= 100)
     {
@@ -356,7 +356,7 @@ void loop()
         if (myId != t)
         {
             myId = t;
-            resetEthernet();
+            initEthernet();
         }
         Watchdog.reset();
         lastPollTime = currentTimeMillis;

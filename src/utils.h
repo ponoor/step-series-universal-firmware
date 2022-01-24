@@ -33,7 +33,7 @@ void updateBrake(uint32_t _currentTimeMillis);
 bool checkMotionStartConditions(uint8_t motorId, bool dir);
 void sendCommandError(uint8_t motorID, uint8_t errorNum);
 void resetMotorDriver(uint8_t deviceID);
-void resetEthernet();
+void initEthernet();
 void sendBootMsg(uint32_t _currentTime);
 
 template <class T>

@@ -19,8 +19,8 @@
 // #define STEP800_R1
 
 // Prototypes
-#define STEP400_PROTO_R4
-//#define STEP800_PROTO_R3
+// #define STEP400_PROTO_R4
+#define STEP800_PROTO_R3
 //#define STEP800_PROTO_R1
 
 // X-Nucleos
@@ -206,6 +206,8 @@
     #define PIN_DRIVER_CS   9u
     #define PIN_DRIVER_RESET    A5
     #define W5500_RESET_PIN 8u
+
+    #define DRIVER_SERCOM   
 
     #define PIN_DIPSW_MISO  A3
     #define PIN_DIPSW_MOSI  A1

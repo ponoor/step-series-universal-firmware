@@ -199,8 +199,10 @@ extern uint16_t slewRate[NUM_OF_MOTOR]; // GATECFG1
 extern uint8_t slewRateNum[NUM_OF_MOTOR]; // [0]114, [1]220, [2]400, [3]520, [4]790, [5]980.
 extern float lowSpeedOptimizeThreshold[NUM_OF_MOTOR];
 extern bool lowSpeedOptimizeEnable[NUM_OF_MOTOR];
+#ifdef HAVE_BRAKE
 extern bool electromagnetBrakeEnable[NUM_OF_MOTOR];
 extern uint16_t brakeTransitionDuration[NUM_OF_MOTOR];
+#endif
 extern float
     acc[NUM_OF_MOTOR],
     dec[NUM_OF_MOTOR],

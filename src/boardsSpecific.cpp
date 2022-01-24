@@ -7,18 +7,7 @@ powerSTEP stepper[] = {
     powerSTEP(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     powerSTEP(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     powerSTEP(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
-#elif defined(STEP800_R1)
-SPIClass shiftRegisterSPI(&DIPSW_SERCOM, PIN_DIPSW_MISO, PIN_DIPSW_SCK, PIN_DIPSW_MOSI, PAD_DIPSW_SPI, PAD_DIPSW_RX);
-AutoDriver stepper[] = {
-    AutoDriver(7, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(6, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(5, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(4, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
-    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
-#elif defined(STEP800_PROTO_R3)
+#elif defined(STEP800_R1) || defined(STEP800_PROTO_R3)
 SPIClass shiftRegisterSPI(&DIPSW_SERCOM, PIN_DIPSW_MISO, PIN_DIPSW_SCK, PIN_DIPSW_MOSI, PAD_DIPSW_SPI, PAD_DIPSW_RX);
 AutoDriver stepper[] = {
     AutoDriver(7, PIN_DRIVER_CS, PIN_DRIVER_RESET),
@@ -51,7 +40,7 @@ void initDipSw()
         pinMode(dipSwPin[i], INPUT_PULLUP);
     }
 
-#elif defined(STEP800_R1)
+#elif defined(STEP800_R1) || defined(STEP800_PROTO_R3)
     shiftRegisterSPI.begin();
     pinPeripheral(PIN_DIPSW_MISO, EPIO_DIPSW_MISO);
     pinPeripheral(PIN_DIPSW_MOSI, EPIO_DIPSW_MOSI);
@@ -59,8 +48,6 @@ void initDipSw()
     shiftRegisterSPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     pinMode(PIN_DIPSW_LATCH, OUTPUT);
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
-#elif defined(STEP800_PROTO_R3)
-    pinMode(SETUP_SW_PIN, INPUT_PULLUP);
 #elif defined(STEP800_PROTO_R1)
     pinMode(PIN_DIPSW_MISO, INPUT);
     pinMode(PIN_DIPSW_SCK, OUTPUT);
@@ -68,6 +55,10 @@ void initDipSw()
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
 #elif defined(STEP100_R1)
 #elif defined(STEP200_R1)
+#endif
+
+#if defined(STEP800_PROTO_R3)
+    pinMode(SETUP_SW_PIN, INPUT_PULLUP);
 #endif
 }
 
@@ -86,11 +77,6 @@ void initBrake()
 #elif defined(STEP800_R1)
     pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
     digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, HIGH);
-
-#elif defined(STEP800_PROTO_R3)
-#elif defined(STEP800_PROTO_R1)
-#elif defined(STEP100_R1)
-#elif defined(STEP200_R1)
 #endif
 }
 
@@ -172,7 +158,7 @@ void checkLimitSw()
     {
         bool t;
 #ifdef HAVE_LIMIT_ADC
-        t = (stepper[i].getParam(ADC_OUT) < 15);
+        t = (stepper[i].getParam(ADC_OUT) < 15U);
 #elif defined(HAVE_LIMIT_GPIO)
         t = !digitalRead(limitSwPin[i]);
 #endif

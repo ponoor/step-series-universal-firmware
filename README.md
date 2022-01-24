@@ -11,8 +11,12 @@ Also trying to cover some variants and X-Nucleos.
 - Arduino Zero + [X-NUCLEO-IHM02A1](https://www.st.com/en/ecosystems/x-nucleo-ihm02a1.html) + Ethernet shield
 - Arduino Zero + [X-NUCLEO-IHM03A1](https://www.st.com/en/ecosystems/x-nucleo-ihm03a1.html) + Ethernet shield
 
+<img src="https://ponoor.com/cms/wp-content/uploads/2021/03/IMG_4219-1600x1067.jpg" width="50%" /><img src="https://ponoor.com/cms/wp-content/uploads/2020/10/step800_r1_1-1600x1067.jpg" width="50%" />
+
+<img src="https://www.st.com/bin/ecommerce/api/image.PF262214.en.feature-description-include-personalized-no-cpn-large.jpg" width="50%" /><img src="https://www.st.com/bin/ecommerce/api/image.PF261319.en.feature-description-include-personalized-no-cpn-large.jpg" width="50%" />
+
 ## Compile
-This project is based on PlatformIO with Arduino platform. Uncomment one which you want to compile at the top of `boardsDef.h`.
+This project is based on PlatformIO with Arduino framework. Uncomment one of board definitions listed in `boardsDef.h`.
 
 ```
 // Products

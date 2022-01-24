@@ -144,14 +144,8 @@ void resetMotorDriver(uint8_t deviceID) {
         stepper[deviceID].setVoltageComp(VS_COMP_DISABLE);
         stepper[deviceID].setOCThreshold(overCurrentThreshold[deviceID]); // 5A for 0.1ohm shunt resistor
         stepper[deviceID].setOCShutdown(OC_SD_ENABLE);
-#ifdef DRIVER_EXT_OSC_24MHZ
-        stepper[deviceID].setOscMode(EXT_24MHZ_OSCOUT_INVERT);
-#elif defined(DRIVER_EXT_OSC_16MHZ)
-        stepper[deviceID].setOscMode(EXT_16MHZ_OSCOUT_INVERT);
-#elif defined(DRIVER_INT_OSC)
-        stepper[deviceID].setOscMode(INT_16MHZ_OSCOUT_16MHZ);
-#endif
-
+        stepper[deviceID].setOscMode(DRIVER_OSC);
+        
 #ifdef DRIVER_POWERSTEP01
         if (isCurrentMode[deviceID]) {
             stepper[deviceID].setHoldTVAL(tvalHold[deviceID]);
@@ -182,13 +176,18 @@ void resetMotorDriver(uint8_t deviceID) {
     }
 }
 
-void resetEthernet() {
+void initEthernet() {
+    Udp.stop();
+#ifdef W5500_RESET_PIN
+    pinMode(W5500_RESET_PIN, OUTPUT);
+    digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_ENABLE_STATE);
     digitalWrite(W5500_RESET_PIN, !W5500_RESET_PIN_ENABLE_STATE);
     digitalWrite(ledPin, HIGH);
     delay(10); // This delay is necessary to refresh the network configration.
     digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_ENABLE_STATE);
     digitalWrite(ledPin, LOW);
     delay(1);
+#endif
     if ( isMyIpAddId ) myIp[3] = myIp_from_config[3] + myId;
     if ( isMacAddId ) mac[5] = mac_from_config[5] + myId;
     if ( isOutPortAddId ) outPort = outPort_from_config + myId;

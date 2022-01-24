@@ -29,7 +29,12 @@ AutoDriver stepper[] = {
     AutoDriver(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #elif defined(STEP100_R1)
+powerSTEP stepper[] = {
+    powerSTEP(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #elif defined(STEP200_R1)
+AutoDriver stepper[] = {
+    AutoDriver(1, PIN_DRIVER_CS, PIN_DRIVER_RESET),
+    AutoDriver(0, PIN_DRIVER_CS, PIN_DRIVER_RESET)};
 #endif
 
 void initDipSw()
@@ -136,7 +141,9 @@ uint8_t getMyId()
     }
     _id = shiftInByte >> 16;
 #elif defined(STEP100_R1)
+    _id = ID;
 #elif defined(STEP200_R1)
+    _id = ID;
 #endif
     return _id;
 }

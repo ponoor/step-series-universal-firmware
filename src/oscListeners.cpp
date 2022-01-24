@@ -2956,12 +2956,12 @@ void setServoParam(OSCMessage &msg, int addrOffset)
         _kp = getFloat(msg, 1),
         _ki = getFloat(msg, 2),
         _kd = getFloat(msg, 3);
-    if (_kp <= 0.0)
-        _kp = 0;
-    if (_ki <= 0.0)
-        _ki = 0;
-    if (_kd <= 0.0)
-        _kd = 0;
+    if (_kp <= 0.0f)
+        _kp = 0.0f;
+    if (_ki <= 0.0f)
+        _ki = 0.0f;
+    if (_kd <= 0.0f)
+        _kd = 0.0f;
     if (isCorrectMotorId(motorID))
     {
         kP[motorID - MOTOR_ID_FIRST] = _kp;

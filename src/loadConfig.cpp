@@ -5,13 +5,15 @@
 
 void loadConfig() {
     uint8_t i;
-    #ifndef HAVE_SD
+#ifndef HAVE_SD
     sdInitializeSucceeded = false;
     configFileOpenSucceeded = false;
     configFileParseSucceeded = false;
     DynamicJsonDocument doc(8192);
-    #else
+#else
+    #ifdef SD_DETECT_PIN
     if (digitalRead(SD_DETECT_PIN) == LOW)
+    #endif
     {
         sdInitializeSucceeded = SD.begin(SD_CS_PIN);
     }
@@ -28,7 +30,7 @@ void loadConfig() {
     configFileParseSucceeded = (error == 0);
     file.close();
     SD.end();
-    #endif
+#endif
 
     // Information
     JsonObject information = doc["information"];

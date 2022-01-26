@@ -123,11 +123,12 @@ void printCurrentState() {
 	p("Current MAC address : %02X:%02X:%02X:%02X:%02X:%02X\n",mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 	p("Current outPort : %d\n", outPort);
 
+#ifdef HAVE_SD
 	printHeader("microSD");
 	showBoolResult(F("SD library initialize succeeded"), sdInitializeSucceeded);
 	showBoolResult(F("SD config file open succeeded"), configFileOpenSucceeded);
 	showBoolResult(F("SD config JSON parse succeeded"), configFileParseSucceeded);
-
+#endif
 	printHeader("Motor Driver");
 	uint16_t status[NUM_OF_MOTOR];
 	uint32_t temp = 0;

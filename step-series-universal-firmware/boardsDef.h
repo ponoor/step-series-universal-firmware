@@ -21,16 +21,18 @@
 // Prototypes
 // #define STEP400_PROTO_R4
 // #define STEP800_PROTO_R3
-//#define STEP800_PROTO_R1
+// #define STEP800_PROTO_R1
 
 // X-Nucleos
 // #define STEP100_R1 // X-NUCLEO-IHM03A1, PowerSTEP01 x1
 #define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
 
+// Common version number
+const uint8_t firmwareVersion[3] = {0,0,1};
+
 #ifdef STEP400_R1
     #define PRODUCT_NAME    "STEP400"
     #define FIRMWARE_NAME   "STEP400_R1_UNIVERSAL"
-    const uint8_t firmwareVersion[3] = {0,1,0};
     const uint8_t applicableConfigVersion[2] = {1,2};
     #define NUM_OF_MOTOR (4)
     #define HAVE_SD
@@ -64,7 +66,6 @@
 #elif defined(STEP400_PROTO_R4)
     #define PRODUCT_NAME    "STEP400"
     #define FIRMWARE_NAME   "STEP400_PROTO_R4_UNIVERSAL"
-    const uint8_t firmwareVersion[3] = {0,1,0};
     const uint8_t applicableConfigVersion[2] = {1,2};
     #define NUM_OF_MOTOR (4)
     #define HAVE_SD
@@ -96,7 +97,6 @@
 #elif defined(STEP800_R1)
     #define PRODUCT_NAME    "STEP800"
     #define FIRMWARE_NAME   "STEP800_R1_UNIVERSAL"
-    const uint8_t firmwareVersion[3] = {0,1,0};
     const uint8_t applicableConfigVersion[2] = {1,2};
     #define NUM_OF_MOTOR (8)
     #define HAVE_SD
@@ -141,7 +141,6 @@
 #elif defined(STEP800_PROTO_R3)
     #define PRODUCT_NAME    "STEP800"
     #define FIRMWARE_NAME   "STEP800_PROTO_R3_UNIVERSAL"
-    const uint8_t firmwareVersion[3] = {0,1,0};
     const uint8_t applicableConfigVersion[2] = {1,2};
     #define NUM_OF_MOTOR (8)
     #define HAVE_SD
@@ -186,7 +185,6 @@
 #elif defined(STEP800_PROTO_R1)
     #define PRODUCT_NAME    "STEP800"
     #define FIRMWARE_NAME   "STEP800_PROTO_R1_UNIVERSAL"
-    const uint8_t firmwareVersion[3] = {0,1,0};
     const uint8_t applicableConfigVersion[2] = {1,2};
     #define NUM_OF_MOTOR (8)
     #define HAVE_DIP_SW_SPI
@@ -217,7 +215,6 @@
 #elif defined(STEP100_R1)
     #define PRODUCT_NAME    "STEP100"
     #define FIRMWARE_NAME   "STEP100_R1_UNIVERSAL"
-    const uint8_t firmwareVersion[3] = {0,1,0};
     const uint8_t applicableConfigVersion[2] = {1,2};
     #define NUM_OF_MOTOR (1)
     #define HAVE_SD
@@ -250,7 +247,6 @@
 #elif defined(STEP200_R1)
     #define PRODUCT_NAME    "STEP200"
     #define FIRMWARE_NAME   "STEP200_R1_UNIVERSAL"
-    const uint8_t firmwareVersion[3] = {0,1,0};
     const uint8_t applicableConfigVersion[2] = {1,2};
     #define NUM_OF_MOTOR (2)
     #define HAVE_SD

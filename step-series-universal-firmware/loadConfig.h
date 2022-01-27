@@ -30,3 +30,4 @@ enum {
 	CONFIG_PRODUCT_APPLICABLE
 };
 #endif
+

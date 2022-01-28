@@ -16,7 +16,7 @@
 
 // Products
 // #define STEP400_R1
-// #define STEP800_R1
+#define STEP800_R1
 
 // Prototypes
 // #define STEP400_PROTO_R4
@@ -25,7 +25,7 @@
 
 // X-Nucleos
 // #define STEP100_R1 // X-NUCLEO-IHM03A1, PowerSTEP01 x1
-#define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
+// #define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
 
 // Common version number
 const uint8_t firmwareVersion[3] = {0,0,1};

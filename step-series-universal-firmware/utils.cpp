@@ -180,11 +180,11 @@ void initEthernet() {
     Udp.stop();
 #ifdef W5500_RESET_PIN
     pinMode(W5500_RESET_PIN, OUTPUT);
-    digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_ENABLE_STATE);
-    digitalWrite(W5500_RESET_PIN, !W5500_RESET_PIN_ENABLE_STATE);
+    digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_OPERATION_STATE);
+    digitalWrite(W5500_RESET_PIN, !W5500_RESET_PIN_OPERATION_STATE);
     digitalWrite(ledPin, HIGH);
     delay(10); // This delay is necessary to refresh the network configration.
-    digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_ENABLE_STATE);
+    digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_OPERATION_STATE);
     digitalWrite(ledPin, LOW);
     delay(1);
 #endif

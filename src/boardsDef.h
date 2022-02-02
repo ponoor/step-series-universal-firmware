@@ -247,7 +247,7 @@ const uint8_t firmwareVersion[3] = {0,0,2};
     #define PAD_DRIVER_SPI  SPI_PAD_0_SCK_1
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_3
     #define PIN_DRIVER_CS   A2
-    #define PIN_DRIVER_RESET    8
+    #define PIN_DRIVER_RESET    8u
     // #define W5500_RESET_PIN A3
 
     #define DRIVER_SERCOM sercom1
@@ -283,7 +283,7 @@ const uint8_t firmwareVersion[3] = {0,0,2};
     #define PAD_DRIVER_SPI  SPI_PAD_0_SCK_1
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_3
     #define PIN_DRIVER_CS   A2
-    #define PIN_DRIVER_RESET    8
+    #define PIN_DRIVER_RESET    8u
     // #define W5500_RESET_PIN A3
 
     #define DRIVER_SERCOM sercom1

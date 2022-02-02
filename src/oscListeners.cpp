@@ -1427,17 +1427,17 @@ void getHomingSpeed(OSCMessage &msg, int addrOffset)
 void setProhibitMotionOnHomeSw(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    bool dir = getBool(msg, 1);
+    bool state = getBool(msg, 1);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
-        bProhibitMotionOnHomeSw[motorID] = dir;
+        bProhibitMotionOnHomeSw[motorID] = state;
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            bProhibitMotionOnHomeSw[i] = dir;
+            bProhibitMotionOnHomeSw[i] = state;
         }
     }
 }
@@ -1461,17 +1461,17 @@ void getProhibitMotionOnHomeSw(OSCMessage &msg, int addrOffset)
 void setProhibitMotionOnLimitSw(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    bool dir = getBool(msg, 1);
+    bool state = getBool(msg, 1);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
-        bProhibitMotionOnLimitSw[motorID] = dir;
+        bProhibitMotionOnLimitSw[motorID] = state;
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            bProhibitMotionOnLimitSw[i] = dir;
+            bProhibitMotionOnLimitSw[i] = state;
         }
     }
 }

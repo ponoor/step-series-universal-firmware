@@ -40,7 +40,7 @@ AutoDriver stepper[] = {
 void initDipSw()
 {
 #if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
-    for (uint8_t i = 0; i < 8; i++)
+    for (uint8_t i = 0; i < DIP_SW_DIGITS; i++)
     {
         pinMode(dipSwPin[i], INPUT_PULLUP);
     }
@@ -58,8 +58,13 @@ void initDipSw()
     pinMode(PIN_DIPSW_SCK, OUTPUT);
     pinMode(PIN_DIPSW_LATCH, OUTPUT);
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
-#elif defined(STEP100_R1)
-#elif defined(STEP200_R1)
+#elif defined(STEP100_R1) || defined(STEP200_R1)
+    #ifdef HAVE_DIP_SW
+    for (uint8_t i = 0; i < DIP_SW_DIGITS; i++)
+    {
+        pinMode(dipSwPin[i], INPUT_PULLUP);
+    }
+    #endif
 #endif
 
 #if defined(STEP800_PROTO_R3)
@@ -109,7 +114,7 @@ uint8_t getMyId()
 {
     uint8_t _id = 0;
 #if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
-    for (auto i = 0; i < 8; ++i)
+    for (auto i = 0; i < DIP_SW_DIGITS; ++i)
     {
         _id |= (!digitalRead(dipSwPin[i])) << i;
     }
@@ -140,10 +145,15 @@ uint8_t getMyId()
         digitalWrite(PIN_DIPSW_SCK, LOW);
     }
     _id = shiftInByte >> 16;
-#elif defined(STEP100_R1)
+#elif defined(STEP100_R1) || defined(STEP200_R1)
+    #ifndef HAVE_DIP_SW
     _id = ID;
-#elif defined(STEP200_R1)
-    _id = ID;
+    #else
+    for (auto i = 0; i < DIP_SW_DIGITS; ++i)
+    {
+        _id |= (!digitalRead(dipSwPin[i])) << i;
+    }
+    #endif
 #endif
     return _id;
 }

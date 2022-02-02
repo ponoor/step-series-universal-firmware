@@ -27,8 +27,12 @@
 // #define STEP100_R1 // X-NUCLEO-IHM03A1, PowerSTEP01 x1
 #define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
 
+// Uncomment this line if the board is M0 with Zero bootloader (Swap D2 and D4) 
+// Only work for STEP100/STEP200
+#define MZERO_WITH_ZERO_BOOTLOADER
+
 // Common version number
-const uint8_t firmwareVersion[3] = {0,0,1};
+const uint8_t firmwareVersion[3] = {0,0,2};
 
 #ifdef STEP400_R1
     #define PRODUCT_NAME    "STEP400"
@@ -39,10 +43,11 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define HAVE_BRAKE
     #define HAVE_LIMIT_ADC
     #define HAVE_DIP_SW
+    #define DIP_SW_DIGITS   8
     #define DRIVER_POWERSTEP01
     #define DRIVER_OSC EXT_16MHZ_OSCOUT_INVERT
-    #define DRIVER_RESET_PIN_ENABLE_STATE  HIGH
-    #define W5500_RESET_PIN_ENABLE_STATE    HIGH // HIGH: Operation, LOW: RESET
+    #define DRIVER_RESET_PIN_OPERATION_STATE  HIGH
+    #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
 
     // pins
     #define ledPin 13u
@@ -71,10 +76,11 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define HAVE_SD
     #define HAVE_LIMIT_GPIO
     #define HAVE_DIP_SW
+    #define DIP_SW_DIGITS   8
     #define DRIVER_POWERSTEP01
     #define DRIVER_OSC EXT_16MHZ_OSCOUT_INVERT
-    #define DRIVER_RESET_PIN_ENABLE_STATE  HIGH
-    #define W5500_RESET_PIN_ENABLE_STATE    HIGH // HIGH: Operation, LOW: RESET
+    #define DRIVER_RESET_PIN_OPERATION_STATE  HIGH
+    #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
     // pins
     #define ledPin 13u
     const uint8_t dipSwPin[8] = { A5,SCL,7u,SDA,2u,9u,3u,0u }; // Prototype_r4
@@ -104,8 +110,8 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define HAVE_DIP_SW_SPI
     #define DRIVER_L6470
     #define DRIVER_OSC EXT_16MHZ_OSCOUT_INVERT
-    #define DRIVER_RESET_PIN_ENABLE_STATE   HIGH
-    #define W5500_RESET_PIN_ENABLE_STATE    HIGH // HIGH: Operation, LOW: RESET
+    #define DRIVER_RESET_PIN_OPERATION_STATE   HIGH
+    #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
 
     #define ledPin 13u
     #define SD_CS_PIN	4u
@@ -148,8 +154,8 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define DRIVER_L6470
     #define DRIVER_OSC EXT_16MHZ_OSCOUT_INVERT
     
-    #define DRIVER_RESET_PIN_ENABLE_STATE   HIGH
-    #define W5500_RESET_PIN_ENABLE_STATE    HIGH // HIGH: Operation, LOW: RESET
+    #define DRIVER_RESET_PIN_OPERATION_STATE   HIGH
+    #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
 
     #define ledPin 13u
     #define SD_CS_PIN	4u
@@ -190,8 +196,8 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define HAVE_DIP_SW_SPI
     #define DRIVER_L6470
     #define DRIVER_OSC EXT_24MHZ_OSCOUT_INVERT
-    #define DRIVER_RESET_PIN_ENABLE_STATE   LOW
-    #define W5500_RESET_PIN_ENABLE_STATE    LOW
+    #define DRIVER_RESET_PIN_OPERATION_STATE   LOW
+    #define W5500_RESET_PIN_OPERATION_STATE    LOW
 
     #define ledPin 4u
     #define PIN_DRIVER_MISO 12u	// D6 /SERCOM3/PAD[2] miso
@@ -206,11 +212,11 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define PIN_DRIVER_RESET    A5
     #define W5500_RESET_PIN 8u
 
-    #define DRIVER_SERCOM   
+    #define DRIVER_SERCOM   sercom1
 
     #define PIN_DIPSW_MISO  A3
-    #define PIN_DIPSW_MOSI  A1
     #define PIN_DIPSW_SCK   A2
+    #define PIN_DIPSW_LATCH A1
 
 #elif defined(STEP100_R1)
     #define PRODUCT_NAME    "STEP100"
@@ -222,11 +228,15 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     // #define HAVE_DIP_SW
     #define DRIVER_POWERSTEP01
     #define DRIVER_OSC INT_16MHZ
-    #define DRIVER_RESET_PIN_ENABLE_STATE   HIGH
-    // #define W5500_RESET_PIN_ENABLE_STATE    HIGH // ENABLE: Operation
+    #define DRIVER_RESET_PIN_OPERATION_STATE   HIGH
+    // #define W5500_RESET_PIN_OPERATION_STATE    HIGH
     // pins
     #define ledPin 3u
+#ifdef MZERO_WITH_ZERO_BOOTLOADER
+    #define SD_CS_PIN   2u
+#else
     #define SD_CS_PIN	4u
+#endif
     // #define SD_DETECT_PIN   A4
     #define PIN_DRIVER_MISO 12u	// 
     #define PIN_DRIVER_MOSI 11u	// 
@@ -237,7 +247,7 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define PAD_DRIVER_SPI  SPI_PAD_0_SCK_1
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_3
     #define PIN_DRIVER_CS   A2
-    #define PIN_DRIVER_RESET    8
+    #define PIN_DRIVER_RESET    8u
     // #define W5500_RESET_PIN A3
 
     #define DRIVER_SERCOM sercom1
@@ -254,11 +264,15 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     // #define HAVE_DIP_SW
     #define DRIVER_L6470
     #define DRIVER_OSC INT_16MHZ
-    #define DRIVER_RESET_PIN_ENABLE_STATE   HIGH
-    // #define W5500_RESET_PIN_ENABLE_STATE    HIGH // ENABLE: Operation
+    #define DRIVER_RESET_PIN_OPERATION_STATE   HIGH
+    // #define W5500_RESET_PIN_OPERATION_STATE    HIGH // ENABLE: Operation
     // pins
     #define ledPin 3u
-    #define SD_CS_PIN	4u  
+#ifdef MZERO_WITH_ZERO_BOOTLOADER
+    #define SD_CS_PIN   2u
+#else
+    #define SD_CS_PIN	4u
+#endif
     // #define SD_DETECT_PIN   A4
     #define PIN_DRIVER_MISO 12u	// 
     #define PIN_DRIVER_MOSI 11u	// 
@@ -269,7 +283,7 @@ const uint8_t firmwareVersion[3] = {0,0,1};
     #define PAD_DRIVER_SPI  SPI_PAD_0_SCK_1
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_3
     #define PIN_DRIVER_CS   A2
-    #define PIN_DRIVER_RESET    8
+    #define PIN_DRIVER_RESET    8u
     // #define W5500_RESET_PIN A3
 
     #define DRIVER_SERCOM sercom1

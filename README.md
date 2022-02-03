@@ -1,9 +1,10 @@
 # step-series-universal-firmware
-The two hardware from Ponoor Experiments, STEP400 and STEP800, most of their source codes are common or similar. This project aims to compile the each firmware from the same source codes. 
+
+<img src="https://ponoor.com/cms/wp-content/uploads/2022/02/IMG_4728.jpg" />
+
+The two hardware from Ponoor Experiments, [STEP400](https://ponoor.com/products/step400/) and [STEP800](https://ponoor.com/products/step800/), most of their source codes are common or similar. This project aims to compile the each firmware from the same source codes. 
 
 Also covers some variants and X-Nucleos.
-
-**Still work in progress**
 
 ## Target
 - [STEP400](https://github.com/ponoor/STEP400/)
@@ -43,6 +44,10 @@ If you want to compile/upload with Arduino IDE, please download a `step-series-u
 - **[Adafruit SleepyDog Arduino Library](https://github.com/adafruit/Adafruit_SleepyDog)**
 - **[Ponoor L6470 Library](https://github.com/ponoor/Ponoor_L6470_Library)** for L6470 based boards
 - **[Ponoor PowerSTEP01 Library](https://github.com/ponoor/Ponoor_PowerSTEP01_Library)** for PowerSTEP01 based boards
+
+## Documents
+- [STEP100/200](https://ponoor.com/docs/step100-200/)
+- [STEP400/800](https://ponoor.com/docs/step-series/)
 
 ## Progress
 

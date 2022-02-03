@@ -2505,7 +2505,7 @@ void goUntil(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     bool action = getBool(msg, 1);
     float stepsPerSec = getFloat(msg, 2);
-    bool dir = stepsPerSec > 0;
+    bool dir = stepsPerSec > 0.0f;
     stepsPerSec = fabsf(stepsPerSec);
     if (isCorrectMotorId(motorID))
     {

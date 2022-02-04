@@ -46,8 +46,8 @@ If you want to compile/upload with Arduino IDE, please download a `step-series-u
 - **[Ponoor PowerSTEP01 Library](https://github.com/ponoor/Ponoor_PowerSTEP01_Library)** for PowerSTEP01 based boards
 
 ## Documents
-- [STEP100/200](https://ponoor.com/docs/step100-200/)
-- [STEP400/800](https://ponoor.com/docs/step-series/)
+- [STEP100/200](https://ponoor.com/en/docs/step100-200/)
+- [STEP400/800](https://ponoor.com/en/docs/step-series/)
 
 ## Progress
 

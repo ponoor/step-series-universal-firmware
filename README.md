@@ -2,11 +2,17 @@
 
 <img src="https://ponoor.com/cms/wp-content/uploads/2022/02/IMG_4728.jpg" />
 
-The two hardware from Ponoor Experiments, [STEP400](https://ponoor.com/products/step400/) and [STEP800](https://ponoor.com/products/step800/), most of their source codes are common or similar. This project aims to compile the each firmware from the same source codes. 
+The Arduino sketch for the OSC (Open Sound Control) based stepper motor driver STEP series from [Ponoor Experiments](https://ponoor.com/en/). Basically this sketch will work on Arduino SAMD architectures with Ethernet module (W5100/W5500) and motor drivers L6470/PowerSTEP01 from STMicroelectronics.
 
-Also covers some variants and X-Nucleos.
+## Background
+The two hardware from Ponoor Experiments, [STEP400](https://ponoor.com/products/step400/) and [STEP800](https://ponoor.com/products/step800/), they have their own firmware but most of their codes are common or similar. This project aims to compile the each firmware from the same source codes. 
+
+Also covers some variants and X-Nucleos with Arduino.
+
 
 ## Target
+<!--This firmware covers STEP400 and STEP800 from Ponoor Experiments inc, and also X-Nucleos with Arduino. -->
+
 - [STEP400](https://github.com/ponoor/STEP400/)
 - [STEP800](https://github.com/ponoor/STEP800/)
 - Arduino Zero + [X-NUCLEO-IHM03A1](https://www.st.com/en/ecosystems/x-nucleo-ihm03a1.html) + Ethernet shield (a.k.a. STEP100)

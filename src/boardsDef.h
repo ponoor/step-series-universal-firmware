@@ -15,7 +15,7 @@
 #include <SPI.h>
 
 // Products
-// #define STEP400_R1
+#define STEP400_R1
 // #define STEP800_R1
 
 // Prototypes
@@ -25,11 +25,11 @@
 
 // X-Nucleos
 // #define STEP100_R1 // X-NUCLEO-IHM03A1, PowerSTEP01 x1
-#define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
+// #define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
 
 // Uncomment this line if the board is M0 with Zero bootloader (Swap D2 and D4) 
 // Only work for STEP100/STEP200
-#define MZERO_WITH_ZERO_BOOTLOADER
+// #define MZERO_WITH_ZERO_BOOTLOADER
 
 // Common version number
 const uint8_t firmwareVersion[3] = {0,0,2};

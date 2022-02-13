@@ -2675,19 +2675,32 @@ void resetPos(OSCMessage &msg, int addrOffset)
         }
     }
 }
+
+// When the stop commands are sent during a homing process, 
+// clear the homing status as HOMING_UNDEFINED.
+void clearHomingStatus(uint8_t motorId)
+{
+    if ((homingStatus[motorId] == HOMING_GOUNTIL)||(homingStatus[motorId] == HOMING_RELEASESW))
+    {
+        homingStatus[motorId] = HOMING_UNDEFINED;
+    }
+}
 void softStop(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        isServoMode[motorID - MOTOR_ID_FIRST] = false;
-        stepper[motorID - MOTOR_ID_FIRST].softStop();
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        isServoMode[motorId] = false;
+        clearHomingStatus(motorId);
+        stepper[motorId].softStop();
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             isServoMode[i] = false;
+            clearHomingStatus(i);
             stepper[i].softStop();
         }
     }
@@ -2697,14 +2710,17 @@ void hardStop(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        isServoMode[motorID - MOTOR_ID_FIRST] = false;
-        stepper[motorID - MOTOR_ID_FIRST].hardStop();
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        isServoMode[motorId] = false;
+        clearHomingStatus(motorId);
+        stepper[motorId].hardStop();
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             isServoMode[i] = false;
+            clearHomingStatus(i);
             stepper[i].hardStop();
         }
     }
@@ -2713,6 +2729,7 @@ void hardStop(OSCMessage &msg, int addrOffset)
 void softHiZ(uint8_t motorId)
 {
     isServoMode[motorId] = false;
+    clearHomingStatus(motorId);
 #ifdef HAVE_BRAKE
     if (electromagnetBrakeEnable[motorId])
     {
@@ -2753,17 +2770,19 @@ void hardHiZ(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        motorID -= MOTOR_ID_FIRST;
-        isServoMode[motorID] = false;
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        isServoMode[motorId] = false;
+        clearHomingStatus(motorId);
+        stepper[motorId].softStop();
 #ifdef HAVE_BRAKE
-        if (electromagnetBrakeEnable[motorID])
+        if (electromagnetBrakeEnable[motorId])
         {
-            activate(motorID, false);
+            activate(motorId, false);
         }
         else
 #endif
         {
-            stepper[motorID].hardHiZ();
+            stepper[motorId].hardHiZ();
         }
     }
     else if (motorID == MOTOR_ID_ALL)
@@ -2771,6 +2790,7 @@ void hardHiZ(OSCMessage &msg, int addrOffset)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             isServoMode[i] = false;
+            clearHomingStatus(i);
 #ifdef HAVE_BRAKE
             if (electromagnetBrakeEnable[i])
             {
@@ -2829,6 +2849,8 @@ void activate(uint8_t motorId, bool state)
             {
                 setBrake(motorId, LOW);
                 brakeStatus[motorId] = BRAKE_MOTORHIZ_WAITING;
+                isServoMode[motorId] = false;
+                clearHomingStatus(motorId);
                 brakeTransitionTrigTime[motorId] = millis();
             }
         }
@@ -2862,6 +2884,8 @@ void free(uint8_t motorId)
         setBrake(motorId, HIGH);
         stepper[motorId].hardHiZ();
         brakeStatus[motorId] = BRAKE_DISENGAGED;
+        isServoMode[motorId] = false;
+        clearHomingStatus(motorId);
     }
     else
     {

@@ -2676,15 +2676,6 @@ void resetPos(OSCMessage &msg, int addrOffset)
     }
 }
 
-// When the stop commands are sent during a homing process, 
-// clear the homing status as HOMING_UNDEFINED.
-void clearHomingStatus(uint8_t motorId)
-{
-    if ((homingStatus[motorId] == HOMING_GOUNTIL)||(homingStatus[motorId] == HOMING_RELEASESW))
-    {
-        homingStatus[motorId] = HOMING_UNDEFINED;
-    }
-}
 void softStop(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);

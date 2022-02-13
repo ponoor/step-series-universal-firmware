@@ -30,6 +30,7 @@ bool isBrakeDisEngaged(uint8_t motorId);
 void updateBrake(uint32_t _currentTimeMillis);
 #endif
 
+void clearHomingStatus(uint8_t motorId);
 bool checkMotionStartConditions(uint8_t motorId, bool dir);
 void sendCommandError(uint8_t motorID, uint8_t errorNum);
 void resetMotorDriver(uint8_t deviceID);

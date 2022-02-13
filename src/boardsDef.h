@@ -32,7 +32,7 @@
 // #define MZERO_WITH_ZERO_BOOTLOADER
 
 // Common version number
-const uint8_t firmwareVersion[3] = {0,0,2};
+const uint8_t firmwareVersion[3] = {0,0,3};
 
 #ifdef STEP400_R1
     #define PRODUCT_NAME    "STEP400"

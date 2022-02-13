@@ -175,7 +175,6 @@ void goMark(OSCMessage& msg, int addrOffset);
 void setMark(OSCMessage& msg, int addrOffset);
 void setPosition(OSCMessage& msg, int addrOffset);
 void resetPos(OSCMessage& msg, int addrOffset);
-void clearHomingStatus(uint8_t motorId);
 void softStop(OSCMessage& msg, int addrOffset);
 void hardStop(OSCMessage& msg, int addrOffset);
 void softHiZ(OSCMessage& msg, int addrOffset);

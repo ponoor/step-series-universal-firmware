@@ -2939,6 +2939,7 @@ void enableServoMode(uint8_t motorId, bool enable)
         reportMotorStatus[motorId] = false;
         reportDir[motorId] = false;
         stepper[motorId].hardStop();
+        clearHomingStatus(motorId);
     }
     else
     {

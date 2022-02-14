@@ -54,7 +54,7 @@ If you want to compile/upload with Arduino IDE, please download a `step-series-u
 ## Documents
 - [STEP100/200](https://ponoor.com/en/docs/step100-200/)
 - [STEP400/800](https://ponoor.com/en/docs/step-series/)
-
+- [Forum](https://github.com/ponoor/step-series-support/discussions)
 ## Progress
 
 | Board | Basic test | Full test |

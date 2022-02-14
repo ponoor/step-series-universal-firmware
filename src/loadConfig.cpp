@@ -27,7 +27,7 @@ void loadConfig() {
     if (error) {
         p("Failed to read file: %s\nUsing default configuration.\n", error.f_str());
     }
-    configFileParseSucceeded = (error == 0);
+    configFileParseSucceeded = (error == DeserializationError::Ok);
     file.close();
     SD.end();
 #endif

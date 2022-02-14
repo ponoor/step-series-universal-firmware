@@ -2383,7 +2383,7 @@ void move(OSCMessage &msg, int addrOffset)
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
-        if (checkMotionStartConditions(motorID, dir))
+        if (checkMotionStartConditions(motorID, dir, false))
         {
             stepper[motorID].move(dir, steps);
         }
@@ -2392,7 +2392,7 @@ void move(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            if (checkMotionStartConditions(i, dir))
+            if (checkMotionStartConditions(i, dir, false))
             {
                 stepper[i].move(dir, steps);
             }
@@ -2408,7 +2408,7 @@ void goTo(OSCMessage &msg, int addrOffset)
     {
         motorID -= MOTOR_ID_FIRST;
         dir = checkGoToDirection(motorID, pos);
-        if (checkMotionStartConditions(motorID, dir))
+        if (checkMotionStartConditions(motorID, dir, false))
         {
             stepper[motorID].goTo(pos);
         }
@@ -2418,7 +2418,7 @@ void goTo(OSCMessage &msg, int addrOffset)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             dir = checkGoToDirection(i, pos);
-            if (checkMotionStartConditions(i, dir))
+            if (checkMotionStartConditions(i, dir, false))
             {
                 stepper[i].goTo(pos);
             }
@@ -2433,7 +2433,7 @@ void goToDir(OSCMessage &msg, int addrOffset)
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
-        if (checkMotionStartConditions(motorID, dir))
+        if (checkMotionStartConditions(motorID, dir, false))
         {
             stepper[motorID].goToDir(dir, pos);
         }
@@ -2442,7 +2442,7 @@ void goToDir(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            if (checkMotionStartConditions(i, dir))
+            if (checkMotionStartConditions(i, dir, false))
                 stepper[i].goToDir(dir, pos);
         }
     }
@@ -2491,13 +2491,15 @@ void homing(OSCMessage &msg, int addrOffset)
     }
 }
 
-void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec)
-{
-    if (checkMotionStartConditions(motorId, dir))
-    {
-        stepper[motorId].goUntil(action, dir, stepsPerSec);
-        homingStatus[motorId] = HOMING_GOUNTIL;
-        homingStartTime[motorId] = millis();
+void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec) {
+    if (isBrakeDisEngaged(motorId)) {
+        if (homeSwState[motorId]) {
+            sendTwoData("/error/command", "HomeSwActivated", motorId+MOTOR_ID_FIRST);
+        } else {
+            stepper[motorId].goUntil(action, dir, stepsPerSec);
+            homingStatus[motorId] = HOMING_GOUNTIL;
+            homingStartTime[motorId] = millis();
+        }
     }
 }
 void goUntil(OSCMessage &msg, int addrOffset)
@@ -2520,64 +2522,61 @@ void goUntil(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void goUntilRaw(OSCMessage &msg, int addrOffset)
-{
+void goUntilRaw(OSCMessage& msg, int addrOffset) {
     uint8_t motorID = getInt(msg, 0);
     bool action = getBool(msg, 1);
     int32_t speed = getInt(msg, 2);
     bool dir = speed > 0;
     speed = abs(speed);
-    if (isCorrectMotorId(motorID))
-    {
-        uint8_t motorId = motorID - MOTOR_ID_FIRST;
-        if (checkMotionStartConditions(motorId, dir))
-        {
-            stepper[motorId].goUntilRaw(action, dir, speed);
-            homingStatus[motorId] = HOMING_GOUNTIL;
-            homingStartTime[motorId] = millis();
+    if(isCorrectMotorId(motorID)) {
+        motorID -= MOTOR_ID_FIRST;
+        if (isBrakeDisEngaged(motorID)) {
+            if (homeSwState[motorID]) {
+                sendTwoData("/error/command", "HomeSwActivated", motorID+MOTOR_ID_FIRST);
+            } else {
+                stepper[motorID].goUntilRaw(action, dir, speed);
+                homingStatus[motorID] = HOMING_GOUNTIL;
+                homingStartTime[motorID] = millis();
+            }
         }
     }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            if (checkMotionStartConditions(i, dir))
-            {
-                stepper[i].goUntil(action, dir, speed);
-                homingStatus[i] = HOMING_GOUNTIL;
-                homingStartTime[i] = millis();
+    else if (motorID == MOTOR_ID_ALL) {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
+            if (isBrakeDisEngaged(i)) {
+                if (homeSwState[i]) {
+                    sendTwoData("/error/command", "HomeSwActivated", i+MOTOR_ID_FIRST);
+                } else {
+                    stepper[i].goUntil(action, dir, speed);
+                    homingStatus[i] = HOMING_GOUNTIL;
+                    homingStartTime[i] = millis();
+                }
             }
         }
     }
 }
 
-void releaseSw(uint8_t motorId, bool action, bool dir)
-{
-    if (checkMotionStartConditions(motorId, dir))
-    {
+void releaseSw(uint8_t motorId, bool action, bool dir) {
+    if (isBrakeDisEngaged(motorId)) {
         stepper[motorId].releaseSw(action, dir);
         homingStatus[motorId] = HOMING_RELEASESW;
         homingStartTime[motorId] = millis();
     }
 }
-void releaseSw(OSCMessage &msg, int addrOffset)
-{
+void releaseSw(OSCMessage& msg, int addrOffset) {
     uint8_t motorID = getInt(msg, 0);
     uint8_t action = getInt(msg, 1);
     bool dir = getBool(msg, 2);
-    if (isCorrectMotorId(motorID))
-    {
+    if(isCorrectMotorId(motorID)) {
         motorID -= MOTOR_ID_FIRST;
         releaseSw(motorID, action, dir);
     }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
+    else if (motorID == MOTOR_ID_ALL) {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
             releaseSw(i, action, dir);
         }
     }
 }
+
 void goHome(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
@@ -2586,7 +2585,7 @@ void goHome(OSCMessage &msg, int addrOffset)
     {
         motorID -= MOTOR_ID_FIRST;
         dir = checkGoToDirection(motorID, 0);
-        if (checkMotionStartConditions(motorID, dir))
+        if (checkMotionStartConditions(motorID, dir, false))
         {
             stepper[motorID].goHome();
         }
@@ -2596,7 +2595,7 @@ void goHome(OSCMessage &msg, int addrOffset)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             dir = checkGoToDirection(i, 0);
-            if (checkMotionStartConditions(i, dir))
+            if (checkMotionStartConditions(i, dir, false))
             {
                 stepper[i].goHome();
             }
@@ -2611,7 +2610,7 @@ void goMark(OSCMessage &msg, int addrOffset)
     {
         motorID -= MOTOR_ID_FIRST;
         dir = checkGoToDirection(motorID, stepper[motorID].getMark());
-        if (checkMotionStartConditions(motorID, dir))
+        if (checkMotionStartConditions(motorID, dir, false))
         {
             stepper[motorID].goMark();
         }
@@ -2621,7 +2620,7 @@ void goMark(OSCMessage &msg, int addrOffset)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             dir = checkGoToDirection(i, stepper[i].getMark());
-            if (checkMotionStartConditions(i, dir))
+            if (checkMotionStartConditions(i, dir, false))
             {
                 stepper[i].goMark();
             }

@@ -2327,7 +2327,7 @@ void run(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     float stepsPerSec = getFloat(msg, 1);
     float absSpeed = fabsf(stepsPerSec);
-    boolean dir = stepsPerSec > 0;
+    boolean dir = stepsPerSec > 0.0f;
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;

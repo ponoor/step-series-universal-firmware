@@ -1295,7 +1295,7 @@ void getBrakeTransitionDuration(OSCMessage &msg, int addrOffset)
 void setGoUntilTimeout(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint16_t timeout = getInt(msg, 1);
+    uint32_t timeout = getInt(msg, 1);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -1314,20 +1314,20 @@ void getGoUntilTimeout(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/goUntilTimeout", motorID, goUntilTimeout[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/goUntilTimeout", motorID, (int32_t)goUntilTimeout[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/goUntilTimeout", i + MOTOR_ID_FIRST, goUntilTimeout[i]);
+            sendTwoData("/goUntilTimeout", i + MOTOR_ID_FIRST, (int32_t)goUntilTimeout[i]);
         }
     }
 }
 void setReleaseSwTimeout(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint16_t timeout = getInt(msg, 1);
+    uint32_t timeout = getInt(msg, 1);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -1346,13 +1346,13 @@ void getReleaseSwTimeout(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/releaseSwTimeout", motorID, releaseSwTimeout[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/releaseSwTimeout", motorID, (int32_t)releaseSwTimeout[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/releaseSwTimeout", i + MOTOR_ID_FIRST, releaseSwTimeout[i]);
+            sendTwoData("/releaseSwTimeout", i + MOTOR_ID_FIRST, (int32_t)releaseSwTimeout[i]);
         }
     }
 }

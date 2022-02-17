@@ -86,9 +86,10 @@ bool
 #endif
     bHomingAtStartup[NUM_OF_MOTOR];
 float homingSpeed[NUM_OF_MOTOR];
-uint16_t
+uint32_t
     goUntilTimeout[NUM_OF_MOTOR],
-    releaseSwTimeout[NUM_OF_MOTOR],
+    releaseSwTimeout[NUM_OF_MOTOR];
+uint16_t
     reportPositionInterval[NUM_OF_MOTOR],
     reportPositionListInterval;
 uint8_t kvalHold[NUM_OF_MOTOR], kvalRun[NUM_OF_MOTOR], kvalAcc[NUM_OF_MOTOR], kvalDec[NUM_OF_MOTOR];

@@ -50,6 +50,12 @@ bool bBrakeDecWaiting[NUM_OF_MOTOR];
 uint32_t homingStartTime[NUM_OF_MOTOR];
 uint8_t homingStatus[NUM_OF_MOTOR];
 bool bHoming[NUM_OF_MOTOR];
+
+// BUSY state clear waiting for /goto, /gotoDir, /goHome, and /goMark
+enum BusyClearWaitStatus busyClearWaitStatus[NUM_OF_MOTOR] = { NONE };
+int32_t busyClearWaitGoToPosition[NUM_OF_MOTOR]; // Store the target position for /goto and /gotoDir during the BUSY clear waiting.
+bool busyClearWaitGoToDir[NUM_OF_MOTOR]; // Store the target direction
+
 // Motor settings
 bool 
     busy[NUM_OF_MOTOR],

@@ -1295,7 +1295,7 @@ void getBrakeTransitionDuration(OSCMessage &msg, int addrOffset)
 void setGoUntilTimeout(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint16_t timeout = getInt(msg, 1);
+    uint32_t timeout = getInt(msg, 1);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -1314,20 +1314,20 @@ void getGoUntilTimeout(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/goUntilTimeout", motorID, goUntilTimeout[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/goUntilTimeout", motorID, (int32_t)goUntilTimeout[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/goUntilTimeout", i + MOTOR_ID_FIRST, goUntilTimeout[i]);
+            sendTwoData("/goUntilTimeout", i + MOTOR_ID_FIRST, (int32_t)goUntilTimeout[i]);
         }
     }
 }
 void setReleaseSwTimeout(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint16_t timeout = getInt(msg, 1);
+    uint32_t timeout = getInt(msg, 1);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -1346,13 +1346,13 @@ void getReleaseSwTimeout(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/releaseSwTimeout", motorID, releaseSwTimeout[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/releaseSwTimeout", motorID, (int32_t)releaseSwTimeout[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/releaseSwTimeout", i + MOTOR_ID_FIRST, releaseSwTimeout[i]);
+            sendTwoData("/releaseSwTimeout", i + MOTOR_ID_FIRST, (int32_t)releaseSwTimeout[i]);
         }
     }
 }
@@ -2187,7 +2187,7 @@ void getSpeed(OSCMessage &msg, int addrOffset)
         s = stepper[motorID - MOTOR_ID_FIRST].getSpeed();
         if (dir[motorID - MOTOR_ID_FIRST] == REV)
         {
-            s *= -1.0;
+            s *= -1.0f;
         }
         sendTwoData("/speed", motorID, s);
     }
@@ -2198,7 +2198,7 @@ void getSpeed(OSCMessage &msg, int addrOffset)
             s = stepper[i].getSpeed();
             if (dir[i] == REV)
             {
-                s *= -1.0;
+                s *= -1.0f;
             }
             sendTwoData("/speed", i + MOTOR_ID_FIRST, s);
         }
@@ -2378,49 +2378,79 @@ void move(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t steps = getInt(msg, 1);
-    boolean dir = steps > 0;
+    boolean newDir = steps > 0;
     steps = abs(steps);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
-        if (checkMotionStartConditions(motorID, dir, false))
+        if (checkMotionStartConditions(motorID, newDir, false))
         {
-            stepper[motorID].move(dir, steps);
+            stepper[motorID].move(newDir, steps);
         }
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            if (checkMotionStartConditions(i, dir, false))
+            if (checkMotionStartConditions(i, newDir, false))
             {
-                stepper[i].move(dir, steps);
+                stepper[i].move(newDir, steps);
             }
         }
+    }
+}
+
+// Try to clear BUSY flag and return TRUE if succeeded.
+// GOTO and GOTO_DIR is only executable when not in BUSY state
+// So clear the BUSY with RUN command first.
+bool clearBusyForGoTo(uint8_t motorId)
+{
+    if (busy[motorId])
+    {
+        int32_t rawSpeed = stepper[motorId].getParam(SPEED);
+        stepper[motorId].runRaw(dir[motorId], rawSpeed);
+        bool isReadyForGoTo = (stepper[motorId].getStatus() & STATUS_BUSY) > 0;
+        return isReadyForGoTo;
+    }
+    else
+    {
+        return true;
     }
 }
 void goTo(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t pos = getInt(msg, 1);
-    bool dir = 0;
+    bool newDir = 0;
     if (isCorrectMotorId(motorID))
     {
-        motorID -= MOTOR_ID_FIRST;
-        dir = checkGoToDirection(motorID, pos);
-        if (checkMotionStartConditions(motorID, dir, false))
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        newDir = checkGoToDirection(motorId, pos);
+        if (checkMotionStartConditions(motorId, newDir))
         {
-            stepper[motorID].goTo(pos);
+            if (clearBusyForGoTo(motorId))
+            {
+                stepper[motorId].goTo(pos);
+            } else {
+                busyClearWaitStatus[motorId] = WAIT_FOR_GOTO;
+                busyClearWaitGoToPosition[motorId] = pos;
+            }
         }
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            dir = checkGoToDirection(i, pos);
-            if (checkMotionStartConditions(i, dir, false))
+            newDir = checkGoToDirection(i, pos);
+            if (checkMotionStartConditions(i, newDir))
             {
-                stepper[i].goTo(pos);
+                if (clearBusyForGoTo(i))
+                {
+                    stepper[i].goTo(pos);
+                } else {
+                    busyClearWaitStatus[i] = WAIT_FOR_GOTO;
+                    busyClearWaitGoToPosition[i] = pos;
+                }
             }
         }
     }
@@ -2432,10 +2462,17 @@ void goToDir(OSCMessage &msg, int addrOffset)
     int32_t pos = getInt(msg, 2);
     if (isCorrectMotorId(motorID))
     {
-        motorID -= MOTOR_ID_FIRST;
-        if (checkMotionStartConditions(motorID, dir, false))
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        if (checkMotionStartConditions(motorId, dir, false))
         {
-            stepper[motorID].goToDir(dir, pos);
+            if (clearBusyForGoTo(motorId))
+            {
+                stepper[motorId].goToDir(dir, pos);
+            } else {
+                busyClearWaitStatus[motorId] = WAIT_FOR_GOTO_DIR;
+                busyClearWaitGoToPosition[motorId] = pos;
+                busyClearWaitGoToDir[motorId] = dir;
+            }
         }
     }
     else if (motorID == MOTOR_ID_ALL)
@@ -2443,7 +2480,16 @@ void goToDir(OSCMessage &msg, int addrOffset)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             if (checkMotionStartConditions(i, dir, false))
-                stepper[i].goToDir(dir, pos);
+            {
+                if (clearBusyForGoTo(i))
+                {
+                    stepper[i].goToDir(dir, pos);
+                } else {
+                    busyClearWaitStatus[i] = WAIT_FOR_GOTO_DIR;
+                    busyClearWaitGoToPosition[i] = pos;
+                    busyClearWaitGoToDir[i] = dir;
+                }
+            }
         }
     }
 }
@@ -2583,11 +2629,16 @@ void goHome(OSCMessage &msg, int addrOffset)
     bool dir;
     if (isCorrectMotorId(motorID))
     {
-        motorID -= MOTOR_ID_FIRST;
-        dir = checkGoToDirection(motorID, 0);
-        if (checkMotionStartConditions(motorID, dir, false))
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        dir = checkGoToDirection(motorId, 0);
+        if (checkMotionStartConditions(motorId, dir, false))
         {
-            stepper[motorID].goHome();
+            if (clearBusyForGoTo(motorId))
+            {
+                stepper[motorId].goHome();
+            } else {
+                busyClearWaitStatus[motorId] = WAIT_FOR_GOHOME;
+            }
         }
     }
     else if (motorID == MOTOR_ID_ALL)
@@ -2597,7 +2648,12 @@ void goHome(OSCMessage &msg, int addrOffset)
             dir = checkGoToDirection(i, 0);
             if (checkMotionStartConditions(i, dir, false))
             {
-                stepper[i].goHome();
+                if (clearBusyForGoTo(i))
+                {
+                    stepper[i].goHome();
+                } else {
+                    busyClearWaitStatus[i] = WAIT_FOR_GOHOME;
+                }
             }
         }
     }
@@ -2608,11 +2664,16 @@ void goMark(OSCMessage &msg, int addrOffset)
     bool dir;
     if (isCorrectMotorId(motorID))
     {
-        motorID -= MOTOR_ID_FIRST;
-        dir = checkGoToDirection(motorID, stepper[motorID].getMark());
-        if (checkMotionStartConditions(motorID, dir, false))
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        dir = checkGoToDirection(motorId, stepper[motorId].getMark());
+        if (checkMotionStartConditions(motorId, dir, false))
         {
-            stepper[motorID].goMark();
+            if (clearBusyForGoTo(motorId))
+            {
+                stepper[motorId].goMark();
+            } else {
+                busyClearWaitStatus[motorId] = WAIT_FOR_GOMARK;
+            }
         }
     }
     else if (motorID == MOTOR_ID_ALL)
@@ -2622,7 +2683,12 @@ void goMark(OSCMessage &msg, int addrOffset)
             dir = checkGoToDirection(i, stepper[i].getMark());
             if (checkMotionStartConditions(i, dir, false))
             {
-                stepper[i].goMark();
+                if (clearBusyForGoTo(i))
+                {
+                    stepper[i].goMark();
+                } else {
+                    busyClearWaitStatus[i] = WAIT_FOR_GOMARK;
+                }
             }
         }
     }

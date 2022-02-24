@@ -95,6 +95,19 @@ extern uint32_t brakeTransitionTrigTime[NUM_OF_MOTOR];
 extern bool bBrakeDecWaiting[NUM_OF_MOTOR]; // Waiting deceleration for the brake engaging procedure
 #endif
 
+// BUSY clear waiting for cascading GOTO, GOTO_DIR, GOHOME, and GOMARK
+enum BusyClearWaitStatus
+{
+    NONE = 0,
+    WAIT_FOR_GOTO,
+    WAIT_FOR_GOTO_DIR,
+    WAIT_FOR_GOHOME,
+    WAIT_FOR_GOMARK
+};
+extern enum BusyClearWaitStatus busyClearWaitStatus[NUM_OF_MOTOR];
+extern int32_t busyClearWaitGoToPosition[NUM_OF_MOTOR]; // Store the target position for /goto and /gotoDir during the BUSY clear waiting.
+extern bool busyClearWaitGoToDir[NUM_OF_MOTOR]; // Store the target direction
+
 // Homing
 extern uint32_t homingStartTime[NUM_OF_MOTOR];
 extern uint8_t homingStatus[NUM_OF_MOTOR];
@@ -168,9 +181,10 @@ extern bool
     bProhibitMotionOnLimitSw[NUM_OF_MOTOR],
 #endif
     bHomingAtStartup[NUM_OF_MOTOR];
-extern uint16_t
+extern uint32_t
     goUntilTimeout[NUM_OF_MOTOR],
-    releaseSwTimeout[NUM_OF_MOTOR],
+    releaseSwTimeout[NUM_OF_MOTOR];
+extern uint16_t
     reportPositionInterval[NUM_OF_MOTOR],
     reportPositionListInterval;
 extern uint8_t kvalHold[NUM_OF_MOTOR], kvalRun[NUM_OF_MOTOR], kvalAcc[NUM_OF_MOTOR], kvalDec[NUM_OF_MOTOR];

@@ -141,7 +141,7 @@ uint8_t getMyId()
     for (uint8_t i = 1; i < 24; i++)
     {
         digitalWrite(PIN_DIPSW_SCK, HIGH);
-        shiftInByte |= (!digitalRead(PIN_DIPSW_SCK)) << i;
+        shiftInByte |= (!digitalRead(PIN_DIPSW_MISO)) << i;
         digitalWrite(PIN_DIPSW_SCK, LOW);
     }
     _id = shiftInByte >> 16;

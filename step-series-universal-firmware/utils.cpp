@@ -214,14 +214,18 @@ void sendBootMsg(uint32_t _currentTime) {
     turnOnTXL();
     isWaitingSendBootMsg = false;
 }
-#ifdef HAVE_BRAKE
 bool isBrakeDisEngaged(uint8_t motorId) {
+#ifdef HAVE_BRAKE
     bool state = electromagnetBrakeEnable[motorId] && (brakeStatus[motorId] != BRAKE_DISENGAGED);
     if (state) {
         sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_ENGAGED);
     }
     return !state;
+#else
+    return true;
+#endif
 }
+#ifdef HAVE_BRAKE
 void updateBrake(uint32_t _currentTimeMillis) {
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {

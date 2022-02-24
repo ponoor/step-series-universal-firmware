@@ -125,13 +125,41 @@ void checkStatus()
             busy[i] = t;
             if (reportBUSY[i])
                 sendTwoData("/busy", i + MOTOR_ID_FIRST, (int32_t)t);
-            if ((!busy[i]) && (homingStatus[i] == HOMING_RELEASESW))
+            
+            if (!busy[i])
             {
-                homingStatus[i] = HOMING_COMPLETED;
-                if (bHoming[i])
+                if (busyClearWaitStatus[i] != NONE)
                 {
-                    sendTwoData("/homingStatus", i + MOTOR_ID_FIRST, homingStatus[i]);
-                    bHoming[i] = false;
+                    switch (busyClearWaitStatus[i])
+                    {
+                    case WAIT_FOR_GOTO:
+                        stepper[i].goTo(busyClearWaitGoToPosition[i]);
+                        busyClearWaitStatus[i] = NONE;
+                        break;
+                    case WAIT_FOR_GOTO_DIR:
+                        stepper[i].goToDir(busyClearWaitGoToDir[i], busyClearWaitGoToPosition[i]);
+                        busyClearWaitStatus[i] = NONE;
+                        break;
+                    case WAIT_FOR_GOHOME:
+                        stepper[i].goHome();
+                        busyClearWaitStatus[i] = NONE;
+                        break;
+                    case WAIT_FOR_GOMARK:
+                        stepper[i].goMark();
+                        busyClearWaitStatus[i] = NONE;
+                        break;
+                    default:
+                        break;
+                    }
+                }
+                else if (homingStatus[i] == HOMING_RELEASESW)
+                {
+                    homingStatus[i] = HOMING_COMPLETED;
+                    if (bHoming[i])
+                    {
+                        sendTwoData("/homingStatus", i + MOTOR_ID_FIRST, homingStatus[i]);
+                        bHoming[i] = false;
+                    }
                 }
             }
         }

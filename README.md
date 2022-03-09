@@ -55,14 +55,17 @@ If you want to compile/upload with Arduino IDE, please download a `step-series-u
 - [STEP100/200](https://ponoor.com/en/docs/step100-200/)
 - [STEP400/800](https://ponoor.com/en/docs/step-series/)
 - [Forum](https://github.com/ponoor/step-series-support/discussions)
+
 ## Progress
 
 | Board | Basic test | Full test |
 | --- | --- | --- |
-| STEP400 R1 | Ok | - |
-| STEP800 R1 | Ok | - |
-| STEP400 proto R4 | Ok | - |
-| STEP800 proto R3 | Ok | - |
-| STEP800 proto R1 | - | -|
-| X-NUCLEO-IHM02A1 | Ok | - |
-| X-NUCLEO-IHM03A1 | Ok | - |
+| STEP400 R1 | Ok | Ok |
+| STEP800 R1 | Ok | Ok |
+| STEP400 proto R4 | Ok | Ok |
+| STEP800 proto R3 | Ok | Ok |
+| STEP800 proto R1 | Ok | Ok |
+| X-NUCLEO-IHM02A1 | Ok | Ok |
+| X-NUCLEO-IHM03A1 | Ok | Ok |
+
+The full test was done with the test codes of [python-step-series](https://github.com/ponoor/python-step-series) library written by @JulianOrteil.

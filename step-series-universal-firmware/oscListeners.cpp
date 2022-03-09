@@ -559,8 +559,8 @@ void getHomeSw(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        motorID -= motorID;
-        getHomeSw(motorID);
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        getHomeSw(motorId);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
@@ -581,8 +581,8 @@ void getLimitSw(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        motorID -= MOTOR_ID_FIRST;
-        getLimitSw(motorID);
+        uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        getLimitSw(motorId);
     }
     else if (motorID == MOTOR_ID_ALL)
     {

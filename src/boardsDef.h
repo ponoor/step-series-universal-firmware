@@ -18,14 +18,15 @@
 #define STEP400_R1
 // #define STEP800_R1
 
-// Prototypes
-// #define STEP400_PROTO_R4
-// #define STEP800_PROTO_R3
-// #define STEP800_PROTO_R1
-
 // X-Nucleos
 // #define STEP100_R1 // X-NUCLEO-IHM03A1, PowerSTEP01 x1
 // #define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
+
+// Prototypes
+// #define STEP400_PROTO_R4 // rev.2020-04-06
+// #define STEP400_PROTO_R3 // rev.2020-01-07
+// #define STEP800_PROTO_R3
+// #define STEP800_PROTO_R1
 
 // Uncomment this line if the board is M0 with Zero bootloader (Swap D2 and D4) 
 // Only work for STEP100/STEP200
@@ -76,9 +77,41 @@ const uint8_t firmwareVersion[3] = {1,0,0};
     #define HAVE_SD
     #define HAVE_LIMIT_GPIO
     #define HAVE_DIP_SW
-    #define DIP_SW_DIGITS   8
+    #define DIP_SW_DIGITS   (8)
     #define DRIVER_POWERSTEP01
     #define DRIVER_OSC EXT_16MHZ_OSCOUT_INVERT
+    #define DRIVER_RESET_PIN_OPERATION_STATE  HIGH
+    #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
+    // pins
+    #define ledPin 13u
+    const uint8_t dipSwPin[8] = { A5,SCL,7u,SDA,2u,9u,3u,0u }; // Prototype_r4
+    const uint8_t limitSwPin[4] = { 1u,5u,8u,A1 };
+    #define SD_CS_PIN	4u
+    #define SD_DETECT_PIN   A4
+    #define PIN_DRIVER_MISO 6u	// D6 /SERCOM3/PAD[2] miso
+    #define PIN_DRIVER_MOSI 11u	// D11/SERCOM3/PAD[0] mosi
+    #define PIN_DRIVER_SCK	12u	// D12/SERCOM3/PAD[3] sck
+    #define EPIO_DRIVER_MISO    PIO_SERCOM_ALT
+    #define EPIO_DRIVER_MOSI    PIO_SERCOM_ALT
+    #define EPIO_DRIVER_SCK PIO_SERCOM_ALT
+    #define PAD_DRIVER_SPI  SPI_PAD_0_SCK_3
+    #define PAD_DRIVER_RX   SERCOM_RX_PAD_2
+    #define PIN_DRIVER_CS   A0
+    #define PIN_DRIVER_RESET    A2
+    #define W5500_RESET_PIN A3
+
+    #define DRIVER_SERCOM sercom3
+#elif defined(STEP400_PROTO_R3)
+    #define PRODUCT_NAME    "STEP400"
+    #define FIRMWARE_NAME   "STEP400_PROTO_R3_UNIVERSAL"
+    const uint8_t applicableConfigVersion[2] = {1,2};
+    #define NUM_OF_MOTOR (4)
+    #define HAVE_SD
+    // #define HAVE_LIMIT_GPIO
+    #define HAVE_DIP_SW
+    #define DIP_SW_DIGITS   (8)
+    #define DRIVER_POWERSTEP01
+    #define DRIVER_OSC EXT_24MHZ_OSCOUT_INVERT
     #define DRIVER_RESET_PIN_OPERATION_STATE  HIGH
     #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
     // pins

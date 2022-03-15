@@ -1,7 +1,7 @@
 #include "boardsSpecific.h"
 #include "wiring_private.h" // pinPeripheral() function
 
-#if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
+#if defined(STEP400_R1) || defined(STEP400_PROTO_R4) || defined(STEP400_PROTO_R3)
 powerSTEP stepper[] = {
     powerSTEP(3, PIN_DRIVER_CS, PIN_DRIVER_RESET),
     powerSTEP(2, PIN_DRIVER_CS, PIN_DRIVER_RESET),
@@ -39,7 +39,7 @@ AutoDriver stepper[] = {
 
 void initDipSw()
 {
-#if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
+#if defined(STEP400_R1) || defined(STEP400_PROTO_R4) || defined(STEP400_PROTO_R3)
     for (uint8_t i = 0; i < DIP_SW_DIGITS; i++)
     {
         pinMode(dipSwPin[i], INPUT_PULLUP);
@@ -113,7 +113,7 @@ void setBrake(uint8_t motorId, bool state)
 uint8_t getMyId()
 {
     uint8_t _id = 0;
-#if defined(STEP400_R1) || defined(STEP400_PROTO_R4)
+#if defined(STEP400_R1) || defined(STEP400_PROTO_R4) || defined(STEP400_PROTO_R3)
     for (auto i = 0; i < DIP_SW_DIGITS; ++i)
     {
         _id |= (!digitalRead(dipSwPin[i])) << i;

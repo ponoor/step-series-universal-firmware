@@ -148,7 +148,7 @@ void printCurrentState() {
 			p("\tEL_POS: 0x%02X (Fullstep:%d, Microstep:%d)\n", temp, (temp>>7),(temp%0x7F));
 			temp = stepper[i].getMark();
 			p("\tMARK: 0x%02X (%dstep)\n", temp, temp);
-			p("\tSPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getSpeedRaw(), stepper[i].getSpeed());
+			p("\tSPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getParam(SPEED), stepper[i].getSpeed());
 			p("\tACC: 0x%02X (%.1fstep/s/s)\n", stepper[i].getAccRaw(), stepper[i].getAcc());
 			p("\tDEC: 0x%02X (%.1fstep/s/s)\n", stepper[i].getDecRaw(), stepper[i].getDec());
 			p("\tMAX_SPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getMaxSpeedRaw(), stepper[i].getMaxSpeed());

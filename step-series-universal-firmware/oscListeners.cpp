@@ -1153,7 +1153,10 @@ void getBemfParam(uint8_t motorId)
     }
     OSCMessage newMes("/bemfParam");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
-    newMes.add(intersectSpeed[motorId]).add(startSlope[motorId]).add(accFinalSlope[motorId]).add(decFinalSlope[motorId]);
+    newMes.add((int32_t)stepper[motorId].getParam(INT_SPD));
+    newMes.add((int32_t)stepper[motorId].getParam(ST_SLP));
+    newMes.add((int32_t)stepper[motorId].getParam(FN_SLP_ACC));
+    newMes.add((int32_t)stepper[motorId].getParam(FN_SLP_DEC));
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();
@@ -1216,7 +1219,9 @@ void getDecayModeParam(uint8_t motorId)
     }
     OSCMessage newMes("/decayModeParam");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
-    newMes.add(fastDecaySetting[motorId]).add(minOnTime[motorId]).add(minOffTime[motorId]);
+    newMes.add((int32_t)stepper[motorId].getParam(T_FAST));
+    newMes.add((int32_t)stepper[motorId].getParam(TON_MIN));
+    newMes.add((int32_t)stepper[motorId].getParam(TOFF_MIN));
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();
@@ -1679,8 +1684,11 @@ void getKval(uint8_t motorID)
     }
     OSCMessage newMes("/kval");
     newMes.add((int32_t)motorID);
-    motorID -= MOTOR_ID_FIRST;
-    newMes.add(kvalHold[motorID]).add(kvalRun[motorID]).add(kvalAcc[motorID]).add(kvalDec[motorID]);
+    uint8_t motorId = motorID - MOTOR_ID_FIRST;
+    newMes.add((int32_t)stepper[motorId].getHoldKVAL());
+    newMes.add((int32_t)stepper[motorId].getRunKVAL());
+    newMes.add((int32_t)stepper[motorId].getAccKVAL());
+    newMes.add((int32_t)stepper[motorId].getDecKVAL());
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();
@@ -1851,8 +1859,11 @@ void getTval(uint8_t motorID)
     }
     OSCMessage newMes("/tval");
     newMes.add((int32_t)motorID);
-    motorID -= MOTOR_ID_FIRST;
-    newMes.add(tvalHold[motorID]).add(tvalRun[motorID]).add(tvalAcc[motorID]).add(tvalDec[motorID]);
+    uint8_t motorId = motorID - MOTOR_ID_FIRST;
+    newMes.add((int32_t)stepper[motorId].getHoldTVAL());
+    newMes.add((int32_t)stepper[motorId].getRunTVAL());
+    newMes.add((int32_t)stepper[motorId].getAccTVAL());
+    newMes.add((int32_t)stepper[motorId].getDecTVAL());
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();
@@ -1871,10 +1882,10 @@ void getTval_mA(uint8_t motorId)
     }
     OSCMessage newMes("/tval_mA");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
-    newMes.add(TvalToCurrent(tvalHold[motorId]));
-    newMes.add(TvalToCurrent(tvalRun[motorId]));
-    newMes.add(TvalToCurrent(tvalAcc[motorId]));
-    newMes.add(TvalToCurrent(tvalDec[motorId]));
+    newMes.add(TvalToCurrent(stepper[motorId].getHoldTVAL()));
+    newMes.add(TvalToCurrent(stepper[motorId].getRunTVAL()));
+    newMes.add(TvalToCurrent(stepper[motorId].getAccTVAL()));
+    newMes.add(TvalToCurrent(stepper[motorId].getDecTVAL()));
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();
@@ -1984,7 +1995,7 @@ void getMinSpeed(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/minSpeed", motorID, minSpeed[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/minSpeed", motorID, stepper[motorID - MOTOR_ID_FIRST].getMinSpeed());
     }
     else if (motorID == MOTOR_ID_ALL)
     {

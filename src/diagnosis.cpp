@@ -141,13 +141,100 @@ void printCurrentState() {
 		for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
 		{
 			temp = 0;
-			p("Driver ID#%d\n\tSTATUS: 0x%02X\n", i + 1, status[i]);
+			p("Driver ID#%d\n", i+1);
+			temp = stepper[i].getPos();
+			p("\tABS_POS: 0x%02X (%dstep)\n",temp, temp);
+			temp = stepper[i].getElPos();
+			p("\tEL_POS: 0x%02X (Fullstep:%d, Microstep:%d)\n", temp, (temp>>7),(temp%0x7F));
+			temp = stepper[i].getMark();
+			p("\tMARK: 0x%02X (%dstep)\n", temp, temp);
+			p("\tSPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getSpeedRaw(), stepper[i].getSpeed());
+			p("\tACC: 0x%02X (%.1fstep/s/s)\n", stepper[i].getAccRaw(), stepper[i].getAcc());
+			p("\tDEC: 0x%02X (%.1fstep/s/s)\n", stepper[i].getDecRaw(), stepper[i].getDec());
+			p("\tMAX_SPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getMaxSpeedRaw(), stepper[i].getMaxSpeed());
+			p("\tMIN_SPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getMinSpeedRaw(), stepper[i].getMinSpeed());
+			p("\tFS_SPD: 0x%02X (%.1fstep/s)\n", stepper[i].getFullSpeedRaw(), stepper[i].getFullSpeed());
+			temp = stepper[i].getHoldKVAL();
+			p("\tKVAL_HOLD: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getRunKVAL();
+			p("\tKVAL_RUN: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getAccKVAL();
+			p("\tKVAL_ACC: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getDecKVAL();
+			p("\tKVAL_DEC: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getParam(INT_SPD);
+			p("\tINT_SPD: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getParam(ST_SLP);
+			p("\tST_SLP: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getParam(FN_SLP_ACC);
+			p("\tFN_SLP_ACC: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getParam(FN_SLP_DEC);
+			p("\tFN_SLP_DEC: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getParam(K_THERM);
+			p("\tK_THERM: 0x%02X (%.1f)\n", temp, (1.0f+(float)temp*0.03125f));
+			temp = stepper[i].getParam(ADC_OUT);
+			p("\tADC_OUT: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getOCThreshold();
+#ifdef DRIVER_POWERSTEP01
+			p("\tOCD_TH: 0x%02X (%.1fmA)\n", temp, (float)(temp+1)*312.5f);
+#elif defined(DRIVER_L6470)
+			p("\tOCD_TH: 0x%02X (%.1fmA)\n", temp, (float)(temp+1)*375.0f);
+#endif
+			temp = stepper[i].getParam(STALL_TH);
+#ifdef DRIVER_POWERSTEP01
+			p("\tSTALL_TH: 0x%02X (%.1fmA)\n", temp, (float)(temp+1)*312.5f);
+#elif defined(DRIVER_L6470)
+			p("\tSTALL_TH: 0x%02X (%.1fmA)\n", temp, (float)(temp+1)*31.25f);
+#endif
+			temp = stepper[i].getStepMode();
+			p("\tSTEP_MODE: 0x%02X (%d)\n", temp, temp);
+			temp = stepper[i].getParam(ALARM_EN);
+			p("\tALARM_EN: 0x%02X (", temp);
+			for (uint8_t i = 0; i < 8; i++) {
+				SerialUSB.print(((temp >> (7 - i)) & 1) == 1 ? "1" : "0");
+				if (i == 3) SerialUSB.print(" ");
+			}
+			SerialUSB.println(")");
+
+			temp = stepper[i].getParam(CONFIG);
+			p("\tCONFIG: 0x%02X\n", temp);
+			p("\t  OSC_SEL: %d\n", temp%0x7);
+			p("\t  EXT_CLK: %d\n", (temp>>3)%0x1);
+			p("\t  SW_MODE: %d\n", (temp>>4)%0x1);
+#ifdef DRIVER_POWERSTEP01
+			if (isCurrentMode[i])
+				p("\t  EN_TQREG: %d\n", (temp>>5)%0x1);
+			else
+				p("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
+
+			p("\t  OC_SD: %d\n", (temp>>7)%0x1);
+			p("\t  UVLOVAL: %d\n", (temp>>8)%0x1);
+			p("\t  VCCVAL: %d\n", (temp>>9)%0x1);
+			if (isCurrentMode[i])
+			{
+				p("\t  TSW: %d\n", (temp>>10)%0x1F);
+				p("\t  PRED_EN: %d\n", (temp>>15)%0x1);
+			}
+			else{
+				p("\t  F_PWM_DEC: %d\n", (temp>>10)%0x7);
+				p("\t  F_PWM_INT: %d\n", (temp>>13)%0x7);
+			}
+			
+#elif defined(DRIVER_L6470)
+			p("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
+			p("\t  OC_SD: %d\n", (temp>>7)%0x1);
+			p("\t  POW_SR: %d\n", (temp>>8)%0x3);
+			p("\t  F_PWM_DEC: %d\n", (temp>>10)%0x7);
+			p("\t  F_PWM_INT: %d\n", (temp>>13)%0x7);
+#endif
+
+			p("\tSTATUS: 0x%02X\n", status[i]);
 			bt = (status[i] & STATUS_HIZ) > 0; // HiZ, high for HiZ
-			showBoolResult(F("\tHigh impedance state"), bt);
-			showBoolResult(F("\tBUSY"), !(status[i] & STATUS_BUSY));
+			showBoolResult(F("\t  High impedance state"), bt);
+			showBoolResult(F("\t  BUSY"), !(status[i] & STATUS_BUSY));
 			bt = (status[i] & STATUS_DIR) > 0;
 			s = (bt ? "Forward" : "Reverse");
-			p("\tMotor direction : %s\n", s.c_str());
+			p("\t  Motor direction : %s\n", s.c_str());
 			t = (status[i] & STATUS_MOT_STATUS) >> 5;
 			switch (t)
 			{
@@ -166,10 +253,10 @@ void printCurrentState() {
 			default:
 				break;
 			}
-			p("\tMotor status : %s\n", s.c_str());
+			p("\t  Motor status : %s\n", s.c_str());
 
 			t = (status[i] & STATUS_UVLO) == 0;
-			showBoolResult("\tUVLO (Undervoltage lock out)", t);
+			showBoolResult("\t  UVLO (Undervoltage lock out)", t);
 
 #ifdef DRIVER_L6470
         	t = (status[i] & (STATUS_TH_WRN|STATUS_TH_SD)) >> 10;
@@ -194,10 +281,10 @@ void printCurrentState() {
 			default:
 				break;
 			}
-			p("\tThermal status : %s\n", s.c_str());
+			p("\t  Thermal status : %s\n", s.c_str());
 
 			t = (status[i] & STATUS_OCD) == 0;
-			showBoolResult("\tOCD (Overcurent detection)", t);
+			showBoolResult("\t  OCD (Overcurent detection)", t);
 
 #ifdef DRIVER_L6470
         	t = (status[i] & (STATUS_STEP_LOSS_A | STATUS_STEP_LOSS_B)) >> 13;
@@ -205,20 +292,17 @@ void printCurrentState() {
         	t = (status[i] & (STATUS_STALL_A | STATUS_STALL_B)) >> 14;
 #endif
 			bt = (t != 3);
-			showBoolResult("\tStalled", bt);
+			showBoolResult("\t  Stalled", bt);
 
 			// SW_F, low for open, high for close
 			bool swF = (status[i] & STATUS_SW_F);
-			p("\tSW_F: %d ", swF);
+			p("\t  SW_F: %d ", swF);
 			if (swF == 1) {
 				p("-HOME senser input closed.\n");
 			}
 			else {
 				p("-HOME senser input open.\n");
 			}
-			// ADC
-			temp = stepper[i].getParam(ADC_OUT);
-			p("\tADC_OUT: %d\n", temp);
 		}
 	}
 	

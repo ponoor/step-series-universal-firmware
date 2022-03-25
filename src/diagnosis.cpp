@@ -303,6 +303,7 @@ void printCurrentState() {
 			else {
 				p("-HOME senser input open.\n");
 			}
+			Watchdog.reset();
 		}
 	}
 	

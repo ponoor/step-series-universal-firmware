@@ -1,4 +1,4 @@
-# step-series-universal-firmware
+# STEP-series Universal Firmware
 
 <img src="https://ponoor.com/cms/wp-content/uploads/2022/02/IMG_4728.jpg" />
 
@@ -10,7 +10,7 @@ The two hardware from Ponoor Experiments, [STEP400](https://ponoor.com/products/
 Also covers some variants and X-Nucleos with Arduino.
 
 
-## Target
+## Target boards
 <!--This firmware covers STEP400 and STEP800 from Ponoor Experiments inc, and also X-Nucleos with Arduino. -->
 
 - [STEP400](https://github.com/ponoor/STEP400/)
@@ -31,20 +31,17 @@ This project is based on PlatformIO with Arduino framework. Uncomment one of boa
 // #define STEP400_R1
 // #define STEP800_R1
 
-// Prototypes
-// #define STEP400_PROTO_R4
-// #define STEP800_PROTO_R3
-// #define STEP800_PROTO_R1
-
 // X-Nucleos
 // #define STEP100_R1 // X-NUCLEO-IHM03A1, PowerSTEP01 x1
 // #define STEP200_R1 // X-NUCLEO-IHM02A1, L6470 x2 
+
+// Prototypes
+...
 ```
 
-If you want to compile/upload with Arduino IDE, please download a `step-series-universal-firmware.zip` from Assets of the latest release. For compilation with Arduino IDE, please see [Compiling the Arduino sketch](https://ponoor.com/en/docs/step-series/technical-information/compile-the-arduino-sketch/) in STEP400/800 documents.
+If you want to compile/upload with Arduino IDE, please download a `step-series-universal-firmware.zip` from Assets of the latest release. You need to install the SAMD core and following libraries to your Arduino IDE for compiling it. For more details, please see [Compiling the Arduino sketch](https://ponoor.com/en/docs/step-series/technical-information/compile-the-arduino-sketch/) in STEP400/800 documents.
 
-
-## Dependency
+### Library Dependency
 - **[OSC Library](https://github.com/CNMAT/OSC)** from CNMAT
 - **[ArduinoJSON Library](https://arduinojson.org/)**
 - **[Adafruit SleepyDog Arduino Library](https://github.com/adafruit/Adafruit_SleepyDog)**

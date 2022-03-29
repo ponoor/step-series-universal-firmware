@@ -238,7 +238,7 @@ void getConfigName(OSCMessage &msg, int addrOffset)
         return;
     }
     OSCMessage newMes("/configName");
-    newMes.add(configName.c_str()).add(sdInitializeSucceeded).add(configFileOpenSucceeded).add(configFileParseSucceeded);
+    newMes.add(configName.c_str()).add((int32_t)sdInitializeSucceeded).add((int32_t)configFileOpenSucceeded).add((int32_t)configFileParseSucceeded);
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();

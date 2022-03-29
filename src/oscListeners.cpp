@@ -216,7 +216,7 @@ void setDestIp(OSCMessage &msg, int addrOffset)
         newMes.add(Udp.remoteIP()[i]);
     }
     destIp = Udp.remoteIP();
-    newMes.add(bIpUpdated);
+    newMes.add((int32_t)bIpUpdated);
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();
@@ -572,7 +572,7 @@ void getHomeSw(OSCMessage &msg, int addrOffset)
 }
 void getHomeSw(uint8_t motorId)
 {
-    sendThreeInt("/homeSw", motorId + MOTOR_ID_FIRST, homeSwState[motorId], dir[motorId]);
+    sendThreeInt("/homeSw", motorId + MOTOR_ID_FIRST, (int32_t)homeSwState[motorId], (int32_t)dir[motorId]);
 }
 
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
@@ -594,7 +594,7 @@ void getLimitSw(OSCMessage &msg, int addrOffset)
 }
 void getLimitSw(uint8_t motorId)
 {
-    sendThreeInt("/limitSw", motorId + MOTOR_ID_FIRST, limitSwState[motorId], dir[motorId]);
+    sendThreeInt("/limitSw", motorId + MOTOR_ID_FIRST, (int32_t)limitSwState[motorId], (int32_t)dir[motorId]);
 }
 #endif
 
@@ -607,13 +607,13 @@ void getBusy(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/busy", motorID, busy[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/busy", motorID, (int32_t)busy[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/busy", i + MOTOR_ID_FIRST, busy[i]);
+            sendTwoData("/busy", i + MOTOR_ID_FIRST, (int32_t)busy[i]);
         }
     }
 }
@@ -626,13 +626,13 @@ void getDir(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/dir", motorID, dir[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/dir", motorID, (int32_t)dir[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/dir", i + MOTOR_ID_FIRST, HiZ[i]);
+            sendTwoData("/dir", i + MOTOR_ID_FIRST, (int32_t)HiZ[i]);
         }
     }
 }
@@ -645,13 +645,13 @@ void getHiZ(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/HiZ", motorID, HiZ[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/HiZ", motorID, (int32_t)HiZ[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/HiZ", i + MOTOR_ID_FIRST, HiZ[i]);
+            sendTwoData("/HiZ", i + MOTOR_ID_FIRST, (int32_t)HiZ[i]);
         }
     }
 }
@@ -664,13 +664,13 @@ void getUvlo(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/uvlo", motorID, uvloStatus[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/uvlo", motorID, (int32_t)uvloStatus[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/uvlo", i + 1, uvloStatus[i]);
+            sendTwoData("/uvlo", i + 1, (int32_t)uvloStatus[i]);
         }
     }
 }
@@ -803,13 +803,13 @@ void getHomeSwMode(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/homeSwMode", motorID, stepper[motorID - MOTOR_ID_FIRST].getSwitchMode() > 0);
+        sendTwoData("/homeSwMode", motorID, (int32_t)(stepper[motorID - MOTOR_ID_FIRST].getSwitchMode() > 0));
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/homeSwMode", i + MOTOR_ID_FIRST, stepper[i].getSwitchMode() > 0);
+            sendTwoData("/homeSwMode", i + MOTOR_ID_FIRST, (int32_t)(stepper[i].getSwitchMode() > 0));
         }
     }
 }
@@ -842,13 +842,13 @@ void getLimitSwMode(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/limitSwMode", motorID, limitSwMode[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/limitSwMode", motorID, (int32_t)limitSwMode[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/limitSwMode", i + MOTOR_ID_FIRST, limitSwMode[i] > 0);
+            sendTwoData("/limitSwMode", i + MOTOR_ID_FIRST, (int32_t)limitSwMode[i]);
         }
     }
 }
@@ -1384,13 +1384,13 @@ void getHomingDirection(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/homingDirection", motorID, homingDirection[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/homingDirection", motorID, (int32_t)homingDirection[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/homingDirection", i + MOTOR_ID_FIRST, homingDirection[i]);
+            sendTwoData("/homingDirection", i + MOTOR_ID_FIRST, (int32_t)homingDirection[i]);
         }
     }
 }
@@ -1451,13 +1451,13 @@ void getProhibitMotionOnHomeSw(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/prohibitMotionOnHomeSw", motorID, bProhibitMotionOnHomeSw[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/prohibitMotionOnHomeSw", motorID, (int32_t)bProhibitMotionOnHomeSw[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/prohibitMotionOnHomeSw", i + MOTOR_ID_FIRST, bProhibitMotionOnHomeSw[i]);
+            sendTwoData("/prohibitMotionOnHomeSw", i + MOTOR_ID_FIRST, (int32_t)bProhibitMotionOnHomeSw[i]);
         }
     }
 }
@@ -1485,13 +1485,13 @@ void getProhibitMotionOnLimitSw(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/prohibitMotionOnLimitSw", motorID, bProhibitMotionOnLimitSw[motorID - MOTOR_ID_FIRST]);
+        sendTwoData("/prohibitMotionOnLimitSw", motorID, (int32_t)bProhibitMotionOnLimitSw[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/prohibitMotionOnLimitSw", i + MOTOR_ID_FIRST, bProhibitMotionOnLimitSw[i]);
+            sendTwoData("/prohibitMotionOnLimitSw", i + MOTOR_ID_FIRST, (int32_t)bProhibitMotionOnLimitSw[i]);
         }
     }
 }

@@ -41,7 +41,7 @@ void checkLimitSw();
 void setup()
 {
     SerialUSB.begin(9600);
-    // while (!SerialUSB);
+    // while (!SerialUSB); // DEBUG
 
     pinMode(ledPin, OUTPUT);
 
@@ -80,6 +80,7 @@ void setup()
     {
         stepper[i].SPIPortConnect(&driverSPI);
         resetMotorDriver(i + MOTOR_ID_FIRST);
+
         digitalWrite(ledPin, HIGH);
         delay(5);
         digitalWrite(ledPin, LOW);

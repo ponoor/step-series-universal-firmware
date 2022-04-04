@@ -11,6 +11,7 @@
 
 #include <OSCMessage.h>
 #include <Ethernet.h>
+#include <Adafruit_SleepyDog.h>
 #include "globals.h"
 #include "boardsSpecific.h"
 

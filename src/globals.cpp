@@ -58,14 +58,14 @@ bool busyClearWaitGoToDir[NUM_OF_MOTOR]; // Store the target direction
 
 // Motor settings
 bool 
-    busy[NUM_OF_MOTOR],
-    HiZ[NUM_OF_MOTOR],
-    homeSwState[NUM_OF_MOTOR],
-    dir[NUM_OF_MOTOR],
-    uvloStatus[NUM_OF_MOTOR];
+    busy[NUM_OF_MOTOR] = {false},
+    HiZ[NUM_OF_MOTOR] = {true},
+    homeSwState[NUM_OF_MOTOR] = {true},
+    dir[NUM_OF_MOTOR] = {REV},
+    uvloStatus[NUM_OF_MOTOR] = {0};
 uint8_t
-    motorStatus[NUM_OF_MOTOR],
-    thermalStatus[NUM_OF_MOTOR];
+    motorStatus[NUM_OF_MOTOR] = {0},
+    thermalStatus[NUM_OF_MOTOR] = {0};
 bool
     reportBUSY[NUM_OF_MOTOR],
     reportHiZ[NUM_OF_MOTOR],

@@ -124,8 +124,11 @@ void sendCommandError(uint8_t motorId, uint8_t errorNum)
 
 void resetMotorDriver(uint8_t deviceID) {
     if (MOTOR_ID_FIRST <= deviceID && deviceID <= MOTOR_ID_LAST) {
+        p("ID: %d CONFIG: 0x%02X", deviceID, stepper[deviceID-1].getParam(CONFIG));
         deviceID -= MOTOR_ID_FIRST;
         stepper[deviceID].resetDev();
+        stepper[deviceID].hardHiZ(); // Required when HOME_SW is activated during reset L6470. PowerSTEP01 doesn't have this issue.
+        stepper[deviceID].setSwitchMode(SW_USER);
         stepper[deviceID].configStepMode(microStepMode[deviceID]);
         stepper[deviceID].setMaxSpeed(maxSpeed[deviceID]);
         stepper[deviceID].setLoSpdOpt(lowSpeedOptimizeEnable[deviceID]);
@@ -139,8 +142,6 @@ void resetMotorDriver(uint8_t deviceID) {
         stepper[deviceID].setDec(dec[deviceID]);
         stepper[deviceID].setSlewRate(slewRate[deviceID]);
         stepper[deviceID].setPWMFreq(PWM_DIV_1, PWM_MUL_0_75);
-        uint16_t swMode = homeSwMode[deviceID] ? SW_USER : SW_HARD_STOP;
-        stepper[deviceID].setSwitchMode(swMode);//
         stepper[deviceID].setVoltageComp(VS_COMP_DISABLE);
         stepper[deviceID].setOCThreshold(overCurrentThreshold[deviceID]); // 5A for 0.1ohm shunt resistor
         stepper[deviceID].setOCShutdown(OC_SD_ENABLE);
@@ -170,9 +171,12 @@ void resetMotorDriver(uint8_t deviceID) {
         }
         stepper[deviceID].setParam(STALL_TH, stallThreshold[deviceID]);
         stepper[deviceID].setParam(ALARM_EN, 0xEF); // Enable alarms except ADC UVLO
+        uint16_t swMode = homeSwMode[deviceID] ? SW_USER : SW_HARD_STOP;
+        stepper[deviceID].setSwitchMode(swMode);//
 
         delay(1);
         stepper[deviceID].getStatus(); // clears error flags
+        p(" -> 0x%02X\n", stepper[deviceID].getParam(CONFIG));
     }
 }
 

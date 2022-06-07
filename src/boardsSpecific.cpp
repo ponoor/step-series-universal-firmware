@@ -78,12 +78,8 @@ void initBrake()
 #ifdef STEP400_R1
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        if (electromagnetBrakeEnable[i])
-        {
-            pinMode(brakePin[i], OUTPUT);
-        }
+        pinMode(brakePin[i], OUTPUT);    
     }
-#elif defined(STEP400_PROTO_R4)
 #elif defined(STEP800_R1)
     pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
     digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, HIGH);

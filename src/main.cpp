@@ -336,7 +336,11 @@ void updateServo(uint32_t currentTimeMicros)
             if (isServoMode[i])
             {
                 int32_t error = targetPosition[i] - stepper[i].getPos();
-                integral[i] += ((error + eZ1[i]) / 2.0f);
+                if (error > 0x1FFFFFL)
+                    error -= 0x3FFFFFL; // wrap ABS_POS 22bit range.
+                else if (error < -0x1FFFFFL)
+                    error += 0x3FFFFFL;
+                integral[i] += (((float)error + eZ1[i]) / 2.0f);
                 if (integral[i] > 1500.0f)
                     integral[i] = 1500.0f;
                 else if (integral[i] < -1500.0f)
@@ -345,14 +349,11 @@ void updateServo(uint32_t currentTimeMicros)
                 {
                     double diff = error - eZ1[i];
 
-                    spd = error * kP[i] + integral[i] * kI[i] + diff * kD[i];
+                    spd = (float)error * kP[i] + integral[i] * kI[i] + diff * kD[i];
                 }
                 eZ2[i] = eZ1[i];
                 eZ1[i] = error;
                 float absSpd = fabsf(spd);
-                // if (absSpd < 1.0f) {
-                //     spd = 0.0;
-                // }
                 bool dir = (spd > 0.0f);
                 if (homeSwState[i])
                 {

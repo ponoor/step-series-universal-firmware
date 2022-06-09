@@ -126,7 +126,7 @@ void checkStatus()
             busy[i] = t;
             if (reportBUSY[i])
                 sendTwoData("/busy", i + MOTOR_ID_FIRST, (int32_t)t);
-            
+
             if (!busy[i])
             {
                 if (busyClearWaitStatus[i] != NONE)
@@ -341,7 +341,7 @@ void updateServo(uint32_t currentTimeMicros)
                     integral[i] = 1500.0f;
                 else if (integral[i] < -1500.0f)
                     integral[i] = -1500.0f;
-                if (fabsf(error) > position_tolerance)
+                if (labs(error) > position_tolerance)
                 {
                     double diff = error - eZ1[i];
 
@@ -353,7 +353,18 @@ void updateServo(uint32_t currentTimeMicros)
                 // if (absSpd < 1.0f) {
                 //     spd = 0.0;
                 // }
-                stepper[i].run((spd > 0.0f), absSpd);
+                bool dir = (spd > 0.0f);
+                if (homeSwState[i])
+                {
+                    if (bProhibitMotionOnHomeSw[i] && (homingDirection[i] == dir))
+                        absSpd = 0.0f;
+                }
+                else if (limitSwState[i])
+                {
+                    if (bProhibitMotionOnLimitSw[i] && (homingDirection[i] != dir))
+                        absSpd = 0.0f;
+                }
+                stepper[i].run(dir, absSpd);
             }
         }
         lastServoUpdateTime = currentTimeMicros;

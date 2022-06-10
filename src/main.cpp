@@ -184,6 +184,10 @@ void checkStatus()
         t = (status & STATUS_SW_EVN) > 0;
         if (t)
         {
+            // This action is also done in the driver chip but required for the servo mode.
+            if (isServoMode[i]&&(!homeSwMode[i]))
+                stepper[i].hardStop();
+            // Trigger the next sequence of the homing.
             if (homingStatus[i] == HOMING_GOUNTIL)
             {
                 if (bHoming[i])
@@ -326,7 +330,7 @@ void updateServo(uint32_t currentTimeMicros)
 {
     static uint32_t lastServoUpdateTime = 0;
     static float eZ1[NUM_OF_MOTOR] = {0.0},
-                 eZ2[NUM_OF_MOTOR] = {0.0},
+                //  eZ2[NUM_OF_MOTOR] = {0.0},
                  integral[NUM_OF_MOTOR] = {0.0};
     float spd = 0.0;
     if ((uint32_t)(currentTimeMicros - lastServoUpdateTime) >= 100)
@@ -351,18 +355,18 @@ void updateServo(uint32_t currentTimeMicros)
 
                     spd = (float)error * kP[i] + integral[i] * kI[i] + diff * kD[i];
                 }
-                eZ2[i] = eZ1[i];
+                // eZ2[i] = eZ1[i];
                 eZ1[i] = error;
                 float absSpd = fabsf(spd);
                 bool dir = (spd > 0.0f);
                 if (homeSwState[i])
                 {
-                    if (bProhibitMotionOnHomeSw[i] && (homingDirection[i] == dir))
+                    if ((bProhibitMotionOnHomeSw[i]||!homeSwMode[i]) && (homingDirection[i] == dir))
                         absSpd = 0.0f;
                 }
                 else if (limitSwState[i])
                 {
-                    if (bProhibitMotionOnLimitSw[i] && (homingDirection[i] != dir))
+                    if ((bProhibitMotionOnLimitSw[i]||!limitSwMode[i]) && (homingDirection[i] != dir))
                         absSpd = 0.0f;
                 }
                 stepper[i].run(dir, absSpd);

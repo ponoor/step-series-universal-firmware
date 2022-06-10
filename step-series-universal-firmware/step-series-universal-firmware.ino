@@ -126,7 +126,7 @@ void checkStatus()
             busy[i] = t;
             if (reportBUSY[i])
                 sendTwoData("/busy", i + MOTOR_ID_FIRST, (int32_t)t);
-            
+
             if (!busy[i])
             {
                 if (busyClearWaitStatus[i] != NONE)
@@ -184,6 +184,10 @@ void checkStatus()
         t = (status & STATUS_SW_EVN) > 0;
         if (t)
         {
+            // This action is also done in the driver chip but required for the servo mode.
+            if (isServoMode[i]&&(!homeSwMode[i]))
+                stepper[i].hardStop();
+            // Trigger the next sequence of the homing.
             if (homingStatus[i] == HOMING_GOUNTIL)
             {
                 if (bHoming[i])
@@ -326,7 +330,7 @@ void updateServo(uint32_t currentTimeMicros)
 {
     static uint32_t lastServoUpdateTime = 0;
     static float eZ1[NUM_OF_MOTOR] = {0.0},
-                 eZ2[NUM_OF_MOTOR] = {0.0},
+                //  eZ2[NUM_OF_MOTOR] = {0.0},
                  integral[NUM_OF_MOTOR] = {0.0};
     float spd = 0.0;
     if ((uint32_t)(currentTimeMicros - lastServoUpdateTime) >= 100)
@@ -336,24 +340,36 @@ void updateServo(uint32_t currentTimeMicros)
             if (isServoMode[i])
             {
                 int32_t error = targetPosition[i] - stepper[i].getPos();
-                integral[i] += ((error + eZ1[i]) / 2.0f);
+                if (error > 0x1FFFFFL)
+                    error -= 0x3FFFFFL; // wrap ABS_POS 22bit range.
+                else if (error < -0x1FFFFFL)
+                    error += 0x3FFFFFL;
+                integral[i] += (((float)error + eZ1[i]) / 2.0f);
                 if (integral[i] > 1500.0f)
                     integral[i] = 1500.0f;
                 else if (integral[i] < -1500.0f)
                     integral[i] = -1500.0f;
-                if (fabsf(error) > position_tolerance)
+                if (labs(error) > position_tolerance)
                 {
                     double diff = error - eZ1[i];
 
-                    spd = error * kP[i] + integral[i] * kI[i] + diff * kD[i];
+                    spd = (float)error * kP[i] + integral[i] * kI[i] + diff * kD[i];
                 }
-                eZ2[i] = eZ1[i];
+                // eZ2[i] = eZ1[i];
                 eZ1[i] = error;
                 float absSpd = fabsf(spd);
-                // if (absSpd < 1.0f) {
-                //     spd = 0.0;
-                // }
-                stepper[i].run((spd > 0.0f), absSpd);
+                bool dir = (spd > 0.0f);
+                if (homeSwState[i])
+                {
+                    if ((bProhibitMotionOnHomeSw[i]||!homeSwMode[i]) && (homingDirection[i] == dir))
+                        absSpd = 0.0f;
+                }
+                else if (limitSwState[i])
+                {
+                    if ((bProhibitMotionOnLimitSw[i]||!limitSwMode[i]) && (homingDirection[i] != dir))
+                        absSpd = 0.0f;
+                }
+                stepper[i].run(dir, absSpd);
             }
         }
         lastServoUpdateTime = currentTimeMicros;

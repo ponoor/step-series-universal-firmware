@@ -364,11 +364,13 @@ void updateServo(uint32_t currentTimeMicros)
                     if ((bProhibitMotionOnHomeSw[i]||!homeSwMode[i]) && (homingDirection[i] == dir))
                         absSpd = 0.0f;
                 }
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
                 else if (limitSwState[i])
                 {
                     if ((bProhibitMotionOnLimitSw[i]||!limitSwMode[i]) && (homingDirection[i] != dir))
                         absSpd = 0.0f;
                 }
+#endif
                 stepper[i].run(dir, absSpd);
             }
         }

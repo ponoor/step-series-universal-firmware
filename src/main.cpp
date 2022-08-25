@@ -179,7 +179,7 @@ void checkStatus()
             homeSwState[i] = t;
             if (reportHomeSwStatus[i])
                 getHomeSw(i);
-            if (bProhibitMotionOnHomeSw[i] && homeSwState[i])
+            if (bProhibitMotionOnHomeSw[i] && homeSwState[i] && (dir[i] == homingDirection[i]))
             {
                 stepper[i].hardStop();
             }

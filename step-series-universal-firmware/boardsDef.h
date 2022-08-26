@@ -25,15 +25,15 @@
 // Prototypes
 // #define STEP400_PROTO_R4 // rev.2020-04-06
 // #define STEP400_PROTO_R3 // rev.2020-01-07
-// #define STEP800_PROTO_R3
-// #define STEP800_PROTO_R1
+// #define STEP800_PROTO_R3 // rev.2020-03-02
+// #define STEP800_PROTO_R1 // rev.2016-12-12
 
 // Uncomment this line if the board is M0 with Zero bootloader (Swap D2 and D4) 
 // Only work for STEP100/STEP200
 // #define MZERO_WITH_ZERO_BOOTLOADER
 
 // Common version number
-const uint8_t firmwareVersion[3] = {1,2,1};
+const uint8_t firmwareVersion[3] = {1,2,2};
 
 #ifdef STEP400_R1
     #define PRODUCT_NAME    "STEP400"

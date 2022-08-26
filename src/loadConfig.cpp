@@ -58,20 +58,20 @@ void loadConfig() {
         gateway[i] = network_gateway[i] | gateway[i];
         subnet[i] = network_subnet[i] | subnet[i];
     }
-    isMyIpAddId = (int)network["isMyIpAddId"] | true;
+    isMyIpAddId = network["isMyIpAddId"] | true;
     inPort = network["inPort"] | 50000;
     outPort = network["outPort"] | 50100;
     outPort_from_config = outPort;
-    isOutPortAddId = (int)network["isOutPortAddId"] | true;
+    isOutPortAddId = network["isOutPortAddId"] | true;
     JsonArray network_mac = network["mac"];
     for (i = 0; i < 6; i++) {
         mac[i] = network_mac[i] | mac[i];
         mac_from_config[i] = mac[i];
     }
-    isMacAddId = (int)network["isMacAddId"] | true;
-    bootedMsgEnable = (int)network["bootedMsgEnable"] | true;
-    isDestIpSet = (int)network["canSendMsgBeforeDestIp"] | false;
-    reportErrors = (int)network["reportError"] | true;
+    isMacAddId = network["isMacAddId"] | true;
+    bootedMsgEnable = network["bootedMsgEnable"] | true;
+    isDestIpSet = network["canSendMsgBeforeDestIp"] | false;
+    reportErrors = network["reportError"] | true;
 
     // Alarm and Report
     JsonObject alarmAndReport = doc["alarmAndReport"];
@@ -93,20 +93,20 @@ void loadConfig() {
     JsonArray alarmAndReport_reportPositionInterval = alarmAndReport["reportPositionInterval"];
     for (i = 0; i < NUM_OF_MOTOR; i++)
     {
-        reportBUSY[i] = (int)alarmAndReport_reportBUSY[i] | false;
-        reportHiZ[i] = (int)alarmAndReport_reportHiZ[i] | false;
-        reportHomeSwStatus[i] = (int)alarmAndReport_reportHomeSwStatus[i] | false;
+        reportBUSY[i] = alarmAndReport_reportBUSY[i] | false;
+        reportHiZ[i] = alarmAndReport_reportHiZ[i] | false;
+        reportHomeSwStatus[i] = alarmAndReport_reportHomeSwStatus[i] | false;
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-        reportLimitSwStatus[i] = (int)alarmAndReport_reportLimitSwStatus[i] | false;
+        reportLimitSwStatus[i] = alarmAndReport_reportLimitSwStatus[i] | false;
 #endif
-        reportDir[i] = (int)alarmAndReport_reportDir[i] | false;
-        reportMotorStatus[i] = (int)alarmAndReport_reportMotorStatus[i] | false;
-        reportSwEvn[i] = (int)alarmAndReport_reportSwEvn[i] | false;
-        reportUVLO[i] = (int)alarmAndReport_reportUVLO[i] | true;
-        reportThermalStatus[i] = (int)alarmAndReport_reportThermalStatus[i] | true;
-        reportOCD[i] = (int)alarmAndReport_reportOCD[i] | true;
-        reportStall[i] = (int)alarmAndReport_reportStall[i] | false;
-        reportPositionInterval[i] = (int)alarmAndReport_reportPositionInterval[i] | 0;
+        reportDir[i] = alarmAndReport_reportDir[i] | false;
+        reportMotorStatus[i] = alarmAndReport_reportMotorStatus[i] | false;
+        reportSwEvn[i] = alarmAndReport_reportSwEvn[i] | false;
+        reportUVLO[i] = alarmAndReport_reportUVLO[i] | true;
+        reportThermalStatus[i] = alarmAndReport_reportThermalStatus[i] | true;
+        reportOCD[i] = alarmAndReport_reportOCD[i] | true;
+        reportStall[i] = alarmAndReport_reportStall[i] | false;
+        reportPositionInterval[i] = alarmAndReport_reportPositionInterval[i] | 0;
         reportPosition[i] = reportPositionInterval[i] > 0;
 #ifdef DRIVER_POWERSTEP01
         overCurrentThreshold[i] = alarmAndReport_OCThreshold[i] | 15; // PowerSTEP01:Max31. 15=5A
@@ -150,16 +150,16 @@ void loadConfig() {
     uint16_t slewRateVal[3] = { SR_180V_us, SR_290V_us, SR_530V_us };
 #endif
     for (i = 0; i < NUM_OF_MOTOR; i++) {
-        bHomingAtStartup[i] = (int)driverSettings_homingAtStartup[i] | false;
-        homingDirection[i] = (int)driverSettings_homingDirection[i] | REV;
+        bHomingAtStartup[i] = driverSettings_homingAtStartup[i] | false;
+        homingDirection[i] = driverSettings_homingDirection[i] | REV;
         homingSpeed[i] = driverSettings_homingSpeed[i] | 50.0;
-        homeSwMode[i] = (int)driverSettings_homeSwMode[i] | true; // true: SW_USER, false: SW_HARDSTOP
-        bProhibitMotionOnHomeSw[i] = (int)driverSettings_prohibitMotionOnHomeSw[i] | false;
+        homeSwMode[i] = driverSettings_homeSwMode[i] | true; // true: SW_USER, false: SW_HARDSTOP
+        bProhibitMotionOnHomeSw[i] = driverSettings_prohibitMotionOnHomeSw[i] | false;
         homingStatus[i] = 0;
         bHoming[i] = false;
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-        limitSwMode[i] = (int)driverSettings_limitSwMode[i] | true;
-        bProhibitMotionOnLimitSw[i] = (int)driverSettings_prohibitMotionOnLimitSw[i] | false;
+        limitSwMode[i] = driverSettings_limitSwMode[i] | true;
+        bProhibitMotionOnLimitSw[i] = driverSettings_prohibitMotionOnLimitSw[i] | false;
 #endif
         goUntilTimeout[i] = driverSettings_goUntilTimeout[i] | 10000;
         releaseSwTimeout[i] = driverSettings_releaseSwTimeout[i] | 10000;
@@ -172,7 +172,7 @@ void loadConfig() {
 #endif
         slewRate[i] = slewRateVal[slewRateNum[i]];
 #ifdef HAVE_BRAKE
-        electromagnetBrakeEnable[i] = (int)driverSettings_electromagnetBrakeEnable[i] | false;
+        electromagnetBrakeEnable[i] = driverSettings_electromagnetBrakeEnable[i] | false;
         brakeStatus[i] = 0;
         bBrakeDecWaiting[i] = false;
         electromagnetBrakeEnable[i] = false;

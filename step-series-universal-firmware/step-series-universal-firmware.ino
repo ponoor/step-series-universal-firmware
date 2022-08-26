@@ -179,6 +179,10 @@ void checkStatus()
             homeSwState[i] = t;
             if (reportHomeSwStatus[i])
                 getHomeSw(i);
+            if (bProhibitMotionOnHomeSw[i] && homeSwState[i] && (dir[i] == homingDirection[i]))
+            {
+                stepper[i].hardStop();
+            }
         }
         // SW_EVN, active high, latched
         t = (status & STATUS_SW_EVN) > 0;

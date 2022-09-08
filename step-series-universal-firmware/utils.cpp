@@ -183,18 +183,19 @@ void resetMotorDriver(uint8_t deviceID) {
 void initEthernet() {
     Udp.stop();
 #ifdef W5500_RESET_PIN
-    pinMode(W5500_RESET_PIN, OUTPUT);
-    digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_OPERATION_STATE);
-    digitalWrite(W5500_RESET_PIN, !W5500_RESET_PIN_OPERATION_STATE);
+    pinMode(PIN_W5500_RESET, OUTPUT);
+    digitalWrite(PIN_W5500_RESET, W5500_RESET_PIN_OPERATION_STATE);
+    digitalWrite(PIN_W5500_RESET, !W5500_RESET_PIN_OPERATION_STATE);
     digitalWrite(ledPin, HIGH);
     delay(10); // This delay is necessary to refresh the network configration.
-    digitalWrite(W5500_RESET_PIN, W5500_RESET_PIN_OPERATION_STATE);
+    digitalWrite(PIN_W5500_RESET, W5500_RESET_PIN_OPERATION_STATE);
     digitalWrite(ledPin, LOW);
     delay(1);
 #endif
     if ( isMyIpAddId ) myIp[3] = myIp_from_config[3] + myId;
     if ( isMacAddId ) mac[5] = mac_from_config[5] + myId;
     if ( isOutPortAddId ) outPort = outPort_from_config + myId;
+    Ethernet.init(PIN_W5500_CS);
     Ethernet.begin(mac, myIp, dns, gateway, subnet);
     Udp.begin(inPort);
     p("New IP: %d.%d.%d.%d\n", myIp[0], myIp[1], myIp[2], myIp[3]);

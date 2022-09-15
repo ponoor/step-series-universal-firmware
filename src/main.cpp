@@ -46,9 +46,9 @@ void setup()
     pinMode(ledPin, OUTPUT);
 
 #ifdef HAVE_SD
-    pinMode(SD_CS_PIN, OUTPUT);
+    pinMode(PIN_SD_CS, OUTPUT);
 #ifdef SD_DETECT_PIN
-    pinMode(SD_DETECT_PIN, INPUT_PULLUP);
+    pinMode(PIN_SD_DETECT, INPUT_PULLUP);
 #endif
 #endif
     pinMode(PIN_DRIVER_CS, OUTPUT);

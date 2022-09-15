@@ -12,10 +12,10 @@ void loadConfig() {
     DynamicJsonDocument doc(8192);
 #else
     #ifdef SD_DETECT_PIN
-    if (digitalRead(SD_DETECT_PIN) == LOW)
+    if (digitalRead(PIN_SD_DETECT) == LOW)
     #endif
     {
-        sdInitializeSucceeded = SD.begin(SD_CS_PIN);
+        sdInitializeSucceeded = SD.begin(PIN_SD_CS);
     }
     File file = SD.open(filename);
     configFileOpenSucceeded = (file != false);

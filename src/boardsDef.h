@@ -33,7 +33,7 @@
 // #define MZERO_WITH_ZERO_BOOTLOADER
 
 // Common version number
-const uint8_t firmwareVersion[3] = {1,2,2};
+const uint8_t firmwareVersion[3] = {1,2,3};
 
 #ifdef STEP400_R1
     #define PRODUCT_NAME    "STEP400"
@@ -53,9 +53,9 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     // pins
     #define ledPin 13u
     const uint8_t dipSwPin[8] = { 7u,30u,A5,31u,2u,9u,3u,0u };
-    #define SD_CS_PIN	4u
+    #define PIN_SD_CS	4u
     const uint8_t brakePin[4] = { A1,8u,5u,1u };
-    #define SD_DETECT_PIN   A4
+    #define PIN_SD_DETECT   A4
     #define PIN_DRIVER_MISO 6u	// D6 /SERCOM3/PAD[2] miso
     #define PIN_DRIVER_MOSI 11u	// D11/SERCOM3/PAD[0] mosi
     #define PIN_DRIVER_SCK	12u	// D12/SERCOM3/PAD[3] sck
@@ -66,7 +66,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_2
     #define PIN_DRIVER_CS   A0
     #define PIN_DRIVER_RESET A2
-    #define W5500_RESET_PIN A3
+    #define PIN_W5500_RESET A3
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM sercom3
 
 #elif defined(STEP400_PROTO_R4)
@@ -86,8 +87,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define ledPin 13u
     const uint8_t dipSwPin[8] = { A5,SCL,7u,SDA,2u,9u,3u,0u }; // Prototype_r4
     const uint8_t limitSwPin[4] = { 1u,5u,8u,A1 };
-    #define SD_CS_PIN	4u
-    #define SD_DETECT_PIN   A4
+    #define PIN_SD_CS	4u
+    #define PIN_SD_DETECT   A4
     #define PIN_DRIVER_MISO 6u	// D6 /SERCOM3/PAD[2] miso
     #define PIN_DRIVER_MOSI 11u	// D11/SERCOM3/PAD[0] mosi
     #define PIN_DRIVER_SCK	12u	// D12/SERCOM3/PAD[3] sck
@@ -98,8 +99,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_2
     #define PIN_DRIVER_CS   A0
     #define PIN_DRIVER_RESET    A2
-    #define W5500_RESET_PIN A3
-
+    #define PIN_W5500_RESET A3
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM sercom3
 #elif defined(STEP400_PROTO_R3)
     #define PRODUCT_NAME    "STEP400"
@@ -118,8 +119,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define ledPin 13u
     const uint8_t dipSwPin[8] = { A5,SCL,7u,SDA,2u,9u,3u,0u }; // Prototype_r4
     const uint8_t limitSwPin[4] = { 1u,5u,8u,A1 };
-    #define SD_CS_PIN	4u
-    #define SD_DETECT_PIN   A4
+    #define PIN_SD_CS	4u
+    #define PIN_SD_DETECT   A4
     #define PIN_DRIVER_MISO 6u	// D6 /SERCOM3/PAD[2] miso
     #define PIN_DRIVER_MOSI 11u	// D11/SERCOM3/PAD[0] mosi
     #define PIN_DRIVER_SCK	12u	// D12/SERCOM3/PAD[3] sck
@@ -130,8 +131,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_2
     #define PIN_DRIVER_CS   A0
     #define PIN_DRIVER_RESET    A2
-    #define W5500_RESET_PIN A3
-
+    #define PIN_W5500_RESET A3
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM sercom3
 #elif defined(STEP800_R1)
     #define PRODUCT_NAME    "STEP800"
@@ -147,8 +148,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
 
     #define ledPin 13u
-    #define SD_CS_PIN	4u
-    #define SD_DETECT_PIN   A4
+    #define PIN_SD_CS	4u
+    #define PIN_SD_DETECT   A4
     #define PIN_DRIVER_MISO 6u	// D6 /SERCOM3/PAD[2] miso
     #define PIN_DRIVER_MOSI 11u	// D11/SERCOM3/PAD[0] mosi
     #define PIN_DRIVER_SCK	12u	// D12/SERCOM3/PAD[3] sck
@@ -159,8 +160,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_2
     #define PIN_DRIVER_CS   A0
     #define PIN_DRIVER_RESET    A2
-    #define W5500_RESET_PIN A3
-
+    #define PIN_W5500_RESET A3
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM   sercom3
 
     #define PIN_DIPSW_MISO  3u
@@ -191,8 +192,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define W5500_RESET_PIN_OPERATION_STATE    HIGH // HIGH: Operation, LOW: RESET
 
     #define ledPin 13u
-    #define SD_CS_PIN	4u
-    #define SD_DETECT_PIN   A4
+    #define PIN_SD_CS	4u
+    #define PIN_SD_DETECT   A4
     #define PIN_DRIVER_MISO 6u	// D6 /SERCOM3/PAD[2] miso
     #define PIN_DRIVER_MOSI 11u	// D11/SERCOM3/PAD[0] mosi
     #define PIN_DRIVER_SCK	12u	// D12/SERCOM3/PAD[3] sck
@@ -203,8 +204,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_2
     #define PIN_DRIVER_CS   A0
     #define PIN_DRIVER_RESET    A2
-    #define W5500_RESET_PIN A3
-
+    #define PIN_W5500_RESET A3
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM   sercom3
 
     #define PIN_DIPSW_MISO  3u
@@ -243,8 +244,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_3
     #define PIN_DRIVER_CS   9u
     #define PIN_DRIVER_RESET    A5
-    #define W5500_RESET_PIN 8u
-
+    #define PIN_W5500_RESET 8u
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM   sercom1
 
     #define PIN_DIPSW_MISO  A3
@@ -266,11 +267,11 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     // pins
     #define ledPin 3u
 #ifdef MZERO_WITH_ZERO_BOOTLOADER
-    #define SD_CS_PIN   2u
+    #define PIN_SD_CS   2u
 #else
-    #define SD_CS_PIN	4u
+    #define PIN_SD_CS	4u
 #endif
-    // #define SD_DETECT_PIN   A4
+    // #define PIN_SD_DETECT   A4
     #define PIN_DRIVER_MISO 12u	// 
     #define PIN_DRIVER_MOSI 11u	// 
     #define PIN_DRIVER_SCK	13u	// 
@@ -281,8 +282,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_3
     #define PIN_DRIVER_CS   A2
     #define PIN_DRIVER_RESET    8u
-    // #define W5500_RESET_PIN A3
-
+    // #define PIN_W5500_RESET A3
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM sercom1
 
     #define ID  1
@@ -302,11 +303,11 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     // pins
     #define ledPin 3u
 #ifdef MZERO_WITH_ZERO_BOOTLOADER
-    #define SD_CS_PIN   2u
+    #define PIN_SD_CS   2u
 #else
-    #define SD_CS_PIN	4u
+    #define PIN_SD_CS	4u
 #endif
-    // #define SD_DETECT_PIN   A4
+    // #define PIN_SD_DETECT   A4
     #define PIN_DRIVER_MISO 12u	// 
     #define PIN_DRIVER_MOSI 11u	// 
     #define PIN_DRIVER_SCK	13u	// 
@@ -317,8 +318,8 @@ const uint8_t firmwareVersion[3] = {1,2,2};
     #define PAD_DRIVER_RX   SERCOM_RX_PAD_3
     #define PIN_DRIVER_CS   A2
     #define PIN_DRIVER_RESET    8u
-    // #define W5500_RESET_PIN A3
-
+    // #define PIN_W5500_RESET A3
+    #define PIN_W5500_CS    10u
     #define DRIVER_SERCOM sercom1
 
     #define ID  1

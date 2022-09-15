@@ -276,7 +276,7 @@ void printCurrentState() {
 				s = "Bridge shutdown";
 				break;
 			case 3:
-				s = "Device shutsown";
+				s = "Device shutdown";
 				break;
 			default:
 				break;
@@ -284,7 +284,7 @@ void printCurrentState() {
 			p("\t  Thermal status : %s\n", s.c_str());
 
 			t = (status[i] & STATUS_OCD) == 0;
-			showBoolResult("\t  OCD (Overcurent detection)", t);
+			showBoolResult("\t  OCD (Overcurrent detection)", t);
 
 #ifdef DRIVER_L6470
         	t = (status[i] & (STATUS_STEP_LOSS_A | STATUS_STEP_LOSS_B)) >> 13;
@@ -298,10 +298,10 @@ void printCurrentState() {
 			bool swF = (status[i] & STATUS_SW_F);
 			p("\t  SW_F: %d ", swF);
 			if (swF == 1) {
-				p("-HOME senser input closed.\n");
+				p("-HOME sensor input closed.\n");
 			}
 			else {
-				p("-HOME senser input open.\n");
+				p("-HOME sensor input open.\n");
 			}
 			Watchdog.reset();
 		}

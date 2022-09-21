@@ -182,7 +182,7 @@ void resetMotorDriver(uint8_t deviceID) {
 
 void initEthernet() {
     Udp.stop();
-#ifdef W5500_RESET_PIN
+#ifdef PIN_W5500_RESET
     pinMode(PIN_W5500_RESET, OUTPUT);
     digitalWrite(PIN_W5500_RESET, W5500_RESET_PIN_OPERATION_STATE);
     digitalWrite(PIN_W5500_RESET, !W5500_RESET_PIN_OPERATION_STATE);

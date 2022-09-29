@@ -11,7 +11,7 @@ void loadConfig() {
     configFileParseSucceeded = false;
     DynamicJsonDocument doc(8192);
 #else
-    #ifdef SD_DETECT_PIN
+    #ifdef PIN_SD_DETECT
     if (digitalRead(PIN_SD_DETECT) == LOW)
     #endif
     {

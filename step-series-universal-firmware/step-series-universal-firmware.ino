@@ -23,7 +23,7 @@
 
 const String productName = PRODUCT_NAME;
 const char *firmwareName = FIRMWARE_NAME;
-SPIClass driverSPI(&DRIVER_SERCOM, PIN_DRIVER_MISO, PIN_DRIVER_SCK, PIN_DRIVER_MOSI, PAD_DRIVER_SPI, PAD_DRIVER_RX);
+SPIClassSAMD driverSPI(&DRIVER_SERCOM, PIN_DRIVER_MISO, PIN_DRIVER_SCK, PIN_DRIVER_MOSI, PAD_DRIVER_SPI, PAD_DRIVER_RX);
 
 // Servo mode
 constexpr auto position_tolerance = 0; // steps
@@ -47,7 +47,7 @@ void setup()
 
 #ifdef HAVE_SD
     pinMode(PIN_SD_CS, OUTPUT);
-#ifdef SD_DETECT_PIN
+#ifdef PIN_SD_DETECT
     pinMode(PIN_SD_DETECT, INPUT_PULLUP);
 #endif
 #endif

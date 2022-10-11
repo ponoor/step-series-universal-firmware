@@ -15,7 +15,7 @@
 #include <SPI.h>
 
 // Products
-#define STEP400_R1
+// #define STEP400_R1
 // #define STEP800_R1
 
 // X-Nucleos
@@ -28,6 +28,7 @@
 // #define STEP800_PROTO_R3 // rev.2020-03-02
 // #define STEP800_PROTO_R1 // rev.2016-12-12
 
+#define STEP200_MARDUINO
 // Uncomment this line if the board is M0 with Zero bootloader (Swap D2 and D4) 
 // Only work for STEP100/STEP200
 // #define MZERO_WITH_ZERO_BOOTLOADER
@@ -320,6 +321,43 @@ const uint8_t firmwareVersion[3] = {1,2,5};
     #define PIN_DRIVER_RESET    8u
     // #define PIN_W5500_RESET A3
     #define PIN_W5500_CS    10u
+    #define DRIVER_SERCOM sercom1
+
+    #define ID  1
+
+#elif defined(STEP200_MARDUINO)
+    #define STEP200_R1
+    #define PRODUCT_NAME    "STEP200_MARDUINO"
+    #define FIRMWARE_NAME   "STEP200_R1_UNIVERSAL"
+    const uint8_t applicableConfigVersion[2] = {1,2};
+    #define NUM_OF_MOTOR (2)
+    #define HAVE_SD
+    // #define HAVE_LIMIT_GPIO
+    // #define HAVE_DIP_SW
+    #define DRIVER_L6470
+    #define DRIVER_OSC INT_16MHZ
+    #define DRIVER_RESET_PIN_OPERATION_STATE HIGH
+    #define W5500_RESET_PIN_OPERATION_STATE HIGH // ENABLE: Operation
+    // pins
+    #define ledPin 5u
+    #ifdef MZERO_WITH_ZERO_BOOTLOADER
+    #define PIN_SD_CS 2u
+    #else
+    #define PIN_SD_CS 4u
+    #endif
+    // #define PIN_SD_DETECT A4
+    #define PIN_DRIVER_MISO 12u //
+    #define PIN_DRIVER_MOSI 11u //
+    #define PIN_DRIVER_SCK 13u //
+    #define EPIO_DRIVER_MISO PIO_SERCOM
+    #define EPIO_DRIVER_MOSI PIO_SERCOM
+    #define EPIO_DRIVER_SCK PIO_SERCOM
+    #define PAD_DRIVER_SPI SPI_PAD_0_SCK_1
+    #define PAD_DRIVER_RX SERCOM_RX_PAD_3
+    #define PIN_DRIVER_CS A2
+    #define PIN_DRIVER_RESET 8u
+    #define PIN_W5500_RESET 9u
+    #define PIN_W5500_CS 3u
     #define DRIVER_SERCOM sercom1
 
     #define ID  1

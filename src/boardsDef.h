@@ -354,7 +354,7 @@ const uint8_t firmwareVersion[3] = {1,2,5};
     #define EPIO_DRIVER_SCK PIO_SERCOM
     #define PAD_DRIVER_SPI SPI_PAD_0_SCK_1
     #define PAD_DRIVER_RX SERCOM_RX_PAD_3
-    #define PIN_DRIVER_CS A2
+    #define PIN_DRIVER_CS A3
     #define PIN_DRIVER_RESET 8u
     #define PIN_W5500_RESET 9u
     #define PIN_W5500_CS 3u

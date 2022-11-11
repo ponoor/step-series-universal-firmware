@@ -16,9 +16,9 @@
 #ifdef STEP400_R1
 #elif defined(STEP400_PROTO_R4)
 #elif defined(STEP800_R1)
-extern SPIClass shiftRegisterSPI;
+extern SPIClassSAMD shiftRegisterSPI;
 #elif defined(STEP800_PROTO_R3)
-extern SPIClass shiftRegisterSPI;
+extern SPIClassSAMD shiftRegisterSPI;
 #elif defined(STEP800_PROTO_R1)
 #elif defined(STEP100_R1)
 #elif defined(STEP200_R1)

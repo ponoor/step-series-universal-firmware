@@ -2333,12 +2333,8 @@ void getMark(OSCMessage &msg, int addrOffset)
     }
 }
 
-void run(OSCMessage &msg, int addrOffset)
+void run(uint8_t motorID, float stepsPerSec, float absSpeed, bool dir)
 {
-    uint8_t motorID = getInt(msg, 0);
-    float stepsPerSec = getFloat(msg, 1);
-    float absSpeed = fabsf(stepsPerSec);
-    boolean dir = stepsPerSec > 0.0f;
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -2358,12 +2354,18 @@ void run(OSCMessage &msg, int addrOffset)
         }
     }
 }
-
-void runRaw(OSCMessage &msg, int addrOffset)
+void run(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    int32_t speed = getInt(msg, 1);
-    boolean dir = speed > 0;
+    float stepsPerSec = getFloat(msg, 1);
+    float absSpeed = fabsf(stepsPerSec);
+    boolean dir = stepsPerSec > 0.0f;
+    run(motorID, stepsPerSec, absSpeed, dir);
+}
+
+void runRaw(uint8_t motorID, int32_t speed)
+{
+    bool dir = speed > 0;
     speed = abs(speed);
     if (isCorrectMotorId(motorID))
     {
@@ -2385,11 +2387,16 @@ void runRaw(OSCMessage &msg, int addrOffset)
     }
 }
 
-void move(OSCMessage &msg, int addrOffset)
+void runRaw(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    int32_t steps = getInt(msg, 1);
-    boolean newDir = steps > 0;
+    int32_t speed = getInt(msg, 1);
+    runRaw(motorID, speed);
+}
+
+void move(uint8_t motorID, int32_t steps)
+{
+    bool newDir = steps > 0;
     steps = abs(steps);
     if (isCorrectMotorId(motorID))
     {
@@ -2410,6 +2417,12 @@ void move(OSCMessage &msg, int addrOffset)
         }
     }
 }
+void move(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID = getInt(msg, 0);
+    int32_t steps = getInt(msg, 1);
+    move(motorID, steps);
+}
 
 // Try to clear BUSY flag and return TRUE if succeeded.
 // GOTO and GOTO_DIR is only executable when not in BUSY state
@@ -2428,10 +2441,8 @@ bool clearBusyForGoTo(uint8_t motorId)
         return true;
     }
 }
-void goTo(OSCMessage &msg, int addrOffset)
+void goTo(uint8_t motorID, int32_t pos)
 {
-    uint8_t motorID = getInt(msg, 0);
-    int32_t pos = getInt(msg, 1);
     bool newDir = 0;
     if (isCorrectMotorId(motorID))
     {
@@ -2466,11 +2477,15 @@ void goTo(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void goToDir(OSCMessage &msg, int addrOffset)
+void goTo(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
-    boolean dir = getBool(msg, 1);
-    int32_t pos = getInt(msg, 2);
+    int32_t pos = getInt(msg, 1);
+    goTo(motorID, pos);
+}
+
+void goToDir(uint8_t motorID, bool dir, int32_t pos)
+{
     if (isCorrectMotorId(motorID))
     {
         uint8_t motorId = motorID - MOTOR_ID_FIRST;
@@ -2503,6 +2518,13 @@ void goToDir(OSCMessage &msg, int addrOffset)
             }
         }
     }
+}
+void goToDir(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID = getInt(msg, 0);
+    boolean dir = getBool(msg, 1);
+    int32_t pos = getInt(msg, 2);
+    goToDir(motorID, dir, pos);
 }
 
 void homing(uint8_t motorId)
@@ -2751,10 +2773,8 @@ void resetPos(OSCMessage &msg, int addrOffset)
         }
     }
 }
-
-void softStop(OSCMessage &msg, int addrOffset)
+void softStop(uint8_t motorID)
 {
-    uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
         uint8_t motorId = motorID - MOTOR_ID_FIRST;
@@ -2772,9 +2792,13 @@ void softStop(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void hardStop(OSCMessage &msg, int addrOffset)
+void softStop(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
+    softStop(motorID);
+}
+void hardStop(uint8_t motorID)
+{
     if (isCorrectMotorId(motorID))
     {
         uint8_t motorId = motorID - MOTOR_ID_FIRST;
@@ -2792,8 +2816,13 @@ void hardStop(OSCMessage &msg, int addrOffset)
         }
     }
 }
+void hardStop(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID = getInt(msg, 0);
+    hardStop(motorID);
+}
 
-void softHiZ(uint8_t motorId)
+void executeSoftHiZ(uint8_t motorId)
 {
     isServoMode[motorId] = false;
     clearHomingStatus(motorId);
@@ -2816,25 +2845,28 @@ void softHiZ(uint8_t motorId)
         stepper[motorId].softHiZ();
     }
 }
-void softHiZ(OSCMessage &msg, int addrOffset)
+void softHiZ(uint8_t motorID)
 {
-    uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
-        softHiZ(motorID);
+        executeSoftHiZ(motorID);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            softHiZ(i);
+            executeSoftHiZ(i);
         }
     }
 }
-void hardHiZ(OSCMessage &msg, int addrOffset)
+void softHiZ(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
+    softHiZ(motorID);
+}
+void hardHiZ(uint8_t motorID)
+{
     if (isCorrectMotorId(motorID))
     {
         uint8_t motorId = motorID - MOTOR_ID_FIRST;
@@ -2870,6 +2902,11 @@ void hardHiZ(OSCMessage &msg, int addrOffset)
             }
         }
     }
+}
+void hardHiZ(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID = getInt(msg, 0);
+    hardHiZ(motorID);
 }
 
 #ifdef HAVE_BRAKE

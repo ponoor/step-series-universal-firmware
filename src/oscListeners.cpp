@@ -28,6 +28,17 @@ void OSCMsgReceive()
             bMsgRouted |= msgIN.route("/run", run);
             bMsgRouted |= msgIN.route("/runRaw", runRaw);
 
+            // combined
+            bMsgRouted |= msgIN.route("/combine/move", combinedMove);
+            bMsgRouted |= msgIN.route("/combine/goTo", combinedGoTo);
+            bMsgRouted |= msgIN.route("/combine/goToDir", combinedGoToDir);
+            bMsgRouted |= msgIN.route("/combine/run", combinedRun);
+            bMsgRouted |= msgIN.route("/combine/runRaw", combinedRunRaw);
+            bMsgRouted |= msgIN.route("/combine/hardHiZ", combinedHardHiZ);
+            bMsgRouted |= msgIN.route("/combine/hardStop", combinedHardStop);
+            bMsgRouted |= msgIN.route("/combine/softHiZ", combinedSoftHiZ);
+            bMsgRouted |= msgIN.route("/combine/softStop", combinedSoftStop);
+
             // motion
             bMsgRouted |= msgIN.route("/move", move);
             bMsgRouted |= msgIN.route("/goTo", goTo);
@@ -2333,7 +2344,7 @@ void getMark(OSCMessage &msg, int addrOffset)
     }
 }
 
-void run(uint8_t motorID, float stepsPerSec, float absSpeed, bool dir)
+void run(uint8_t motorID, float absSpeed, bool dir)
 {
     if (isCorrectMotorId(motorID))
     {
@@ -2360,13 +2371,22 @@ void run(OSCMessage &msg, int addrOffset)
     float stepsPerSec = getFloat(msg, 1);
     float absSpeed = fabsf(stepsPerSec);
     boolean dir = stepsPerSec > 0.0f;
-    run(motorID, stepsPerSec, absSpeed, dir);
+    run(motorID, absSpeed, dir);
 }
 
-void runRaw(uint8_t motorID, int32_t speed)
+void combinedRun(OSCMessage &msg, int addrOffset)
 {
-    bool dir = speed > 0;
-    speed = abs(speed);
+    uint8_t motorID[2];
+    motorID[0] = getInt(msg, 0);
+    motorID[1] = getInt(msg, 1);
+    float stepsPerSec = getFloat(msg, 2);
+    float absSpeed = fabsf(stepsPerSec);
+    boolean dir = stepsPerSec > 0.0f;
+    run(motorID[0], absSpeed, dir);
+    run(motorID[1], absSpeed, dir);
+}
+void runRaw(uint8_t motorID, bool dir, int32_t speed)
+{
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -2391,13 +2411,25 @@ void runRaw(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t speed = getInt(msg, 1);
-    runRaw(motorID, speed);
+    bool dir = speed > 0;
+    speed = abs(speed);
+
+    runRaw(motorID, dir, speed);
+}
+void combinedRunRaw(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2];
+    motorID[0] = getInt(msg, 0);
+    motorID[1] = getInt(msg, 1);
+    int32_t speed = getInt(msg, 2);
+    bool dir = speed > 0;
+    speed = abs(speed);
+    runRaw(motorID[0], dir, speed);
+    runRaw(motorID[1], dir, speed);
 }
 
-void move(uint8_t motorID, int32_t steps)
+void move(uint8_t motorID, bool newDir, int32_t steps)
 {
-    bool newDir = steps > 0;
-    steps = abs(steps);
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -2421,9 +2453,21 @@ void move(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t steps = getInt(msg, 1);
-    move(motorID, steps);
+    bool newDir = steps > 0;
+    steps = abs(steps);
+    move(motorID, newDir, steps);
 }
 
+void combinedMove(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    int32_t steps = getInt(msg, 2);
+    bool newDir = steps > 0;
+    steps = abs(steps);
+    move(motorID[0], newDir, steps);
+    move(motorID[1], newDir, steps);
+
+}
 // Try to clear BUSY flag and return TRUE if succeeded.
 // GOTO and GOTO_DIR is only executable when not in BUSY state
 // So clear the BUSY with RUN command first.
@@ -2483,6 +2527,13 @@ void goTo(OSCMessage &msg, int addrOffset)
     int32_t pos = getInt(msg, 1);
     goTo(motorID, pos);
 }
+void combinedGoTo(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    int32_t pos = getInt(msg, 2);
+    goTo(motorID[0], pos);
+    goTo(motorID[1], pos);
+}
 
 void goToDir(uint8_t motorID, bool dir, int32_t pos)
 {
@@ -2526,7 +2577,14 @@ void goToDir(OSCMessage &msg, int addrOffset)
     int32_t pos = getInt(msg, 2);
     goToDir(motorID, dir, pos);
 }
-
+void combinedGoToDir(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    boolean dir = getBool(msg, 2);
+    int32_t pos = getInt(msg, 3);
+    goToDir(motorID[0], dir, pos);
+    goToDir(motorID[1], dir, pos);
+}
 void homing(uint8_t motorId)
 {
     if (bHoming[motorId])
@@ -2797,6 +2855,12 @@ void softStop(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     softStop(motorID);
 }
+void combinedSoftStop(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    softStop(motorID[0]);
+    softStop(motorID[1]);
+}
 void hardStop(uint8_t motorID)
 {
     if (isCorrectMotorId(motorID))
@@ -2821,7 +2885,13 @@ void hardStop(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     hardStop(motorID);
 }
+void combinedHardStop(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    hardStop(motorID[0]);
+    hardStop(motorID[1]);
 
+}
 void executeSoftHiZ(uint8_t motorId)
 {
     isServoMode[motorId] = false;
@@ -2865,6 +2935,13 @@ void softHiZ(OSCMessage &msg, int addrOffset)
     uint8_t motorID = getInt(msg, 0);
     softHiZ(motorID);
 }
+void combinedSoftHiZ(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    softHiZ(motorID[0]);
+    softHiZ(motorID[1]);
+
+}
 void hardHiZ(uint8_t motorID)
 {
     if (isCorrectMotorId(motorID))
@@ -2907,6 +2984,12 @@ void hardHiZ(OSCMessage &msg, int addrOffset)
 {
     uint8_t motorID = getInt(msg, 0);
     hardHiZ(motorID);
+}
+void combinedHardHiZ(OSCMessage &msg, int addrOffset)
+{
+    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    hardHiZ(motorID[0]);
+    hardHiZ(motorID[1]);
 }
 
 #ifdef HAVE_BRAKE

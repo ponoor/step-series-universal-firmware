@@ -183,6 +183,15 @@ void hardHiZ(OSCMessage& msg, int addrOffset);
 void activate(OSCMessage& msg, int addrOffset);
 void free(OSCMessage& msg, int addrOffset);
 #endif
+void combinedRun(OSCMessage& msg, int addrOffset);
+void combinedRunRaw(OSCMessage& msg, int addrOffset);
+void combinedMove(OSCMessage& msg, int addrOffset);
+void combinedGoTo(OSCMessage& msg, int addrOffset);
+void combinedGoToDir(OSCMessage& msg, int addrOffset);
+void combinedSoftStop(OSCMessage& msg, int addrOffset);
+void combinedHardStop(OSCMessage& msg, int addrOffset);
+void combinedSoftHiZ(OSCMessage& msg, int addrOffset);
+void combinedHardHiZ(OSCMessage& msg, int addrOffset);
 
 // servo_commands_osc_listener
 void setTargetPosition(OSCMessage& msg, int addrOffset);

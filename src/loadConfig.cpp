@@ -17,7 +17,7 @@ void loadConfig() {
     {
         sdInitializeSucceeded = SD.begin(PIN_SD_CS);
     }
-    File file = SD.open(filename);
+    File file = SD.open(filename, FILE_READ);
     configFileOpenSucceeded = (file != false);
     // Allocate a temporary JsonDocument
     // Don't forget to change the capacity to match your requirements.
@@ -29,7 +29,7 @@ void loadConfig() {
     }
     configFileParseSucceeded = (error == DeserializationError::Ok);
     file.close();
-    SD.end();
+    // SD.end();
 #endif
 
     // Information

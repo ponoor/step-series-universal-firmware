@@ -38,11 +38,16 @@ void updatePositionReportList(uint32_t _currentTimeMillis);
 void checkLimitSw();
 #endif
 
+// DEV ArduinoSC
+
+
+
 void setup()
 {
     SerialUSB.begin(9600);
     // while (!SerialUSB); // DEBUG
-
+    for (uint8_t i=0; i<4; i++)
+        pinMode(testPin[i], OUTPUT);
     pinMode(ledPin, OUTPUT);
 
 #ifdef HAVE_SD
@@ -337,8 +342,9 @@ void updateServo(uint32_t currentTimeMicros)
                 //  eZ2[NUM_OF_MOTOR] = {0.0},
                  integral[NUM_OF_MOTOR] = {0.0};
     float spd = 0.0;
-    if ((uint32_t)(currentTimeMicros - lastServoUpdateTime) >= 100)
+    if ((uint32_t)(currentTimeMicros - lastServoUpdateTime) >= 5000)
     {
+        fastDigitalWriteHIGH(testPin[1]);
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             if (isServoMode[i])
@@ -379,18 +385,20 @@ void updateServo(uint32_t currentTimeMicros)
             }
         }
         lastServoUpdateTime = currentTimeMicros;
+        fastDigitalWriteLOW(testPin[1]);
     }
 }
 
 void loop()
 {
     uint32_t
-        currentTimeMillis = millis(),
-        currentTimeMicros = micros();
+        currentTimeMillis = millis();
+        
     static uint32_t lastPollTime = 0;
 
     if ((uint32_t)(currentTimeMillis - lastPollTime) >= STATUS_POLL_PERIOD)
     {
+        fastDigitalWriteHIGH(testPin[0]);
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
         checkLimitSw();
 #endif
@@ -411,6 +419,7 @@ void loop()
         }
         Watchdog.reset();
         lastPollTime = currentTimeMillis;
+        fastDigitalWriteLOW(testPin[0]);
     }
 
     if (SerialUSB.available() > 0)
@@ -422,5 +431,6 @@ void loop()
         sendBootMsg(currentTimeMillis);
     }
     OSCMsgReceive();
+    uint32_t currentTimeMicros = micros();
     updateServo(currentTimeMicros);
 }

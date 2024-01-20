@@ -12,6 +12,7 @@ void OSCMsgReceive()
     int size;
     if ((size = Udp.parsePacket()) > 0)
     {
+        fastDigitalWriteHIGH(testPin[2]);
         while (size--)
             msgIN.fill(Udp.read());
 
@@ -191,6 +192,7 @@ void OSCMsgReceive()
         {
             sendOneDatum("/error/osc", "OscSyntaxError");
         }
+        fastDigitalWriteLOW(testPin[2]);
     }
 }
 

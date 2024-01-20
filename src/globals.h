@@ -27,7 +27,7 @@
 extern const uint8_t firmwareVersion[3]; // defined in boardsDef.h
 extern int8_t loadedConfigVersion[2];
 extern const uint8_t applicableConfigVersion[2]; // defined in boardsDef.h
-#define STATUS_POLL_PERIOD   1 // [ms]
+#define STATUS_POLL_PERIOD   5 // [ms]
 
 
 // Tx, Rx LED

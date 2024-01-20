@@ -14,6 +14,22 @@
 #include <Adafruit_SleepyDog.h>
 #include "globals.h"
 #include "boardsSpecific.h"
+const uint8_t testPin[4] = { 9, 8, A1, 1};
+inline __attribute__((always_inline)) void fastDigitalWriteHIGH(uint32_t ulPin)
+{
+	EPortType port = g_APinDescription[ulPin].ulPort;
+	uint32_t pin = g_APinDescription[ulPin].ulPin;
+	uint32_t pinMask = (1ul << pin);
+	PORT->Group[port].OUTSET.reg = pinMask;
+}
+
+inline __attribute__((always_inline)) void fastDigitalWriteLOW(uint32_t ulPin)
+{
+	EPortType port = g_APinDescription[ulPin].ulPort;
+	uint32_t pin = g_APinDescription[ulPin].ulPin;
+	uint32_t pinMask = (1ul << pin);
+	PORT->Group[port].OUTCLR.reg = pinMask;
+}
 
 char* p_(const __FlashStringHelper* fmt, ...);
 #define p(fmt, ...)	 p_(F(fmt), ##__VA_ARGS__)

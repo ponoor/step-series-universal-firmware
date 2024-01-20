@@ -15,8 +15,8 @@
 #include <SPI.h>
 
 // Products
-#define STEP400_R1
-// #define STEP800_R1
+// #define STEP400_R1
+#define STEP800_R1
 
 // X-Nucleos
 // #define STEP100_R1 // X-NUCLEO-IHM03A1, PowerSTEP01 x1

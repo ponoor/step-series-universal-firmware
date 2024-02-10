@@ -3,7 +3,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include <Ethernet.h>
-#include <OSCMessage.h>         // https://github.com/CNMAT/OSC
+#include <ArduinoOSCEther.h>
 #include <ArduinoJson.h>        //https://arduinojson.org/
 #include <Adafruit_SleepyDog.h> // https://github.com/adafruit/Adafruit_SleepyDog
 
@@ -18,7 +18,6 @@
 #include "boardsSpecific.h"
 #include "utils.h"
 #include "loadConfig.h"
-#include "oscListeners.h"
 #include "diagnosis.h"
 
 const String productName = PRODUCT_NAME;

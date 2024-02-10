@@ -3,7 +3,6 @@
 // 
 
 #include "utils.h"
-#include "oscListeners.h"
 #include <stdarg.h>
 
 char* p_(const __FlashStringHelper* fmt, ...)
@@ -57,60 +56,94 @@ void sendWrongDataTypeError() {
         sendOneDatum(F("/error/osc"),"WrongDataType");
 }
 
-int getInt(OSCMessage &msg, uint8_t offset) 
+int getInt(OscMessage m, size_t offset)
 {
-	int msgVal = 0;
-	if (msg.isFloat(offset))
-	{
-		msgVal = (int) msg.getFloat(offset);
-	}
-	else if (msg.isInt(offset))
-	{
-		msgVal = msg.getInt(offset);
-	}
-    else {
-        sendWrongDataTypeError();
-    }
-	return msgVal;
-}
-
-float getFloat(OSCMessage &msg, uint8_t offset)
-{
-	float msgVal = 0;
-	if (msg.isFloat(offset))
-	{
-		msgVal = msg.getFloat(offset);
-	}
-	else if (msg.isInt(offset))
-	{
-		msgVal = msg.getInt(offset);
-	}
-    else {
-        sendWrongDataTypeError();
-    }
-	return msgVal;
-}
-
-bool getBool(OSCMessage &msg, uint8_t offset)
-{
-    bool msgVal = 0;
-	if (msg.isFloat(offset))
-	{
-		msgVal = msg.getFloat(offset) >= 1.0f;
-	}
-	else if (msg.isInt(offset))
-	{
-		msgVal = msg.getInt(offset) > 0;
-	}
-    else if (msg.isBoolean(offset)) 
+  int t = 0;
+  if (m.isInt32(offset))
+  {
+    t = m.getArgAsInt32(offset);
+  }
+  else if (m.isFloat(offset))
+  {
+    t = m.getArgAsFloat(offset);
+  }
+    else if (m.isDouble(offset))
     {
-        msgVal = msg.getBoolean(offset);
+        t = m.getArgAsDouble(offset);
     }
-    else {
-        sendWrongDataTypeError();
+  else if (m.isBool(offset))
+  {
+    t = m.getArgAsBool(offset);
+  }
+  else if (m.isInt64(offset))
+  {
+    t = m.getArgAsInt64(offset);
+  }
+  else
+  {
+    sendWrongDataTypeError();
+  }
+  return t;
+}
+
+float getFloat(OscMessage m, size_t offset)
+{
+  float t = 0.0f;
+  if (m.isFloat(offset))
+  {
+    t = m.getArgAsFloat(offset);
+  }
+  else if (m.isDouble(offset))
+  {
+    t = m.getArgAsDouble(offset);
+  }
+  else if (m.isInt32(offset))
+  {
+    t = m.getArgAsInt32(offset);
+  }
+  else if (m.isBool(offset))
+  {
+    t = m.getArgAsBool(offset);
+  }
+  else if (m.isInt64(offset))
+  {
+    t = m.getArgAsInt64(offset);
+  }
+  else
+  {
+    sendWrongDataTypeError();
+  }
+  return t;
+}
+
+bool getBool(OscMessage m, size_t offset)
+{
+    bool t = false;
+	if (m.isBool(offset))
+    {
+        t = m.getArgAsBool(offset);
     }
-	return msgVal;
-    
+    else if (m.isInt32(offset))
+    {
+        t = m.getArgAsInt32(offset) > 0;
+    }
+    else if (m.isFloat(offset))
+    {
+        t = m.getArgAsFloat(offset) > 0.0f;
+    }
+    else if (m.isInt64(offset))
+    {
+        t = m.getArgAsInt64(offset) > 0;
+    }
+    else if (m.isDouble(offset))
+    {
+        t = m.getArgAsDouble(offset) > 0.0;
+    }
+    else
+  {
+    sendWrongDataTypeError();
+  }
+  return t;
 }
 
 void sendCommandError(uint8_t motorId, uint8_t errorNum)
@@ -210,12 +243,7 @@ void sendBootMsg(uint32_t _currentTime) {
     else {
         if ((uint32_t)(_currentTime - linkedTime) < BOOT_MSG_WAIT_TIME) return;
     }
-    OSCMessage newMes("/booted");
-    newMes.add(myId);
-    Udp.beginPacket(broadcastIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
+    OscEther.send(broadcastIp, outPort, "/booted", myId);
     turnOnTXL();
     isWaitingSendBootMsg = false;
 }
@@ -294,26 +322,9 @@ bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatu
 }
 
 void sendThreeInt(String address, int32_t data1, int32_t data2, int32_t data3) {
-    if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
-    newMes.add(data1).add(data2).add(data3);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOsc(address, data1, data2, data3);
 }
 
 void sendAllData(String address, int32_t *data) {
-    if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
-    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-    {
-        newMes.add(data[i]);
-    }
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOsc(address, data);
 }

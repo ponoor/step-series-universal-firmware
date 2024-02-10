@@ -5,8 +5,13 @@
 #include "oscListeners.h"
 #include "utils.h"
 
+void subscribeOsc()
+{
+    OscEther.subscribe(inPort, "/setDestIp", setDestIp);
+}
 void OSCMsgReceive()
 {
+    bool t = OscEther.getServer(inPort).parse();
     bool bMsgHasError = false, bMsgRouted = false;
     OSCMessage msgIN;
     int size;
@@ -219,7 +224,7 @@ bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
 }
 
 #pragma region config_commands_osc_listener
-void setDestIp(OSCMessage &msg, int addrOffset)
+void setDestIp(OscMessage m)
 {
     bool bIpUpdated = false;
     OSCMessage newMes("/destIp");
@@ -2462,13 +2467,12 @@ void move(OSCMessage &msg, int addrOffset)
 
 void combinedMove(OSCMessage &msg, int addrOffset)
 {
-    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    uint8_t motorID[2] = {getInt(msg, 0), getInt(msg, 1)};
     int32_t steps = getInt(msg, 2);
     bool newDir = steps > 0;
     steps = abs(steps);
     move(motorID[0], newDir, steps);
     move(motorID[1], newDir, steps);
-
 }
 // Try to clear BUSY flag and return TRUE if succeeded.
 // GOTO and GOTO_DIR is only executable when not in BUSY state
@@ -2499,7 +2503,9 @@ void goTo(uint8_t motorID, int32_t pos)
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goTo(pos);
-            } else {
+            }
+            else
+            {
                 busyClearWaitStatus[motorId] = WAIT_FOR_GOTO;
                 busyClearWaitGoToPosition[motorId] = pos;
             }
@@ -2515,7 +2521,9 @@ void goTo(uint8_t motorID, int32_t pos)
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goTo(pos);
-                } else {
+                }
+                else
+                {
                     busyClearWaitStatus[i] = WAIT_FOR_GOTO;
                     busyClearWaitGoToPosition[i] = pos;
                 }
@@ -2531,7 +2539,7 @@ void goTo(OSCMessage &msg, int addrOffset)
 }
 void combinedGoTo(OSCMessage &msg, int addrOffset)
 {
-    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    uint8_t motorID[2] = {getInt(msg, 0), getInt(msg, 1)};
     int32_t pos = getInt(msg, 2);
     goTo(motorID[0], pos);
     goTo(motorID[1], pos);
@@ -2547,7 +2555,9 @@ void goToDir(uint8_t motorID, bool dir, int32_t pos)
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goToDir(dir, pos);
-            } else {
+            }
+            else
+            {
                 busyClearWaitStatus[motorId] = WAIT_FOR_GOTO_DIR;
                 busyClearWaitGoToPosition[motorId] = pos;
                 busyClearWaitGoToDir[motorId] = dir;
@@ -2563,7 +2573,9 @@ void goToDir(uint8_t motorID, bool dir, int32_t pos)
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goToDir(dir, pos);
-                } else {
+                }
+                else
+                {
                     busyClearWaitStatus[i] = WAIT_FOR_GOTO_DIR;
                     busyClearWaitGoToPosition[i] = pos;
                     busyClearWaitGoToDir[i] = dir;
@@ -2581,7 +2593,7 @@ void goToDir(OSCMessage &msg, int addrOffset)
 }
 void combinedGoToDir(OSCMessage &msg, int addrOffset)
 {
-    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    uint8_t motorID[2] = {getInt(msg, 0), getInt(msg, 1)};
     boolean dir = getBool(msg, 2);
     int32_t pos = getInt(msg, 3);
     goToDir(motorID[0], dir, pos);
@@ -2630,11 +2642,16 @@ void homing(OSCMessage &msg, int addrOffset)
     }
 }
 
-void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec) {
-    if (isBrakeDisEngaged(motorId)) {
-        if (homeSwState[motorId]) {
-            sendTwoData("/error/command", "HomeSwActivated", motorId+MOTOR_ID_FIRST);
-        } else {
+void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec)
+{
+    if (isBrakeDisEngaged(motorId))
+    {
+        if (homeSwState[motorId])
+        {
+            sendTwoData("/error/command", "HomeSwActivated", motorId + MOTOR_ID_FIRST);
+        }
+        else
+        {
             stepper[motorId].goUntil(action, dir, stepsPerSec);
             homingStatus[motorId] = HOMING_GOUNTIL;
             homingStartTime[motorId] = millis();
@@ -2661,30 +2678,42 @@ void goUntil(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void goUntilRaw(OSCMessage& msg, int addrOffset) {
+void goUntilRaw(OSCMessage &msg, int addrOffset)
+{
     uint8_t motorID = getInt(msg, 0);
     bool action = getBool(msg, 1);
     int32_t speed = getInt(msg, 2);
     bool dir = speed > 0;
     speed = abs(speed);
-    if(isCorrectMotorId(motorID)) {
+    if (isCorrectMotorId(motorID))
+    {
         motorID -= MOTOR_ID_FIRST;
-        if (isBrakeDisEngaged(motorID)) {
-            if (homeSwState[motorID]) {
-                sendTwoData("/error/command", "HomeSwActivated", motorID+MOTOR_ID_FIRST);
-            } else {
+        if (isBrakeDisEngaged(motorID))
+        {
+            if (homeSwState[motorID])
+            {
+                sendTwoData("/error/command", "HomeSwActivated", motorID + MOTOR_ID_FIRST);
+            }
+            else
+            {
                 stepper[motorID].goUntilRaw(action, dir, speed);
                 homingStatus[motorID] = HOMING_GOUNTIL;
                 homingStartTime[motorID] = millis();
             }
         }
     }
-    else if (motorID == MOTOR_ID_ALL) {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
-            if (isBrakeDisEngaged(i)) {
-                if (homeSwState[i]) {
-                    sendTwoData("/error/command", "HomeSwActivated", i+MOTOR_ID_FIRST);
-                } else {
+    else if (motorID == MOTOR_ID_ALL)
+    {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        {
+            if (isBrakeDisEngaged(i))
+            {
+                if (homeSwState[i])
+                {
+                    sendTwoData("/error/command", "HomeSwActivated", i + MOTOR_ID_FIRST);
+                }
+                else
+                {
                     stepper[i].goUntil(action, dir, speed);
                     homingStatus[i] = HOMING_GOUNTIL;
                     homingStartTime[i] = millis();
@@ -2694,23 +2723,29 @@ void goUntilRaw(OSCMessage& msg, int addrOffset) {
     }
 }
 
-void releaseSw(uint8_t motorId, bool action, bool dir) {
-    if (isBrakeDisEngaged(motorId)) {
+void releaseSw(uint8_t motorId, bool action, bool dir)
+{
+    if (isBrakeDisEngaged(motorId))
+    {
         stepper[motorId].releaseSw(action, dir);
         homingStatus[motorId] = HOMING_RELEASESW;
         homingStartTime[motorId] = millis();
     }
 }
-void releaseSw(OSCMessage& msg, int addrOffset) {
+void releaseSw(OSCMessage &msg, int addrOffset)
+{
     uint8_t motorID = getInt(msg, 0);
     uint8_t action = getInt(msg, 1);
     bool dir = getBool(msg, 2);
-    if(isCorrectMotorId(motorID)) {
+    if (isCorrectMotorId(motorID))
+    {
         motorID -= MOTOR_ID_FIRST;
         releaseSw(motorID, action, dir);
     }
-    else if (motorID == MOTOR_ID_ALL) {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
+    else if (motorID == MOTOR_ID_ALL)
+    {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        {
             releaseSw(i, action, dir);
         }
     }
@@ -2729,7 +2764,9 @@ void goHome(OSCMessage &msg, int addrOffset)
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goHome();
-            } else {
+            }
+            else
+            {
                 busyClearWaitStatus[motorId] = WAIT_FOR_GOHOME;
             }
         }
@@ -2744,7 +2781,9 @@ void goHome(OSCMessage &msg, int addrOffset)
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goHome();
-                } else {
+                }
+                else
+                {
                     busyClearWaitStatus[i] = WAIT_FOR_GOHOME;
                 }
             }
@@ -2764,7 +2803,9 @@ void goMark(OSCMessage &msg, int addrOffset)
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goMark();
-            } else {
+            }
+            else
+            {
                 busyClearWaitStatus[motorId] = WAIT_FOR_GOMARK;
             }
         }
@@ -2779,7 +2820,9 @@ void goMark(OSCMessage &msg, int addrOffset)
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goMark();
-                } else {
+                }
+                else
+                {
                     busyClearWaitStatus[i] = WAIT_FOR_GOMARK;
                 }
             }
@@ -2859,7 +2902,7 @@ void softStop(OSCMessage &msg, int addrOffset)
 }
 void combinedSoftStop(OSCMessage &msg, int addrOffset)
 {
-    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    uint8_t motorID[2] = {getInt(msg, 0), getInt(msg, 1)};
     softStop(motorID[0]);
     softStop(motorID[1]);
 }
@@ -2889,10 +2932,9 @@ void hardStop(OSCMessage &msg, int addrOffset)
 }
 void combinedHardStop(OSCMessage &msg, int addrOffset)
 {
-    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    uint8_t motorID[2] = {getInt(msg, 0), getInt(msg, 1)};
     hardStop(motorID[0]);
     hardStop(motorID[1]);
-
 }
 void executeSoftHiZ(uint8_t motorId)
 {
@@ -2939,10 +2981,9 @@ void softHiZ(OSCMessage &msg, int addrOffset)
 }
 void combinedSoftHiZ(OSCMessage &msg, int addrOffset)
 {
-    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    uint8_t motorID[2] = {getInt(msg, 0), getInt(msg, 1)};
     softHiZ(motorID[0]);
     softHiZ(motorID[1]);
-
 }
 void hardHiZ(uint8_t motorID)
 {
@@ -2989,7 +3030,7 @@ void hardHiZ(OSCMessage &msg, int addrOffset)
 }
 void combinedHardHiZ(OSCMessage &msg, int addrOffset)
 {
-    uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
+    uint8_t motorID[2] = {getInt(msg, 0), getInt(msg, 1)};
     hardHiZ(motorID[0]);
     hardHiZ(motorID[1]);
 }

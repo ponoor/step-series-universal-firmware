@@ -10,7 +10,7 @@
 #endif
 
 #include "globals.h"
-#include <OSCMessage.h>
+#include <ArduinoOSCEther.h>
 #include "boardsSpecific.h"
 // 'motorID' : 1-4/1-8, 255
 // 'motorId' : 0-3/0-7
@@ -22,7 +22,7 @@ void activate(uint8_t motorId, bool state);
 void free(uint8_t motorId);
 
 // config_commands_osc_listener
-void setDestIp(OSCMessage& msg, int addrOffset);
+void setDestIp(OscMessage m);
 void getVersion(OSCMessage& msg, int addrOffset);
 void getConfigName(OSCMessage& msg, int addrOffset);
 void getConfigRegister(uint8_t deviceId);

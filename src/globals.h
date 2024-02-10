@@ -63,7 +63,7 @@ extern IPAddress
     dns,
     gateway,
     subnet;
-const IPAddress broadcastIp(255, 255, 255, 255);
+const String broadcastIp = "255.255.255.255";
 extern unsigned int inPort, outPort, outPort_from_config;
 extern EthernetUDP Udp;
 extern bool

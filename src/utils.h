@@ -9,7 +9,7 @@
 	#include "WProgram.h"
 #endif
 
-#include <OSCMessage.h>
+#include <ArduinoOSCEther.h>
 #include <Ethernet.h>
 #include <Adafruit_SleepyDog.h>
 #include "globals.h"
@@ -38,9 +38,9 @@ void turnOnRXL();
 void turnOnTXL();
 void updateRxTxLed(uint32_t _currentTimeMillis);
 
-int getInt(OSCMessage &msg, uint8_t offset);
-float getFloat(OSCMessage &msg, uint8_t offset);
-bool getBool(OSCMessage &msg, uint8_t offset);
+int getInt(OscMessage m, size_t offset);
+float getFloat(OscMessage m, size_t offset);
+bool getBool(OscMessage m, size_t offset);
 
 bool isBrakeDisEngaged(uint8_t motorId);
 #ifdef HAVE_BRAKE
@@ -79,4 +79,12 @@ void sendTwoData(String address, T data1, U data2) {
 }
 void sendThreeInt(String address, int32_t data1, int32_t data2, int32_t data3);
 void sendAllData(String address, int32_t *data);
+
+template<typename... Args>
+void sendOsc(String address, Args&&... args)
+{
+    if (!isDestIpSet) { return; }
+  OscEther.send(destIp, outPort, address, std::forward<Args>(args)...);
+    turnOnTXL();
+}
 #endif

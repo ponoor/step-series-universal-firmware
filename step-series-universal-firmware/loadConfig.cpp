@@ -175,7 +175,6 @@ void loadConfig() {
         electromagnetBrakeEnable[i] = driverSettings_electromagnetBrakeEnable[i] | false;
         brakeStatus[i] = 0;
         bBrakeDecWaiting[i] = false;
-        electromagnetBrakeEnable[i] = false;
         brakeTransitionDuration[i] = driverSettings_brakeTransitionDuration[i] | 100;
 #endif
     }

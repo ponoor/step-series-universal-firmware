@@ -189,7 +189,7 @@ void checkStatus()
         if (t)
         {
             // This action is also done in the driver chip but required for the servo mode.
-            if (isServoMode[i]&&(!homeSwMode[i]))
+            if (isServoMode[i] && (!homeSwMode[i]))
                 stepper[i].hardStop();
             // Trigger the next sequence of the homing.
             if (homingStatus[i] == HOMING_GOUNTIL)
@@ -258,7 +258,7 @@ void checkStatus()
         if (t && reportOCD[i])
             sendOneDatum("/overCurrent", i + 1);
 
-            // STALL A&B, active low, latched
+        // STALL A&B, active low, latched
 #ifdef DRIVER_L6470
         t = (status & (STATUS_STEP_LOSS_A | STATUS_STEP_LOSS_B)) >> 13;
 #elif defined(DRIVER_POWERSTEP01)
@@ -329,32 +329,32 @@ void updatePositionReportList(uint32_t _currentTimeMillis)
         lastPollTime = _currentTimeMillis;
     }
 }
-
-void updateServo(uint32_t currentTimeMicros)
+#define INTEGRAL_LIMIT 1500.0f
+void updateServo(uint32_t _currentTime)
 {
     static uint32_t lastServoUpdateTime = 0;
     static float eZ1[NUM_OF_MOTOR] = {0.0},
-                //  eZ2[NUM_OF_MOTOR] = {0.0},
-                 integral[NUM_OF_MOTOR] = {0.0};
-    float spd = 0.0;
-    if ((uint32_t)(currentTimeMicros - lastServoUpdateTime) >= 100)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+                 //  eZ2[NUM_OF_MOTOR] = {0.0},
+        integral[NUM_OF_MOTOR] = {0.0};
+        if ((uint32_t)(_currentTime - lastServoUpdateTime) >= servoPollPeriod)
         {
-            if (isServoMode[i])
+            for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
             {
+                if (isServoMode[i])
+                {
+                float spd = 0.0;
                 int32_t error = targetPosition[i] - stepper[i].getPos();
                 if (error > 0x1FFFFFL)
                     error -= 0x3FFFFFL; // wrap ABS_POS 22bit range.
                 else if (error < -0x1FFFFFL)
                     error += 0x3FFFFFL;
-                integral[i] += (((float)error + eZ1[i]) / 2.0f);
-                if (integral[i] > 1500.0f)
-                    integral[i] = 1500.0f;
-                else if (integral[i] < -1500.0f)
-                    integral[i] = -1500.0f;
                 if (labs(error) > position_tolerance)
                 {
+                    integral[i] += (((float)error + eZ1[i]) * 0.5f);
+                    if (integral[i] > INTEGRAL_LIMIT)
+                        integral[i] = INTEGRAL_LIMIT;
+                    else if (integral[i] < -INTEGRAL_LIMIT)
+                        integral[i] = -INTEGRAL_LIMIT;
                     double diff = error - eZ1[i];
 
                     spd = (float)error * kP[i] + integral[i] * kI[i] + diff * kD[i];
@@ -365,28 +365,27 @@ void updateServo(uint32_t currentTimeMicros)
                 bool dir = (spd > 0.0f);
                 if (homeSwState[i])
                 {
-                    if ((bProhibitMotionOnHomeSw[i]||!homeSwMode[i]) && (homingDirection[i] == dir))
+                    if ((bProhibitMotionOnHomeSw[i] || !homeSwMode[i]) && (homingDirection[i] == dir))
                         absSpd = 0.0f;
                 }
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
                 else if (limitSwState[i])
                 {
-                    if ((bProhibitMotionOnLimitSw[i]||!limitSwMode[i]) && (homingDirection[i] != dir))
+                    if ((bProhibitMotionOnLimitSw[i] || !limitSwMode[i]) && (homingDirection[i] != dir))
                         absSpd = 0.0f;
                 }
 #endif
                 stepper[i].run(dir, absSpd);
+                // sendTwoData("/integral", i + MOTOR_ID_FIRST, (int32_t)integral[i]); // debug
             }
         }
-        lastServoUpdateTime = currentTimeMicros;
+        lastServoUpdateTime = _currentTime;
     }
 }
 
 void loop()
 {
-    uint32_t
-        currentTimeMillis = millis(),
-        currentTimeMicros = micros();
+    uint32_t currentTimeMillis = millis();
     static uint32_t lastPollTime = 0;
 
     if ((uint32_t)(currentTimeMillis - lastPollTime) >= STATUS_POLL_PERIOD)
@@ -409,6 +408,10 @@ void loop()
             myId = t;
             initEthernet();
         }
+        if (isWaitingSendBootMsg)
+        {
+            sendBootMsg(currentTimeMillis);
+        }
         Watchdog.reset();
         lastPollTime = currentTimeMillis;
     }
@@ -417,10 +420,6 @@ void loop()
     {
         diagnosisCommand(SerialUSB.read());
     }
-    if (isWaitingSendBootMsg)
-    {
-        sendBootMsg(currentTimeMillis);
-    }
     OSCMsgReceive();
-    updateServo(currentTimeMicros);
+    updateServo(currentTimeMillis);
 }

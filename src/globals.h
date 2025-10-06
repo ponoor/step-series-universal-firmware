@@ -27,7 +27,7 @@
 extern const uint8_t firmwareVersion[3]; // defined in boardsDef.h
 extern int8_t loadedConfigVersion[2];
 extern const uint8_t applicableConfigVersion[2]; // defined in boardsDef.h
-#define STATUS_POLL_PERIOD   1 // [ms]
+#define STATUS_POLL_PERIOD   10 // [ms]
 
 
 // Tx, Rx LED
@@ -225,6 +225,7 @@ extern float
     fullStepSpeed[NUM_OF_MOTOR];
 
 // Servo mode
+constexpr uint32_t servoPollPeriod = 10; // [ms]
 extern int32_t targetPosition[NUM_OF_MOTOR];
 extern float kP[NUM_OF_MOTOR], kI[NUM_OF_MOTOR], kD[NUM_OF_MOTOR];
 extern boolean isServoMode[NUM_OF_MOTOR];

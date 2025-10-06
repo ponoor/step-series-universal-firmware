@@ -18,6 +18,22 @@
 char* p_(const __FlashStringHelper* fmt, ...);
 #define p(fmt, ...)	 p_(F(fmt), ##__VA_ARGS__)
 
+inline __attribute__((always_inline)) void fastDigitalWriteHIGH(uint32_t ulPin)
+{
+	EPortType port = g_APinDescription[ulPin].ulPort;
+	uint32_t pin = g_APinDescription[ulPin].ulPin;
+	uint32_t pinMask = (1ul << pin);
+	PORT->Group[port].OUTSET.reg = pinMask;
+}
+
+inline __attribute__((always_inline)) void fastDigitalWriteLOW(uint32_t ulPin)
+{
+	EPortType port = g_APinDescription[ulPin].ulPort;
+	uint32_t pin = g_APinDescription[ulPin].ulPin;
+	uint32_t pinMask = (1ul << pin);
+	PORT->Group[port].OUTCLR.reg = pinMask;
+}
+
 void turnOnRXL();
 void turnOnTXL();
 void updateRxTxLed(uint32_t _currentTimeMillis);

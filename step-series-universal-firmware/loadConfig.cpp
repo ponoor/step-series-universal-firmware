@@ -9,7 +9,7 @@ void loadConfig() {
     sdInitializeSucceeded = false;
     configFileOpenSucceeded = false;
     configFileParseSucceeded = false;
-    DynamicJsonDocument doc(8192);
+    JsonDocument doc;
 #else
     #ifdef PIN_SD_DETECT
     if (digitalRead(PIN_SD_DETECT) == LOW)
@@ -22,7 +22,7 @@ void loadConfig() {
     // Allocate a temporary JsonDocument
     // Don't forget to change the capacity to match your requirements.
     // Use arduinojson.org/v6/assistant to compute the capacity.
-    DynamicJsonDocument doc(8192);
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     if (error) {
         p("Failed to read file: %s\nUsing default configuration.\n", error.f_str());

@@ -22,13 +22,13 @@ char* p_(const __FlashStringHelper* fmt, ...)
 }
 
 void turnOnRXL() {
-    digitalWrite(PIN_LED_RXL, LOW); // turn on
+    fastDigitalWriteLOW(PIN_LED_RXL); // turn on
     RXL_blinkStartTime = millis();
     rxLedEnabled = true;
 }
 
 void turnOnTXL() {
-    digitalWrite(PIN_LED_TXL, LOW); // turn on
+    fastDigitalWriteLOW(PIN_LED_TXL); // turn on
     TXL_blinkStartTime = millis();
     txLedEnabled = true;
 }
@@ -39,7 +39,7 @@ void updateRxTxLed(uint32_t _currentTimeMillis) {
         if ((uint32_t)(_currentTimeMillis - RXL_blinkStartTime) >= RXL_TXL_BLINK_DURATION)
         {
             rxLedEnabled = false;
-            digitalWrite(PIN_LED_RXL, HIGH); // turn off
+            fastDigitalWriteHIGH(PIN_LED_RXL); // turn off
         }
     }
     if (txLedEnabled)
@@ -47,7 +47,7 @@ void updateRxTxLed(uint32_t _currentTimeMillis) {
         if ((uint32_t)(_currentTimeMillis - TXL_blinkStartTime) >= RXL_TXL_BLINK_DURATION)
         {
             txLedEnabled = false;
-            digitalWrite(PIN_LED_TXL, HIGH); // turn off
+            fastDigitalWriteHIGH(PIN_LED_TXL); // turn off
         }
     }
 }

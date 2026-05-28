@@ -32,4 +32,12 @@ void printHeader(String header);
 void testBrake();
 #endif
 
+// Web Serial API commands
+void printConfigAsJson();
+void printStatusAsJson();
+void receiveConfigJson();
+void applyConfigFromJson(JsonDocument& doc);
+void saveConfigToSd(JsonDocument& doc);
+void rebootBoard();
+
 #endif

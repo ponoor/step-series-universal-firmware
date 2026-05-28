@@ -37,7 +37,9 @@ void printConfigAsJson();
 void printStatusAsJson();
 void receiveConfigJson();
 void applyConfigFromJson(JsonDocument& doc);
+#ifdef HAVE_SD
 void saveConfigToSd(JsonDocument& doc);
+#endif
 void rebootBoard();
 
 #endif

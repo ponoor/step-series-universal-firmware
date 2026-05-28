@@ -1,6 +1,6 @@
-//
-//
-//
+// 
+// 
+// 
 
 #include "diagnosis.h"
 #include "utils.h"
@@ -235,7 +235,7 @@ void printCurrentState() {
 				p("\t  F_PWM_DEC: %d\n", (temp>>10)%0x7);
 				p("\t  F_PWM_INT: %d\n", (temp>>13)%0x7);
 			}
-
+			
 #elif defined(DRIVER_L6470)
 			p("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
 			p("\t  OC_SD: %d\n", (temp>>7)%0x1);
@@ -322,7 +322,7 @@ void printCurrentState() {
 			Watchdog.reset();
 		}
 	}
-
+	
 	printHeader("Modes");
 	printAllBools(F("Servo Mode"),isServoMode);
 #ifdef DRIVER_POWERSTEP01
@@ -359,11 +359,11 @@ void printConfigurations() {
 	printIpAddress(F("Gateway"), gateway);
 	printIpAddress(F("Subnet mask"), subnet);
 	p("MAC address from Config: %02X:%02X:%02X:%02X:%02X:%02X\n",
-		mac_from_config[0],
-		mac_from_config[1],
-		mac_from_config[2],
-		mac_from_config[3],
-		mac_from_config[4],
+		mac_from_config[0], 
+		mac_from_config[1], 
+		mac_from_config[2], 
+		mac_from_config[3], 
+		mac_from_config[4], 
 		mac_from_config[5]);
 	showBoolResult(F("isMacAddId"), isMacAddId);
 	p("inPort : %d\n", inPort);
@@ -374,7 +374,7 @@ void printConfigurations() {
 	showBoolResult(F("reportErrors"), reportErrors);
 
 	printHeader(F("Report & Alarm"));
-	printAllBools(F("reportBUSY"), reportBUSY);
+	printAllBools(F("reportBUSY"), reportBUSY); 
 	printAllBools(F("reportBUSY"), reportBUSY);
 	printAllBools(F("reportHiZ"), reportHiZ);
 	printAllBools(F("reportHomeSwStatus"), reportHomeSwStatus);
@@ -474,7 +474,7 @@ void printAllBools(String title, bool* val) {
 		out += (val[i]) ? "Yes" : "No";
 		if (i<(NUM_OF_MOTOR-1)) out +=", ";
 	}
-
+	
 	SerialUSB.println(out);
 }
 
@@ -864,8 +864,10 @@ void applyConfigFromJson(JsonDocument& doc) {
 	JsonArray ds_stepMode = driverSettings["stepMode"];
 #ifdef DRIVER_POWERSTEP01
 	JsonArray ds_isCurrentMode = driverSettings["isCurrentMode"];
-#endif
 	JsonArray ds_slewRate = driverSettings["slewRate"];
+#elif defined(DRIVER_L6470)
+	JsonArray ds_slewRate = driverSettings["slewRate"];
+#endif
 #ifdef HAVE_BRAKE
 	JsonArray ds_electromagnetBrakeEnable = driverSettings["electromagnetBrakeEnable"];
 	JsonArray ds_brakeTransitionDuration = driverSettings["brakeTransitionDuration"];

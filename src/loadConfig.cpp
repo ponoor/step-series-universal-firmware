@@ -134,6 +134,8 @@ void loadConfig() {
     JsonArray driverSettings_prohibitMotionOnLimitSw = driverSettings["prohibitMotionOnLimitSw"];
 #endif
     JsonArray driverSettings_goUntilTimeout = driverSettings["goUntilTimeout"];
+    if (driverSettings_goUntilTimeout.isNull())
+        driverSettings_goUntilTimeout = driverSettings["goUnitlTimeout"];  // legacy typo
     JsonArray driverSettings_releaseSwTimeout = driverSettings["releaseSwTimeout"];
     JsonArray driverSettings_stepMode = driverSettings["stepMode"];
 #ifdef DRIVER_POWERSTEP01

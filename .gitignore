@@ -10,3 +10,7 @@
 *.zip
 CLAUDE.md
 browser-config-tool-plan.md
+tmpclaude-*
+*.tmp
+*.tmp.*
+claude_temp_*

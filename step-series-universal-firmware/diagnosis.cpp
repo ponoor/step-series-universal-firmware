@@ -507,228 +507,276 @@ void testBrake(){
 // =============================================================================
 
 void printConfigAsJson() {
-	JsonDocument doc;
 	uint8_t i;
 
-	// Board metadata (not in SD config files)
-	JsonObject board = doc["board"].to<JsonObject>();
-	board["product"] = PRODUCT_NAME;
-	board["numMotors"] = NUM_OF_MOTOR;
-	JsonArray fwVer = board["firmwareVersion"].to<JsonArray>();
-	for (i = 0; i < 3; i++) fwVer.add(firmwareVersion[i]);
+	SerialUSB.print(F("{"));
 
-	// Information
-	JsonObject information = doc["information"].to<JsonObject>();
-	information["configName"] = configName;
-	JsonArray cfgVer = information["configVersion"].to<JsonArray>();
-	cfgVer.add(loadedConfigVersion[0]);
-	cfgVer.add(loadedConfigVersion[1]);
-	information["targetProduct"] = configTargetProduct;
-
-	// Network — use _from_config values (pre-DIP-switch)
-	JsonObject network = doc["network"].to<JsonObject>();
-	JsonArray net_myIp = network["myIp"].to<JsonArray>();
-	for (i = 0; i < 4; i++) net_myIp.add(myIp_from_config[i]);
-	JsonArray net_destIp = network["destIp"].to<JsonArray>();
-	for (i = 0; i < 4; i++) net_destIp.add(destIp[i]);
-	JsonArray net_dns = network["dns"].to<JsonArray>();
-	for (i = 0; i < 4; i++) net_dns.add(dns[i]);
-	JsonArray net_gateway = network["gateway"].to<JsonArray>();
-	for (i = 0; i < 4; i++) net_gateway.add(gateway[i]);
-	JsonArray net_subnet = network["subnet"].to<JsonArray>();
-	for (i = 0; i < 4; i++) net_subnet.add(subnet[i]);
-	network["isMyIpAddId"] = isMyIpAddId;
-	network["inPort"] = inPort;
-	network["outPort"] = outPort_from_config;
-	network["isOutPortAddId"] = isOutPortAddId;
-	JsonArray net_mac = network["mac"].to<JsonArray>();
-	for (i = 0; i < 6; i++) net_mac.add(mac_from_config[i]);
-	network["isMacAddId"] = isMacAddId;
-	network["bootedMsgEnable"] = bootedMsgEnable;
-	network["canSendMsgBeforeDestIp"] = isDestIpSet;
-	network["reportError"] = reportErrors;
-
-	// Alarm and Report
-	JsonObject alarm = doc["alarmAndReport"].to<JsonObject>();
-	JsonArray ar_reportBUSY = alarm["reportBUSY"].to<JsonArray>();
-	JsonArray ar_reportHiZ = alarm["reportHiZ"].to<JsonArray>();
-	JsonArray ar_reportHomeSwStatus = alarm["reportHomeSwStatus"].to<JsonArray>();
-	JsonArray ar_reportDir = alarm["reportDir"].to<JsonArray>();
-	JsonArray ar_reportMotorStatus = alarm["reportMotorStatus"].to<JsonArray>();
-	JsonArray ar_reportSwEvn = alarm["reportSwEvn"].to<JsonArray>();
-	JsonArray ar_reportUVLO = alarm["reportUVLO"].to<JsonArray>();
-	JsonArray ar_reportThermalStatus = alarm["reportThermalStatus"].to<JsonArray>();
-	JsonArray ar_reportOCD = alarm["reportOCD"].to<JsonArray>();
-	JsonArray ar_reportStall = alarm["reportStall"].to<JsonArray>();
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-	JsonArray ar_reportLimitSwStatus = alarm["reportLimitSwStatus"].to<JsonArray>();
-#endif
-	JsonArray ar_OCThreshold = alarm["OCThreshold"].to<JsonArray>();
-	JsonArray ar_reportPositionInterval = alarm["reportPositionInterval"].to<JsonArray>();
-	for (i = 0; i < NUM_OF_MOTOR; i++) {
-		ar_reportBUSY.add(reportBUSY[i]);
-		ar_reportHiZ.add(reportHiZ[i]);
-		ar_reportHomeSwStatus.add(reportHomeSwStatus[i]);
-		ar_reportDir.add(reportDir[i]);
-		ar_reportMotorStatus.add(reportMotorStatus[i]);
-		ar_reportSwEvn.add(reportSwEvn[i]);
-		ar_reportUVLO.add(reportUVLO[i]);
-		ar_reportThermalStatus.add(reportThermalStatus[i]);
-		ar_reportOCD.add(reportOCD[i]);
-		ar_reportStall.add(reportStall[i]);
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-		ar_reportLimitSwStatus.add(reportLimitSwStatus[i]);
-#endif
-		ar_OCThreshold.add(overCurrentThreshold[i]);
-		ar_reportPositionInterval.add(reportPositionInterval[i]);
+	// Board metadata — each section in its own scope so JsonDocument is freed before the next
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		obj["product"] = PRODUCT_NAME;
+		obj["numMotors"] = NUM_OF_MOTOR;
+		JsonArray fwVer = obj["firmwareVersion"].to<JsonArray>();
+		for (i = 0; i < 3; i++) fwVer.add(firmwareVersion[i]);
+		SerialUSB.print(F("\"board\":"));
+		serializeJson(doc, SerialUSB);
 	}
-	alarm["reportPositionListInterval"] = reportPositionListInterval;
+	Watchdog.reset();
 
-	// Driver Settings
-	JsonObject ds = doc["driverSettings"].to<JsonObject>();
-	JsonArray ds_homingAtStartup = ds["homingAtStartup"].to<JsonArray>();
-	JsonArray ds_homingDirection = ds["homingDirection"].to<JsonArray>();
-	JsonArray ds_homingSpeed = ds["homingSpeed"].to<JsonArray>();
-	JsonArray ds_homeSwMode = ds["homeSwMode"].to<JsonArray>();
-	JsonArray ds_prohibitMotionOnHomeSw = ds["prohibitMotionOnHomeSw"].to<JsonArray>();
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		obj["configName"] = configName;
+		JsonArray cfgVer = obj["configVersion"].to<JsonArray>();
+		cfgVer.add(loadedConfigVersion[0]);
+		cfgVer.add(loadedConfigVersion[1]);
+		obj["targetProduct"] = configTargetProduct;
+		SerialUSB.print(F(",\"information\":"));
+		serializeJson(doc, SerialUSB);
+	}
+	Watchdog.reset();
+
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		JsonArray net_myIp = obj["myIp"].to<JsonArray>();
+		for (i = 0; i < 4; i++) net_myIp.add(myIp_from_config[i]);
+		JsonArray net_destIp = obj["destIp"].to<JsonArray>();
+		for (i = 0; i < 4; i++) net_destIp.add(destIp[i]);
+		JsonArray net_dns = obj["dns"].to<JsonArray>();
+		for (i = 0; i < 4; i++) net_dns.add(dns[i]);
+		JsonArray net_gateway = obj["gateway"].to<JsonArray>();
+		for (i = 0; i < 4; i++) net_gateway.add(gateway[i]);
+		JsonArray net_subnet = obj["subnet"].to<JsonArray>();
+		for (i = 0; i < 4; i++) net_subnet.add(subnet[i]);
+		obj["isMyIpAddId"] = isMyIpAddId;
+		obj["inPort"] = inPort;
+		obj["outPort"] = outPort_from_config;
+		obj["isOutPortAddId"] = isOutPortAddId;
+		JsonArray net_mac = obj["mac"].to<JsonArray>();
+		for (i = 0; i < 6; i++) net_mac.add(mac_from_config[i]);
+		obj["isMacAddId"] = isMacAddId;
+		obj["bootedMsgEnable"] = bootedMsgEnable;
+		obj["canSendMsgBeforeDestIp"] = isDestIpSet;
+		obj["reportError"] = reportErrors;
+		SerialUSB.print(F(",\"network\":"));
+		serializeJson(doc, SerialUSB);
+	}
+	Watchdog.reset();
+
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		JsonArray ar_reportBUSY = obj["reportBUSY"].to<JsonArray>();
+		JsonArray ar_reportHiZ = obj["reportHiZ"].to<JsonArray>();
+		JsonArray ar_reportHomeSwStatus = obj["reportHomeSwStatus"].to<JsonArray>();
+		JsonArray ar_reportDir = obj["reportDir"].to<JsonArray>();
+		JsonArray ar_reportMotorStatus = obj["reportMotorStatus"].to<JsonArray>();
+		JsonArray ar_reportSwEvn = obj["reportSwEvn"].to<JsonArray>();
+		JsonArray ar_reportUVLO = obj["reportUVLO"].to<JsonArray>();
+		JsonArray ar_reportThermalStatus = obj["reportThermalStatus"].to<JsonArray>();
+		JsonArray ar_reportOCD = obj["reportOCD"].to<JsonArray>();
+		JsonArray ar_reportStall = obj["reportStall"].to<JsonArray>();
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-	JsonArray ds_limitSwMode = ds["limitSwMode"].to<JsonArray>();
-	JsonArray ds_prohibitMotionOnLimitSw = ds["prohibitMotionOnLimitSw"].to<JsonArray>();
+		JsonArray ar_reportLimitSwStatus = obj["reportLimitSwStatus"].to<JsonArray>();
 #endif
-	JsonArray ds_goUntilTimeout = ds["goUntilTimeout"].to<JsonArray>();
-	JsonArray ds_releaseSwTimeout = ds["releaseSwTimeout"].to<JsonArray>();
-	JsonArray ds_stepMode = ds["stepMode"].to<JsonArray>();
+		JsonArray ar_OCThreshold = obj["OCThreshold"].to<JsonArray>();
+		JsonArray ar_reportPositionInterval = obj["reportPositionInterval"].to<JsonArray>();
+		for (i = 0; i < NUM_OF_MOTOR; i++) {
+			ar_reportBUSY.add(reportBUSY[i]);
+			ar_reportHiZ.add(reportHiZ[i]);
+			ar_reportHomeSwStatus.add(reportHomeSwStatus[i]);
+			ar_reportDir.add(reportDir[i]);
+			ar_reportMotorStatus.add(reportMotorStatus[i]);
+			ar_reportSwEvn.add(reportSwEvn[i]);
+			ar_reportUVLO.add(reportUVLO[i]);
+			ar_reportThermalStatus.add(reportThermalStatus[i]);
+			ar_reportOCD.add(reportOCD[i]);
+			ar_reportStall.add(reportStall[i]);
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+			ar_reportLimitSwStatus.add(reportLimitSwStatus[i]);
+#endif
+			ar_OCThreshold.add(overCurrentThreshold[i]);
+			ar_reportPositionInterval.add(reportPositionInterval[i]);
+		}
+		obj["reportPositionListInterval"] = reportPositionListInterval;
+		SerialUSB.print(F(",\"alarmAndReport\":"));
+		serializeJson(doc, SerialUSB);
+	}
+	Watchdog.reset();
+
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		JsonArray ds_homingAtStartup = obj["homingAtStartup"].to<JsonArray>();
+		JsonArray ds_homingDirection = obj["homingDirection"].to<JsonArray>();
+		JsonArray ds_homingSpeed = obj["homingSpeed"].to<JsonArray>();
+		JsonArray ds_homeSwMode = obj["homeSwMode"].to<JsonArray>();
+		JsonArray ds_prohibitMotionOnHomeSw = obj["prohibitMotionOnHomeSw"].to<JsonArray>();
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+		JsonArray ds_limitSwMode = obj["limitSwMode"].to<JsonArray>();
+		JsonArray ds_prohibitMotionOnLimitSw = obj["prohibitMotionOnLimitSw"].to<JsonArray>();
+#endif
+		JsonArray ds_goUntilTimeout = obj["goUntilTimeout"].to<JsonArray>();
+		JsonArray ds_releaseSwTimeout = obj["releaseSwTimeout"].to<JsonArray>();
+		JsonArray ds_stepMode = obj["stepMode"].to<JsonArray>();
 #ifdef DRIVER_POWERSTEP01
-	JsonArray ds_isCurrentMode = ds["isCurrentMode"].to<JsonArray>();
+		JsonArray ds_isCurrentMode = obj["isCurrentMode"].to<JsonArray>();
 #endif
-	JsonArray ds_slewRate = ds["slewRate"].to<JsonArray>();
+		JsonArray ds_slewRate = obj["slewRate"].to<JsonArray>();
 #ifdef HAVE_BRAKE
-	JsonArray ds_electromagnetBrakeEnable = ds["electromagnetBrakeEnable"].to<JsonArray>();
-	JsonArray ds_brakeTransitionDuration = ds["brakeTransitionDuration"].to<JsonArray>();
+		JsonArray ds_electromagnetBrakeEnable = obj["electromagnetBrakeEnable"].to<JsonArray>();
+		JsonArray ds_brakeTransitionDuration = obj["brakeTransitionDuration"].to<JsonArray>();
 #endif
-	for (i = 0; i < NUM_OF_MOTOR; i++) {
-		ds_homingAtStartup.add(bHomingAtStartup[i]);
-		ds_homingDirection.add(homingDirection[i]);
-		ds_homingSpeed.add(homingSpeed[i]);
-		ds_homeSwMode.add(homeSwMode[i]);
-		ds_prohibitMotionOnHomeSw.add(bProhibitMotionOnHomeSw[i]);
+		for (i = 0; i < NUM_OF_MOTOR; i++) {
+			ds_homingAtStartup.add(bHomingAtStartup[i]);
+			ds_homingDirection.add(homingDirection[i]);
+			ds_homingSpeed.add(homingSpeed[i]);
+			ds_homeSwMode.add(homeSwMode[i]);
+			ds_prohibitMotionOnHomeSw.add(bProhibitMotionOnHomeSw[i]);
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-		ds_limitSwMode.add(limitSwMode[i]);
-		ds_prohibitMotionOnLimitSw.add(bProhibitMotionOnLimitSw[i]);
+			ds_limitSwMode.add(limitSwMode[i]);
+			ds_prohibitMotionOnLimitSw.add(bProhibitMotionOnLimitSw[i]);
 #endif
-		ds_goUntilTimeout.add(goUntilTimeout[i]);
-		ds_releaseSwTimeout.add(releaseSwTimeout[i]);
-		ds_stepMode.add(microStepMode[i]);
+			ds_goUntilTimeout.add(goUntilTimeout[i]);
+			ds_releaseSwTimeout.add(releaseSwTimeout[i]);
+			ds_stepMode.add(microStepMode[i]);
 #ifdef DRIVER_POWERSTEP01
-		ds_isCurrentMode.add(isCurrentMode[i]);
+			ds_isCurrentMode.add(isCurrentMode[i]);
 #endif
-		ds_slewRate.add(slewRateNum[i]); // index 0-5, not raw register value
+			ds_slewRate.add(slewRateNum[i]);
 #ifdef HAVE_BRAKE
-		ds_electromagnetBrakeEnable.add(electromagnetBrakeEnable[i]);
-		ds_brakeTransitionDuration.add(brakeTransitionDuration[i]);
+			ds_electromagnetBrakeEnable.add(electromagnetBrakeEnable[i]);
+			ds_brakeTransitionDuration.add(brakeTransitionDuration[i]);
 #endif
+		}
+		SerialUSB.print(F(",\"driverSettings\":"));
+		serializeJson(doc, SerialUSB);
 	}
+	Watchdog.reset();
 
-	// Speed Profile
-	JsonObject sp = doc["speedProfile"].to<JsonObject>();
-	JsonArray sp_acc = sp["acc"].to<JsonArray>();
-	JsonArray sp_dec = sp["dec"].to<JsonArray>();
-	JsonArray sp_maxSpeed = sp["maxSpeed"].to<JsonArray>();
-	JsonArray sp_fullStepSpeed = sp["fullStepSpeed"].to<JsonArray>();
-	JsonArray sp_minSpeed = sp["minSpeed"].to<JsonArray>();
-	for (i = 0; i < NUM_OF_MOTOR; i++) {
-		sp_acc.add(acc[i]);
-		sp_dec.add(dec[i]);
-		sp_maxSpeed.add(maxSpeed[i]);
-		sp_fullStepSpeed.add(fullStepSpeed[i]);
-		sp_minSpeed.add(minSpeed[i]);
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		JsonArray sp_acc = obj["acc"].to<JsonArray>();
+		JsonArray sp_dec = obj["dec"].to<JsonArray>();
+		JsonArray sp_maxSpeed = obj["maxSpeed"].to<JsonArray>();
+		JsonArray sp_fullStepSpeed = obj["fullStepSpeed"].to<JsonArray>();
+		JsonArray sp_minSpeed = obj["minSpeed"].to<JsonArray>();
+		for (i = 0; i < NUM_OF_MOTOR; i++) {
+			sp_acc.add(acc[i]);
+			sp_dec.add(dec[i]);
+			sp_maxSpeed.add(maxSpeed[i]);
+			sp_fullStepSpeed.add(fullStepSpeed[i]);
+			sp_minSpeed.add(minSpeed[i]);
+		}
+		SerialUSB.print(F(",\"speedProfile\":"));
+		serializeJson(doc, SerialUSB);
 	}
+	Watchdog.reset();
 
-	// Voltage Mode
-	JsonObject vm = doc["voltageMode"].to<JsonObject>();
-	JsonArray vm_KVAL_HOLD = vm["KVAL_HOLD"].to<JsonArray>();
-	JsonArray vm_KVAL_RUN = vm["KVAL_RUN"].to<JsonArray>();
-	JsonArray vm_KVAL_ACC = vm["KVAL_ACC"].to<JsonArray>();
-	JsonArray vm_KVAL_DEC = vm["KVAL_DEC"].to<JsonArray>();
-	JsonArray vm_INT_SPEED = vm["INT_SPEED"].to<JsonArray>();
-	JsonArray vm_ST_SLP = vm["ST_SLP"].to<JsonArray>();
-	JsonArray vm_FN_SLP_ACC = vm["FN_SLP_ACC"].to<JsonArray>();
-	JsonArray vm_FN_SLP_DEC = vm["FN_SLP_DEC"].to<JsonArray>();
-	JsonArray vm_STALL_TH = vm["STALL_TH"].to<JsonArray>();
-	JsonArray vm_lowSpeedOptimizeEnable = vm["lowSpeedOptimizeEnable"].to<JsonArray>();
-	JsonArray vm_lowSpeedOptimize = vm["lowSpeedOptimize"].to<JsonArray>();
-	for (i = 0; i < NUM_OF_MOTOR; i++) {
-		vm_KVAL_HOLD.add(kvalHold[i]);
-		vm_KVAL_RUN.add(kvalRun[i]);
-		vm_KVAL_ACC.add(kvalAcc[i]);
-		vm_KVAL_DEC.add(kvalDec[i]);
-		vm_INT_SPEED.add(intersectSpeed[i]);
-		vm_ST_SLP.add(startSlope[i]);
-		vm_FN_SLP_ACC.add(accFinalSlope[i]);
-		vm_FN_SLP_DEC.add(decFinalSlope[i]);
-		vm_STALL_TH.add(stallThreshold[i]);
-		vm_lowSpeedOptimizeEnable.add(lowSpeedOptimizeEnable[i]);
-		vm_lowSpeedOptimize.add(lowSpeedOptimizeThreshold[i]);
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		JsonArray vm_KVAL_HOLD = obj["KVAL_HOLD"].to<JsonArray>();
+		JsonArray vm_KVAL_RUN = obj["KVAL_RUN"].to<JsonArray>();
+		JsonArray vm_KVAL_ACC = obj["KVAL_ACC"].to<JsonArray>();
+		JsonArray vm_KVAL_DEC = obj["KVAL_DEC"].to<JsonArray>();
+		JsonArray vm_INT_SPEED = obj["INT_SPEED"].to<JsonArray>();
+		JsonArray vm_ST_SLP = obj["ST_SLP"].to<JsonArray>();
+		JsonArray vm_FN_SLP_ACC = obj["FN_SLP_ACC"].to<JsonArray>();
+		JsonArray vm_FN_SLP_DEC = obj["FN_SLP_DEC"].to<JsonArray>();
+		JsonArray vm_STALL_TH = obj["STALL_TH"].to<JsonArray>();
+		JsonArray vm_lowSpeedOptimizeEnable = obj["lowSpeedOptimizeEnable"].to<JsonArray>();
+		JsonArray vm_lowSpeedOptimize = obj["lowSpeedOptimize"].to<JsonArray>();
+		for (i = 0; i < NUM_OF_MOTOR; i++) {
+			vm_KVAL_HOLD.add(kvalHold[i]);
+			vm_KVAL_RUN.add(kvalRun[i]);
+			vm_KVAL_ACC.add(kvalAcc[i]);
+			vm_KVAL_DEC.add(kvalDec[i]);
+			vm_INT_SPEED.add(intersectSpeed[i]);
+			vm_ST_SLP.add(startSlope[i]);
+			vm_FN_SLP_ACC.add(accFinalSlope[i]);
+			vm_FN_SLP_DEC.add(decFinalSlope[i]);
+			vm_STALL_TH.add(stallThreshold[i]);
+			vm_lowSpeedOptimizeEnable.add(lowSpeedOptimizeEnable[i]);
+			vm_lowSpeedOptimize.add(lowSpeedOptimizeThreshold[i]);
+		}
+		SerialUSB.print(F(",\"voltageMode\":"));
+		serializeJson(doc, SerialUSB);
 	}
+	Watchdog.reset();
 
 #ifdef DRIVER_POWERSTEP01
-	// Current Mode
-	JsonObject cm = doc["currentMode"].to<JsonObject>();
-	JsonArray cm_TVAL_HOLD = cm["TVAL_HOLD"].to<JsonArray>();
-	JsonArray cm_TVAL_RUN = cm["TVAL_RUN"].to<JsonArray>();
-	JsonArray cm_TVAL_ACC = cm["TVAL_ACC"].to<JsonArray>();
-	JsonArray cm_TVAL_DEC = cm["TVAL_DEC"].to<JsonArray>();
-	JsonArray cm_T_FAST = cm["T_FAST"].to<JsonArray>();
-	JsonArray cm_TON_MIN = cm["TON_MIN"].to<JsonArray>();
-	JsonArray cm_TOFF_MIN = cm["TOFF_MIN"].to<JsonArray>();
-	for (i = 0; i < NUM_OF_MOTOR; i++) {
-		cm_TVAL_HOLD.add(tvalHold[i]);
-		cm_TVAL_RUN.add(tvalRun[i]);
-		cm_TVAL_ACC.add(tvalAcc[i]);
-		cm_TVAL_DEC.add(tvalDec[i]);
-		cm_T_FAST.add(fastDecaySetting[i]);
-		cm_TON_MIN.add(minOnTime[i]);
-		cm_TOFF_MIN.add(minOffTime[i]);
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		JsonArray cm_TVAL_HOLD = obj["TVAL_HOLD"].to<JsonArray>();
+		JsonArray cm_TVAL_RUN = obj["TVAL_RUN"].to<JsonArray>();
+		JsonArray cm_TVAL_ACC = obj["TVAL_ACC"].to<JsonArray>();
+		JsonArray cm_TVAL_DEC = obj["TVAL_DEC"].to<JsonArray>();
+		JsonArray cm_T_FAST = obj["T_FAST"].to<JsonArray>();
+		JsonArray cm_TON_MIN = obj["TON_MIN"].to<JsonArray>();
+		JsonArray cm_TOFF_MIN = obj["TOFF_MIN"].to<JsonArray>();
+		for (i = 0; i < NUM_OF_MOTOR; i++) {
+			cm_TVAL_HOLD.add(tvalHold[i]);
+			cm_TVAL_RUN.add(tvalRun[i]);
+			cm_TVAL_ACC.add(tvalAcc[i]);
+			cm_TVAL_DEC.add(tvalDec[i]);
+			cm_T_FAST.add(fastDecaySetting[i]);
+			cm_TON_MIN.add(minOnTime[i]);
+			cm_TOFF_MIN.add(minOffTime[i]);
+		}
+		SerialUSB.print(F(",\"currentMode\":"));
+		serializeJson(doc, SerialUSB);
 	}
+	Watchdog.reset();
 #endif
 
-	// Servo Mode
-	JsonObject svm = doc["servoMode"].to<JsonObject>();
-	JsonArray svm_kP = svm["kP"].to<JsonArray>();
-	JsonArray svm_kI = svm["kI"].to<JsonArray>();
-	JsonArray svm_kD = svm["kD"].to<JsonArray>();
-	for (i = 0; i < NUM_OF_MOTOR; i++) {
-		svm_kP.add(kP[i]);
-		svm_kI.add(kI[i]);
-		svm_kD.add(kD[i]);
+	{
+		JsonDocument doc;
+		JsonObject obj = doc.to<JsonObject>();
+		JsonArray svm_kP = obj["kP"].to<JsonArray>();
+		JsonArray svm_kI = obj["kI"].to<JsonArray>();
+		JsonArray svm_kD = obj["kD"].to<JsonArray>();
+		for (i = 0; i < NUM_OF_MOTOR; i++) {
+			svm_kP.add(kP[i]);
+			svm_kI.add(kI[i]);
+			svm_kD.add(kD[i]);
+		}
+		SerialUSB.print(F(",\"servoMode\":"));
+		serializeJson(doc, SerialUSB);
 	}
 
-	serializeJson(doc, SerialUSB);
-	SerialUSB.println();
+	SerialUSB.println(F("}"));
 }
 
 void printStatusAsJson() {
-	JsonDocument doc;
-	JsonArray motors = doc["motors"].to<JsonArray>();
+	SerialUSB.print(F("{\"motors\":["));
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
-		JsonObject motor = motors.add<JsonObject>();
-		motor["position"] = stepper[i].getPos();
-		motor["speed"] = stepper[i].getSpeed();
-		motor["busy"] = busy[i];
-		motor["hiz"] = HiZ[i];
-		motor["dir"] = dir[i];
-		motor["motorStatus"] = motorStatus[i];
-		motor["homeSw"] = homeSwState[i];
-		motor["uvlo"] = uvloStatus[i];
-		motor["thermalStatus"] = thermalStatus[i];
+		if (i > 0) SerialUSB.print(F(","));
+		{
+			JsonDocument doc;
+			JsonObject obj = doc.to<JsonObject>();
+			obj["position"] = stepper[i].getPos();
+			obj["speed"] = stepper[i].getSpeed();
+			obj["busy"] = busy[i];
+			obj["hiz"] = HiZ[i];
+			obj["dir"] = dir[i];
+			obj["motorStatus"] = motorStatus[i];
+			obj["homeSw"] = homeSwState[i];
+			obj["uvlo"] = uvloStatus[i];
+			obj["thermalStatus"] = thermalStatus[i];
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-		motor["limitSw"] = limitSwState[i];
+			obj["limitSw"] = limitSwState[i];
 #endif
-		motor["servo"] = isServoMode[i];
+			obj["servo"] = isServoMode[i];
+			serializeJson(doc, SerialUSB);
+		}
 		Watchdog.reset();
 	}
-	serializeJson(doc, SerialUSB);
-	SerialUSB.println();
+	SerialUSB.println(F("]}"));
 }
 
 void receiveConfigJson() {

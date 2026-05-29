@@ -753,7 +753,29 @@ void printConfigAsJson() {
 }
 
 void printStatusAsJson() {
-	SerialUSB.print(F("{\"motors\":["));
+	SerialUSB.print(F("{\"board\":{"));
+	SerialUSB.print(F("\"product\":\""));
+	SerialUSB.print(PRODUCT_NAME);
+	SerialUSB.print(F("\",\"firmwareVersion\":["));
+	SerialUSB.print(firmwareVersion[0]); SerialUSB.print(',');
+	SerialUSB.print(firmwareVersion[1]); SerialUSB.print(',');
+	SerialUSB.print(firmwareVersion[2]);
+	SerialUSB.print(F("],\"myIp\":["));
+	for (uint8_t j = 0; j < 4; j++) {
+		if (j > 0) SerialUSB.print(',');
+		SerialUSB.print(myIp[j]);
+	}
+	SerialUSB.print(F("],\"myId\":"));
+	SerialUSB.print(myId);
+	SerialUSB.print(F(",\"linkStatus\":"));
+	SerialUSB.print(Ethernet.linkStatus());
+#ifdef HAVE_SD
+	SerialUSB.print(F(",\"sdInitialized\":"));
+	SerialUSB.print(sdInitializeSucceeded ? F("true") : F("false"));
+	SerialUSB.print(F(",\"configLoaded\":"));
+	SerialUSB.print(configFileParseSucceeded ? F("true") : F("false"));
+#endif
+	SerialUSB.print(F("},\"motors\":["));
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
 		if (i > 0) SerialUSB.print(F(","));
 		{
@@ -762,16 +784,22 @@ void printStatusAsJson() {
 			obj["position"] = stepper[i].getPos();
 			obj["speed"] = stepper[i].getSpeed();
 			obj["busy"] = busy[i];
-			obj["hiz"] = HiZ[i];
+			obj["HiZ"] = HiZ[i];
 			obj["dir"] = dir[i];
 			obj["motorStatus"] = motorStatus[i];
-			obj["homeSw"] = homeSwState[i];
-			obj["uvlo"] = uvloStatus[i];
 			obj["thermalStatus"] = thermalStatus[i];
+			obj["uvlo"] = uvloStatus[i];
+			// OCD and stall are latched flags in the STATUS register — reading clears them.
+			// checkStatus() in the main loop already reads and reports them via OSC.
+			// A second read here would consume and lose the event, so we report false.
+			obj["ocd"] = false;
+			obj["stall"] = false;
+			obj["homeSwState"] = homeSwState[i];
+			obj["homingStatus"] = homingStatus[i];
+			obj["isServoMode"] = isServoMode[i];
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-			obj["limitSw"] = limitSwState[i];
+			obj["limitSwState"] = limitSwState[i];
 #endif
-			obj["servo"] = isServoMode[i];
 			serializeJson(doc, SerialUSB);
 		}
 		Watchdog.reset();

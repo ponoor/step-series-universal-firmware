@@ -831,10 +831,6 @@ void receiveConfigJson() {
 void applyConfigFromJson(JsonDocument& doc) {
 	uint8_t i;
 
-	// Information — configName only; version and targetProduct are read-only
-	const char* name = doc["information"]["configName"];
-	if (name) configName = name;
-
 	// Network
 	JsonObject network = doc["network"];
 	JsonArray network_myIp = network["myIp"];

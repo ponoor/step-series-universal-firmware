@@ -100,6 +100,7 @@ void OSCMsgReceive()
             bMsgRouted |= msgIN.route("/setDestIp", setDestIp);
             bMsgRouted |= msgIN.route("/getVersion", getVersion);
             bMsgRouted |= msgIN.route("/getConfigName", getConfigName);
+            bMsgRouted |= msgIN.route("/setConfigName", setConfigName);
             bMsgRouted |= msgIN.route("/getConfigRegister", getConfigRegister);
             bMsgRouted |= msgIN.route("/getStatus", getStatus);
             bMsgRouted |= msgIN.route("/getStatusList", getStatusList);
@@ -257,6 +258,17 @@ void getConfigName(OSCMessage &msg, int addrOffset)
     Udp.endPacket();
     newMes.empty();
     turnOnTXL();
+}
+
+void setConfigName(OSCMessage &msg, int addrOffset)
+{
+    if (msg.isString(0))
+    {
+        int len = msg.getDataLength(0);
+        char buf[len + 1];
+        msg.getString(0, buf, len + 1);
+        configName = buf;
+    }
 }
 
 void getConfigRegister(uint8_t deviceId)

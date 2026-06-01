@@ -25,6 +25,7 @@ void free(uint8_t motorId);
 void setDestIp(OSCMessage& msg, int addrOffset);
 void getVersion(OSCMessage& msg, int addrOffset);
 void getConfigName(OSCMessage& msg, int addrOffset);
+void setConfigName(OSCMessage& msg, int addrOffset);
 void getConfigRegister(uint8_t deviceId);
 void getConfigRegister(OSCMessage& msg, int addrOffset);
 void resetMotorDriver(OSCMessage& msg, int addrOffset);

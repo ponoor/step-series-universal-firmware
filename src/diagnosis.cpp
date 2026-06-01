@@ -846,6 +846,17 @@ void receiveConfigJson() {
 	// heap usage low  Ethe same structural fix as printConfigAsJson.
 	// ---------------------------------------------------------------
 
+	// Information — update configName only; version and targetProduct are read-only
+	{
+		JsonDocument filter;
+		filter["information"]["configName"] = true;
+		JsonDocument doc;
+		deserializeJson(doc, jsonBuf, DeserializationOption::Filter(filter));
+		const char* name = doc["information"]["configName"];
+		if (name) configName = name;
+	}
+	Watchdog.reset();
+
 	// Network
 	{
 		JsonDocument filter;

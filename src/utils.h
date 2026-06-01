@@ -15,8 +15,8 @@
 #include "globals.h"
 #include "boardsSpecific.h"
 
-char* p_(const __FlashStringHelper* fmt, ...);
-#define p(fmt, ...)	 p_(F(fmt), ##__VA_ARGS__)
+char* dbgPrint_(const __FlashStringHelper* fmt, ...);
+#define dbgPrint(fmt, ...)	 dbgPrint_(F(fmt), ##__VA_ARGS__)
 
 inline __attribute__((always_inline)) void fastDigitalWriteHIGH(uint32_t ulPin)
 {

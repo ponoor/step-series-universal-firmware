@@ -88,10 +88,10 @@ void setup()
     }
 
     myId = getMyId();
-    p("myId:%ld\n", myId);
+    dbgPrint("myId:%ld\n", myId);
     delay(1);
     initEthernet();
-    p("eth ok\n");
+    dbgPrint("eth ok\n");
     isWaitingSendBootMsg = bootedMsgEnable;
 
     Watchdog.enable(100);

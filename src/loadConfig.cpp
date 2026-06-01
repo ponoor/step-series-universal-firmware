@@ -25,7 +25,7 @@ void loadConfig() {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     if (error) {
-        p("Failed to read file: %s\nUsing default configuration.\n", error.f_str());
+        dbgPrint("Failed to read file: %s\nUsing default configuration.\n", error.f_str());
     }
     configFileParseSucceeded = (error == DeserializationError::Ok);
     file.close();

@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STEP Series Config Tool</title>
+<style>
+:root {
+  --bg: #f0f0f0;
+  --surface: #ffffff;
+  --border: #cccccc;
+  --text: #1a1a1a;
+  --text-muted: #666666;
+  --accent: #0066cc;
+  --accent-hover: #004ea3;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --err: #cf222e;
+  --panel-hd: #e8e8e8;
+  --input-bg: #ffffff;
+  --mono: 'Courier New', Courier, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161b22;
+    --surface: #21262d;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --accent-hover: #79c0ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --panel-hd: #2d333b;
+    --input-bg: #2d333b;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);font-size:14px;background:var(--bg);color:var(--text);line-height:1.5}
+#app{max-width:1600px;margin:0 auto;padding:10px 12px}
+
+/* ── Toolbar ── */
+#toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:8px}
+#toolbar h1{font-size:15px;font-weight:700;margin-right:6px;white-space:nowrap}
+.sep{width:1px;height:22px;background:var(--border);margin:0 2px}
+button{font-family:var(--sans);font-size:13px;padding:4px 11px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);cursor:pointer;white-space:nowrap;line-height:1.4}
+button:hover:not(:disabled){background:var(--panel-hd)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+button.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+button.danger{background:var(--err);color:#fff;border-color:var(--err)}
+button.danger:hover:not(:disabled){opacity:.85}
+
+/* ── Status bar ── */
+#status-bar{display:flex;align-items:center;gap:10px;padding:5px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:8px;font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--border);flex-shrink:0}
+.dot.on{background:var(--ok)}
+#status-msg{color:var(--text-muted);flex:1}
+
+/* ── Panels ── */
+details{background:var(--surface);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden}
+details summary{font-weight:600;font-size:13px;padding:7px 12px;background:var(--panel-hd);cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:'▶';font-size:9px;transition:transform .15s;display:inline-block}
+details[open] summary::before{transform:rotate(90deg)}
+.panel-body{padding:10px 12px;overflow-x:auto}
+
+/* ── Per-axis table ── */
+.ax-tbl{border-collapse:collapse;font-size:13px;min-width:100%}
+.ax-tbl th,.ax-tbl td{padding:3px 8px;border:1px solid var(--border);vertical-align:middle}
+.ax-tbl thead th{background:var(--panel-hd);font-weight:600;text-align:center;white-space:nowrap}
+.ax-tbl td:first-child{font-weight:500;white-space:nowrap;min-width:200px;text-align:left}
+.ax-tbl td{text-align:center}
+
+/* ── Inputs ── */
+input[type=number],input[type=text],select{
+  font-family:var(--mono);font-size:13px;padding:2px 5px;
+  border:1px solid var(--border);border-radius:3px;
+  background:var(--input-bg);color:var(--text);width:80px}
+input[type=number]:focus,input[type=text]:focus,select:focus{
+  outline:2px solid var(--accent);outline-offset:-1px}
+input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
+select{width:auto;min-width:80px}
+
+/* ── Network layout ── */
+.net-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:4px 24px}
+.frow{display:flex;align-items:center;gap:8px;padding:2px 0}
+.frow label{font-weight:500;min-width:190px;white-space:nowrap;font-size:13px}
+.octet-grp,.mac-grp{display:flex;align-items:center;gap:2px}
+.octet-grp input,.mac-grp input{width:52px;text-align:center}
+.sep-dot{color:var(--text-muted);padding:0 1px}
+
+/* ── Board info ── */
+.bi-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center;max-width:480px}
+.bi-grid .lbl{font-weight:500;white-space:nowrap;font-size:13px}
+.bi-grid .val{font-family:var(--mono);font-size:13px}
+
+/* ── Tooltips ── */
+.tip{display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;background:var(--text-muted);color:var(--surface);font-size:10px;font-weight:700;cursor:help;margin-left:4px;flex-shrink:0;position:relative}
+.tip[title]{vertical-align:middle}
+
+/* ── Section copy button ── */
+.copy-btn{font-size:12px;padding:2px 8px;margin-bottom:7px}
+
+/* ── Scalar row below axis table ── */
+.scalar-row{display:flex;align-items:center;gap:8px;padding:5px 0;margin-top:4px;border-top:1px solid var(--border);font-size:13px}
+.scalar-row label{font-weight:500;min-width:240px}
+
+/* ── Badges ── */
+.badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-family:var(--mono);font-weight:700;line-height:1.4}
+.b-ok{background:#d1f0d8;color:#1a7f37}
+.b-warn{background:#fff3cd;color:#9a6700}
+.b-err{background:#ffd6d6;color:#cf222e}
+.b-off{background:var(--panel-hd);color:var(--text-muted)}
+@media(prefers-color-scheme:dark){
+  .b-ok{background:#1a3a22;color:#3fb950}
+  .b-warn{background:#3a2800;color:#d29922}
+  .b-err{background:#3a1416;color:#f85149}
+}
+
+/* ── Error banner ── */
+#err-banner{display:none;background:#ffd6d6;border:1px solid #f5a0a0;border-radius:4px;padding:7px 12px;margin-bottom:8px;font-size:13px;color:#cf222e}
+@media(prefers-color-scheme:dark){#err-banner{background:#3a1416;color:#f85149;border-color:#7a2020}}
+
+/* ── No serial warning ── */
+#no-serial{display:none;background:#fff3cd;border:1px solid #d4a000;border-radius:4px;padding:7px 12px;margin-bottom:8px;font-size:13px;color:#9a6700}
+@media(prefers-color-scheme:dark){#no-serial{background:#3a2800;color:#d29922;border-color:#664d00}}
+
+/* ── Disconnected banner ── */
+#dc-banner{display:none;background:#fff3cd;border:1px solid #d4a000;border-radius:4px;padding:7px 12px;margin-bottom:8px;font-size:13px;color:#9a6700;align-items:center;gap:10px}
+#dc-banner.show{display:flex}
+#dc-banner .dc-msg{flex:1}
+@media(prefers-color-scheme:dark){#dc-banner{background:#3a2800;color:#d29922;border-color:#664d00}}
+</style>
+</head>
+<body>
+<div id="app">
+
+<div id="no-serial">⚠ Web Serial API is not available (requires Chrome or Edge). Serial features disabled — Load JSON / Download JSON still work.</div>
+<div id="dc-banner">
+  <span>⚠ Serial connection lost.</span>
+  <span class="dc-msg">You can unplug the USB cable, or reconnect to resume.</span>
+  <button class="primary" onclick="reconnect()">↺ Reconnect</button>
+  <button onclick="dismissDisconnect()">✕ Dismiss</button>
+</div>
+<div id="err-banner"></div>
+
+<div id="toolbar">
+  <h1>STEP Series Config Tool <span style="font-weight:400;color:var(--text-muted);font-size:12px">v2.0</span></h1>
+  <div class="sep"></div>
+  <button id="btn-connect" class="primary">⬡ Connect</button>
+  <button id="btn-read" disabled>↓ Read from Board</button>
+  <button id="btn-save" disabled>↑ Save to SD</button>
+  <button id="btn-reboot" class="danger" disabled>↺ Reboot</button>
+  <button id="btn-poll" disabled>▶ Start Status</button>
+  <div class="sep"></div>
+  <button id="btn-load">📂 Load JSON</button>
+  <button id="btn-download">💾 Download JSON</button>
+  <input type="file" id="file-input" accept=".json,.txt" style="display:none">
+</div>
+
+<div id="status-bar">
+  <div class="dot" id="conn-dot"></div>
+  <span id="status-msg">Disconnected — use Load JSON for offline work, or Connect for serial access</span>
+</div>
+
+<!-- Board Info -->
+<details open>
+  <summary>Board Info</summary>
+  <div class="panel-body">
+    <div class="bi-grid">
+      <span class="lbl">Product</span><span class="val" id="bi-product">—</span>
+      <span class="lbl">Firmware Version</span><span class="val" id="bi-fw">—</span>
+      <span class="lbl">Config Version</span><span class="val" id="bi-cfgver">—</span>
+      <span class="lbl">Config Name</span>
+      <span><input type="text" id="bi-cfgname" maxlength="32" value="" placeholder="(empty)" style="width:200px;font-family:var(--mono);font-size:13px"></span>
+      <span class="lbl">Target Product</span><span class="val" id="bi-target">—</span>
+      <span class="lbl">Axes</span>
+      <span>
+        <select id="bi-axes-sel" onchange="onAxesChange(+this.value)">
+          <option value="1">1 — STEP100</option>
+          <option value="2">2 — STEP200</option>
+          <option value="4" selected>4 — STEP400</option>
+          <option value="8">8 — STEP800</option>
+        </select>
+        <span class="val" id="bi-axes-fixed" style="display:none"></span>
+      </span>
+    </div>
+  </div>
+</details>
+
+<!-- Network -->
+<details>
+  <summary>Network</summary>
+  <div class="panel-body">
+    <div class="net-grid" id="net-fields"></div>
+  </div>
+</details>
+
+<!-- Alarm & Report -->
+<details>
+  <summary>Alarm &amp; Report</summary>
+  <div class="panel-body">
+    <button class="copy-btn" id="copy-alarm" onclick="copyAxis1ToAll('alarm')">Copy Motor 1 → All</button>
+    <div id="alarm-tbl"></div>
+    <div class="scalar-row">
+      <label>Report position list interval (ms) <span class="tip" title="Interval in milliseconds at which all motor positions are reported as a list in a single OSC message. 0 = disabled.">?</span></label>
+      <input type="number" id="f-rpl-interval" min="0" max="65535" value="0" style="width:90px">
+    </div>
+  </div>
+</details>
+
+<!-- Driver Settings -->
+<details>
+  <summary>Driver Settings</summary>
+  <div class="panel-body">
+    <button class="copy-btn" id="copy-driver" onclick="copyAxis1ToAll('driver')">Copy Motor 1 → All</button>
+    <div id="driver-tbl"></div>
+  </div>
+</details>
+
+<!-- Speed Profile -->
+<details>
+  <summary>Speed Profile</summary>
+  <div class="panel-body">
+    <button class="copy-btn" id="copy-speed" onclick="copyAxis1ToAll('speed')">Copy Motor 1 → All</button>
+    <div id="speed-tbl"></div>
+  </div>
+</details>
+
+<!-- Voltage Mode -->
+<details>
+  <summary>Voltage Mode</summary>
+  <div class="panel-body">
+    <button class="copy-btn" id="copy-voltage" onclick="copyAxis1ToAll('voltage')">Copy Motor 1 → All</button>
+    <div id="voltage-tbl"></div>
+  </div>
+</details>
+
+<!-- Current Mode (PowerSTEP01 boards only — shown when currentMode key present) -->
+<details id="current-panel" style="display:none">
+  <summary>Current Mode (PowerSTEP01)</summary>
+  <div class="panel-body">
+    <button class="copy-btn" id="copy-current" onclick="copyAxis1ToAll('current')">Copy Motor 1 → All</button>
+    <div id="current-tbl"></div>
+  </div>
+</details>
+
+<!-- Servo Mode -->
+<details>
+  <summary>Servo Mode</summary>
+  <div class="panel-body">
+    <button class="copy-btn" id="copy-servo" onclick="copyAxis1ToAll('servo')">Copy Motor 1 → All</button>
+    <div id="servo-tbl"></div>
+  </div>
+</details>
+
+<!-- Real-time Status -->
+<details id="rt-panel">
+  <summary>Real-time Status</summary>
+  <div class="panel-body">
+    <div id="rt-board" style="margin-bottom:10px;font-size:13px"></div>
+    <div id="rt-motors" style="overflow-x:auto"></div>
+  </div>
+</details>
+
+</div><!-- #app -->
+
+<script>
+'use strict';
+
+// ── State ────────────────────────────────────────────────────────────────────
+let port = null, reader = null, writer = null;
+let inputDone = null, outputDone = null;
+let rxBuf = '';
+let lineQ = [], lineWaiters = [];
+let numAxes = 4;
+let loadedCfg = null;
+let isPolling = false, isSaving = false;
+let pollTimer = null;
+let macHex = false; // display MAC as hex; JSON stores decimal
+let lastPort = null;        // retained across closeConn() so reconnect() can reuse it
+let intentionalClose = false; // suppresses the disconnect banner during cmdReboot()
+
+// ── Serial: connect / disconnect ─────────────────────────────────────────────
+async function connectSerial() {
+  try {
+    port = await navigator.serial.requestPort();
+    lastPort = port;
+    await _openPort('Connected — reading config…');
+  } catch (e) {
+    setStatus('Connection failed: ' + e.message);
+    port = null; reader = null; writer = null;
+  }
+}
+
+// Open port, set up streams, start read loop, then read config.
+// Callers must set `port` before calling. Handles stale-open state.
+async function _openPort(statusMsg) {
+  // If the port object is still in an open state from a previous session
+  // (e.g. port.close() failed silently after an unexpected disconnect),
+  // force it closed before re-opening.
+  if (port.readable !== null) {
+    try { await port.close(); } catch(_) {}
+  }
+  // SAMD21 native USB CDC ignores baud rate; 9600 is for Web Serial API compliance only
+  await port.open({ baudRate: 9600 });
+
+  const dec = new TextDecoderStream();
+  inputDone = port.readable.pipeTo(dec.writable);
+  reader = dec.readable.getReader();
+
+  const enc = new TextEncoderStream();
+  outputDone = enc.readable.pipeTo(port.writable);
+  writer = enc.writable.getWriter();
+
+  runReadLoop();
+  setConnected(true);
+  setStatus(statusMsg);
+  await cmdReadConfig();
+}
+
+async function runReadLoop() {
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) { handleDisconnect(); break; }
+      rxBuf += value;
+      let idx;
+      while ((idx = rxBuf.indexOf('\n')) >= 0) {
+        const line = rxBuf.slice(0, idx).trim();
+        rxBuf = rxBuf.slice(idx + 1);
+        if (line) deliverLine(line);
+      }
+    }
+  } catch (e) {
+    handleDisconnect();
+  }
+}
+
+function deliverLine(line) {
+  // Only deliver JSON lines (starting with '{') to command handlers.
+  // Boot messages (e.g. "myId:0", "eth ok") and diagnostic text are ignored.
+  if (!line.startsWith('{')) {
+    console.log('[serial]', line);
+    return;
+  }
+  if (lineWaiters.length > 0) {
+    lineWaiters.shift()(line);
+  } else {
+    lineQ.push(line);
+  }
+}
+
+function nextLine(ms = 6000) {
+  if (lineQ.length > 0) return Promise.resolve(lineQ.shift());
+  return new Promise((res, rej) => {
+    const tid = setTimeout(() => {
+      const i = lineWaiters.indexOf(res);
+      if (i >= 0) lineWaiters.splice(i, 1);
+      rej(new Error('Serial response timeout'));
+    }, ms);
+    lineWaiters.push(line => { clearTimeout(tid); res(line); });
+  });
+}
+
+async function send(str) {
+  if (!writer) throw new Error('Not connected');
+  await writer.write(str);
+}
+
+async function handleDisconnect() {
+  if (!port) return;
+  if (intentionalClose) return; // cmdReboot() is managing the close; suppress banner
+  await closeConn();
+  document.getElementById('dc-banner').classList.add('show');
+}
+
+function dismissDisconnect() {
+  document.getElementById('dc-banner').classList.remove('show');
+}
+
+async function closeConn() {
+  stopPoll();
+  try { await reader?.cancel(); } catch(e) {}
+  try { await inputDone; } catch(e) {}
+  // close() (not releaseLock()) signals EOF to TextEncoderStream, which closes
+  // enc.readable, which allows outputDone (the pipeTo Promise) to complete.
+  // releaseLock() alone leaves enc.readable open and outputDone hangs forever.
+  try { await writer?.close(); } catch(e) {}
+  try { await outputDone; } catch(e) {}
+  try { await port?.close(); } catch(e) {}
+  port = null; reader = null; writer = null; inputDone = null; outputDone = null;
+  rxBuf = ''; lineQ = []; lineWaiters = [];
+  setConnected(false);
+}
+
+async function reconnect() {
+  document.getElementById('dc-banner').classList.remove('show');
+  if (lastPort) {
+    // Reuse the previously-granted port without showing the port picker again
+    port = lastPort;
+    try {
+      try { await port.close(); } catch(_) {} // clear any stale open state
+      setStatus('Reconnecting…');
+      await _openPort('Reconnected — reading config…');
+    } catch(e) {
+      setStatus('Reconnect failed: ' + e.message);
+      port = null; reader = null; writer = null;
+      lastPort = null; // next attempt will show port picker
+    }
+  } else {
+    await connectSerial();
+  }
+}
+
+// ── Serial: commands ─────────────────────────────────────────────────────────
+async function cmdReadConfig() {
+  try {
+    lineQ = []; // drain any stale lines
+    await send('G');
+    const line = await nextLine(8000);
+    applyConfig(JSON.parse(line));
+    setStatus('Config loaded from board');
+  } catch (e) {
+    showErr('Read failed: ' + e.message);
+  }
+}
+
+async function cmdReadStatus() {
+  if (!writer || isSaving) return;
+  try {
+    await send('T');
+    const line = await nextLine(3000);
+    updateStatusPanel(JSON.parse(line));
+  } catch (e) {
+    if (port) console.warn('Status poll:', e.message);
+  }
+}
+
+async function cmdSaveConfig() {
+  if (!writer) return;
+  isSaving = true;
+  lineQ = []; // discard stale responses (e.g. {"result":"ok"} from a prior rebootBoard())
+  try {
+    const cfg = assembleConfig();
+    if (!cfg) return;
+    setStatus('Saving…');
+    await send(JSON.stringify(cfg));
+    const line = await nextLine(15000);
+    const res = JSON.parse(line);
+    if (res.result === 'ok') {
+      setStatus('✓ ' + res.message);
+      if (confirm('Config saved.\n\nReboot now to apply changes?')) await cmdReboot();
+    } else {
+      showErr('Save failed: ' + res.message);
+      setStatus('Save failed');
+    }
+  } catch (e) {
+    showErr('Save error: ' + e.message);
+  } finally {
+    isSaving = false;
+  }
+}
+
+async function cmdReboot() {
+  // Set flag before closing so handleDisconnect() (fired by the reader cancel inside
+  // closeConn) knows not to show the unexpected-disconnect banner.
+  intentionalClose = true;
+  try {
+    await send('R');
+    await nextLine(3000).catch(() => {});
+  } catch(e) {}
+  await closeConn();
+  intentionalClose = false;
+  setStatus('Board rebooted — click Connect to reconnect.');
+}
+
+// ── Polling ──────────────────────────────────────────────────────────────────
+function togglePoll() {
+  isPolling ? stopPoll() : startPoll();
+}
+
+function startPoll() {
+  if (!port) return;
+  isPolling = true;
+  document.getElementById('btn-poll').textContent = '■ Stop Status';
+  cmdReadStatus();
+  pollTimer = setInterval(cmdReadStatus, 1000);
+}
+
+function stopPoll() {
+  isPolling = false;
+  clearInterval(pollTimer); pollTimer = null;
+  document.getElementById('btn-poll').textContent = '▶ Start Status';
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function setConnected(on) {
+  document.getElementById('conn-dot').className = 'dot' + (on ? ' on' : '');
+  const btn = document.getElementById('btn-connect');
+  btn.textContent = on ? '✕ Disconnect' : '⬡ Connect';
+  btn.className = on ? 'danger' : 'primary';
+  ['btn-read','btn-save','btn-reboot','btn-poll'].forEach(id => {
+    document.getElementById(id).disabled = !on;
+  });
+  if (!on) stopPoll();
+}
+
+function setStatus(msg) { document.getElementById('status-msg').textContent = msg; }
+
+function showErr(msg) {
+  const el = document.getElementById('err-banner');
+  el.textContent = '⚠ ' + msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 9000);
+}
+
+// ── Axis change ───────────────────────────────────────────────────────────────
+function onAxesChange(n) {
+  numAxes = n;
+  renderAllTables();
+}
+
+function detectAxes(cfg) {
+  if (cfg?.board?.numMotors) return cfg.board.numMotors;
+  const arr = cfg?.speedProfile?.acc;
+  if (Array.isArray(arr) && arr.length >= 1) return arr.length;
+  for (const sec of Object.values(cfg || {})) {
+    if (sec && typeof sec === 'object') {
+      for (const v of Object.values(sec)) {
+        if (Array.isArray(v) && v.length >= 1) return v.length;
+      }
+    }
+  }
+  return 4;
+}
+
+// ── Presence checks (based on loadedCfg) ─────────────────────────────────────
+const has = {
+  currentMode: () => loadedCfg != null && 'currentMode' in loadedCfg,
+  limitSw:     () => loadedCfg?.driverSettings != null && 'limitSwMode' in loadedCfg.driverSettings,
+  brake:       () => loadedCfg?.driverSettings != null && 'electromagnetBrakeEnable' in loadedCfg.driverSettings,
+  slewRate:    () => loadedCfg?.driverSettings != null && 'slewRate' in loadedCfg.driverSettings,
+  isCurrentM:  () => loadedCfg?.driverSettings != null && 'isCurrentMode' in loadedCfg.driverSettings,
+};
+
+// ── Section row definitions ───────────────────────────────────────────────────
+const STEP_MODES = [{v:0,l:'0 – Full'},{v:1,l:'1 – Half'},{v:2,l:'2 – 1/4'},{v:3,l:'3 – 1/8'},
+  {v:4,l:'4 – 1/16'},{v:5,l:'5 – 1/32'},{v:6,l:'6 – 1/64'},{v:7,l:'7 – 1/128'}];
+
+const SLEW_RATES = [{v:0,l:'0 – 114 V/µs'},{v:1,l:'1 – 220 V/µs'},{v:2,l:'2 – 400 V/µs'},
+  {v:3,l:'3 – 520 V/µs'},{v:4,l:'4 – 790 V/µs'},{v:5,l:'5 – 980 V/µs'}];
+
+// OC threshold values differ between PowerSTEP01 (STEP400/100) and L6470 (STEP800/200)
+// STEP400/100: 312.5mA steps × 16 (0–15), STEP800/200: 375mA steps × 16 (0–15)
+// We build both and choose based on board detection; default to STEP400 values.
+const OC_THRESH_STEP400 = [
+  {v:0,l:'312.5 mA'},{v:1,l:'625 mA'},{v:2,l:'937.5 mA'},{v:3,l:'1250 mA'},
+  {v:4,l:'1562.5 mA'},{v:5,l:'1875 mA'},{v:6,l:'2187.5 mA'},{v:7,l:'2500 mA'},
+  {v:8,l:'2812.5 mA'},{v:9,l:'3125 mA'},{v:10,l:'3437.5 mA'},{v:11,l:'3750 mA'},
+  {v:12,l:'4062.5 mA'},{v:13,l:'4375 mA'},{v:14,l:'4687.5 mA'},{v:15,l:'5000 mA'},
+];
+const OC_THRESH_STEP800 = [
+  {v:0,l:'375 mA'},{v:1,l:'750 mA'},{v:2,l:'1125 mA'},{v:3,l:'1500 mA'},
+  {v:4,l:'1875 mA'},{v:5,l:'2250 mA'},{v:6,l:'2625 mA'},{v:7,l:'3000 mA'},
+  {v:8,l:'3375 mA'},{v:9,l:'3750 mA'},{v:10,l:'4125 mA'},{v:11,l:'4500 mA'},
+  {v:12,l:'4875 mA'},{v:13,l:'5250 mA'},{v:14,l:'5625 mA'},{v:15,l:'6000 mA'},
+];
+function getOcThreshOpts() {
+  // Use 800-series values if board is L6470 (no currentMode), else 400-series
+  const product = loadedCfg?.board?.product || '';
+  return (product === 'STEP800' || product === 'STEP200') ? OC_THRESH_STEP800 : OC_THRESH_STEP400;
+}
+
+function alarmRows() { return [
+  {k:'reportBUSY',            l:'Report BUSY flag',                t:'chk', tip:'Send OSC notification when the motor driver BUSY flag changes.'},
+  {k:'reportHiZ',             l:'Report HiZ state',                t:'chk', tip:'Send OSC notification when the motor enters or leaves High-Impedance (coils de-energised) state.'},
+  {k:'reportHomeSwStatus',    l:'Report HOME switch status',       t:'chk', tip:'Send OSC notification when the HOME sensor input changes.'},
+  {k:'reportLimitSwStatus',   l:'Report LIMIT switch status',      t:'chk', hide:!has.limitSw(), tip:'Send OSC notification when the LIMIT sensor input changes.'},
+  {k:'reportDir',             l:'Report motor direction',          t:'chk', tip:'Send OSC notification when the motor direction changes.'},
+  {k:'reportMotorStatus',     l:'Report motor status',             t:'chk', tip:'Send OSC notification when the motor status changes (Stopped / Accel / Decel / Const).'},
+  {k:'reportSwEvn',           l:'Report HOME switch event',        t:'chk', tip:'Send OSC notification when a HOME switch trigger event (falling edge) occurs.'},
+  {k:'reportUVLO',            l:'Report undervoltage lockout',     t:'chk', tip:'Send OSC notification when the under-voltage lockout (UVLO) condition occurs.'},
+  {k:'reportThermalStatus',   l:'Report thermal status',           t:'chk', tip:'Send OSC notification when the driver chip thermal status changes.'},
+  {k:'reportOCD',             l:'Report overcurrent detection',    t:'chk', tip:'Send OSC notification when an overcurrent shutdown event occurs.'},
+  {k:'reportStall',           l:'Report motor stall detection',    t:'chk', tip:'Send OSC notification when motor stalling is detected.'},
+  {k:'OCThreshold',           l:'Overcurrent detection threshold', t:'sel', opts:getOcThreshOpts(), tip:'Current threshold that triggers the overcurrent protection shutdown. Steps differ between PowerSTEP01 (STEP400/100) and L6470 (STEP800/200).'},
+  {k:'reportPositionInterval',l:'Report position interval (ms)',   t:'num', min:0, max:65535, tip:'Interval in milliseconds at which each motor position is reported automatically. 0 = disabled.'},
+];}
+
+function driverRows() { return [
+  {k:'homingAtStartup',          l:'Homing when system starts',              t:'chk', tip:'Start a homing procedure automatically when the board boots.'},
+  {k:'homingDirection',          l:'Homing direction',                       t:'sel', opts:[{v:0,l:'0 – Reverse'},{v:1,l:'1 – Forward'}], dflt:0, outBool:true, tip:'The direction the motor moves during the homing procedure.'},
+  {k:'homingSpeed',              l:'Homing speed (step/s)',                  t:'num', min:0, step:0.01, tip:'Motor speed during the homing procedure in steps per second.'},
+  {k:'homeSwMode',               l:'HOME switch mode',                       t:'chk', tip:'Unchecked = Latch mode (motor stops at switch). Checked = Position mode (records position at switch).'},
+  {k:'prohibitMotionOnHomeSw',   l:'Prohibit motion when HOME SW active',   t:'chk', tip:'Prevent motor motion when the HOME switch is triggered.'},
+  {k:'limitSwMode',              l:'LIMIT switch mode',                      t:'chk', hide:!has.limitSw(), tip:'Unchecked = Latch mode (motor stops at switch). Checked = Position mode (records position at switch).'},
+  {k:'prohibitMotionOnLimitSw',  l:'Prohibit motion when LIMIT SW active',  t:'chk', hide:!has.limitSw(), tip:'Prevent motor motion when the LIMIT switch is triggered.'},
+  {k:'goUntilTimeout',           l:'goUntil timeout (ms)',                   t:'num', min:0, max:4294967295, tip:'Maximum time allowed for a goUntil command before timeout. 0 = no timeout.'},
+  {k:'releaseSwTimeout',         l:'releaseSW timeout (ms)',                 t:'num', min:0, max:4294967295, tip:'Maximum time allowed for a releaseSW command before timeout. 0 = no timeout.'},
+  {k:'stepMode',                 l:'Step mode (microstep resolution)',       t:'sel', opts:STEP_MODES, tip:'Microstep resolution. Full step = coarsest, 1/128 = finest. Higher resolution = lower speed range at same step rate.'},
+  {k:'isCurrentMode',            l:'Current mode enable (PowerSTEP01)',      t:'chk', hide:!has.isCurrentM(), tip:'Enable current control mode. Voltage mode (unchecked) is the default.'},
+  {k:'slewRate',                 l:'Slew rate (output voltage rise speed)',  t:'sel', opts:SLEW_RATES, hide:!has.slewRate(), tip:'Rate of output voltage change. Lower slew rate reduces EMI but limits max speed.'},
+  {k:'electromagnetBrakeEnable', l:'Electromagnetic brake enable',           t:'chk', hide:!has.brake(), tip:'Enable control of an external electromagnetic brake.'},
+  {k:'brakeTransitionDuration',  l:'Brake transition duration (ms)',         t:'num', min:0, hide:!has.brake(), tip:'Time for the brake to transition between engaged and released states.'},
+];}
+
+function speedRows() { return [
+  {k:'acc',          l:'Acceleration (step/s²)', t:'num', min:0, step:0.01, tip:'Motor acceleration rate in steps per second squared.'},
+  {k:'dec',          l:'Deceleration (step/s²)', t:'num', min:0, step:0.01, tip:'Motor deceleration rate in steps per second squared.'},
+  {k:'maxSpeed',     l:'Maximum speed (step/s)', t:'num', min:0, step:0.01, tip:'Maximum motor speed in steps per second.'},
+  {k:'fullStepSpeed',l:'Full step speed (step/s)',t:'num', min:0, step:0.01, tip:'Speed at which the driver switches from microstepping to full-step mode.'},
+  {k:'minSpeed',     l:'Minimum speed (step/s)', t:'num', min:0, step:0.01, tip:'Minimum motor speed in steps per second. Set to 0 to disable.'},
+];}
+
+function voltageRows() { return [
+  {k:'KVAL_HOLD',           l:'KVAL_HOLD (0–255)',           t:'num', min:0, max:255, tip:'Motor voltage coefficient during hold (motor stopped, energised). Higher = more holding torque but more heat.'},
+  {k:'KVAL_RUN',            l:'KVAL_RUN (0–255)',            t:'num', min:0, max:255, tip:'Motor voltage coefficient during constant-speed running.'},
+  {k:'KVAL_ACC',            l:'KVAL_ACC (0–255)',            t:'num', min:0, max:255, tip:'Motor voltage coefficient during acceleration.'},
+  {k:'KVAL_DEC',            l:'KVAL_DEC (0–255)',            t:'num', min:0, max:255, tip:'Motor voltage coefficient during deceleration.'},
+  {k:'INT_SPEED',           l:'INT_SPEED (0–16383)',         t:'num', min:0, max:16383, tip:'Speed threshold at which BEMF compensation intersects. Tune for smooth back-EMF compensation.'},
+  {k:'ST_SLP',              l:'ST_SLP (0–255)',              t:'num', min:0, max:255, tip:'BEMF compensation slope coefficient at start. Affects compensation at low speed.'},
+  {k:'FN_SLP_ACC',          l:'FN_SLP_ACC (0–255)',          t:'num', min:0, max:255, tip:'BEMF compensation slope coefficient during acceleration at high speed.'},
+  {k:'FN_SLP_DEC',          l:'FN_SLP_DEC (0–255)',          t:'num', min:0, max:255, tip:'BEMF compensation slope coefficient during deceleration at high speed.'},
+  {k:'STALL_TH',            l:'Stall detection threshold (0–127)', t:'num', min:0, max:127, tip:'Stall detection threshold. Higher value = less sensitive to stall.'},
+  {k:'lowSpeedOptimizeEnable',l:'Low speed optimize enable', t:'chk', tip:'Enable low-speed optimization for smoother motor motion at very low speeds.'},
+  {k:'lowSpeedOptimize',    l:'Low speed optimize value',   t:'num', min:0, step:0.01, tip:'Low-speed optimization coefficient. Only active when low speed optimize is enabled.'},
+];}
+
+function currentRows() { return [
+  {k:'TVAL_HOLD',l:'TVAL_HOLD (0–127)', t:'num', min:0, max:127, tip:'Target current during hold. Each step ≈ 78mA (PowerSTEP01).'},
+  {k:'TVAL_RUN', l:'TVAL_RUN (0–127)',  t:'num', min:0, max:127, tip:'Target current during constant-speed running.'},
+  {k:'TVAL_ACC', l:'TVAL_ACC (0–127)',  t:'num', min:0, max:127, tip:'Target current during acceleration.'},
+  {k:'TVAL_DEC', l:'TVAL_DEC (0–127)',  t:'num', min:0, max:127, tip:'Target current during deceleration.'},
+  {k:'T_FAST',   l:'T_FAST (0–255)',    t:'num', min:0, max:255, tip:'Maximum fast decay time. Controls current decay during a step.'},
+  {k:'TON_MIN',  l:'TON_MIN (0–255)',   t:'num', min:0, max:255, tip:'Minimum ON time for the current control PWM.'},
+  {k:'TOFF_MIN', l:'TOFF_MIN (0–255)',  t:'num', min:0, max:255, tip:'Minimum OFF time for the current control PWM.'},
+];}
+
+function servoRows() { return [
+  {k:'kP',l:'kP (Proportional gain)', t:'num', min:0, step:0.0001, tip:'Proportional gain for the servo PID controller.'},
+  {k:'kI',l:'kI (Integral gain)',     t:'num', min:0, step:0.0001, tip:'Integral gain for the servo PID controller.'},
+  {k:'kD',l:'kD (Derivative gain)',   t:'num', min:0, step:0.0001, tip:'Derivative gain for the servo PID controller.'},
+];}
+
+// ── Table rendering ───────────────────────────────────────────────────────────
+function buildTable(secId, rows) {
+  let hdr = '<tr><th>Parameter</th>';
+  for (let i = 0; i < numAxes; i++) hdr += `<th>Motor ${i+1}</th>`;
+  hdr += '</tr>';
+
+  let body = '';
+  for (const r of rows) {
+    if (r.hide) continue;
+    const tip = r.tip ? ` <span class="tip" title="${r.tip}">?</span>` : '';
+    body += `<tr><td>${r.l}${tip}</td>`;
+    for (let i = 0; i < numAxes; i++) {
+      body += `<td>${inputHtml(secId, r, i)}</td>`;
+    }
+    body += '</tr>';
+  }
+  return `<table class="ax-tbl"><thead>${hdr}</thead><tbody>${body}</tbody></table>`;
+}
+
+function inputHtml(secId, r, axisIdx) {
+  const id = `f-${secId}-${r.k}-${axisIdx}`;
+  if (r.t === 'chk') return `<input type="checkbox" id="${id}">`;
+  if (r.t === 'sel') {
+    const dflt = r.dflt ?? r.opts[0]?.v ?? 0;
+    const opts = r.opts.map(o=>`<option value="${o.v}"${o.v===dflt?' selected':''}>${o.l}</option>`).join('');
+    return `<select id="${id}">${opts}</select>`;
+  }
+  const mn = r.min != null ? `min="${r.min}"` : '';
+  const mx = r.max != null ? `max="${r.max}"` : '';
+  const st = r.step != null ? `step="${r.step}"` : '';
+  return `<input type="number" id="${id}" ${mn} ${mx} ${st} value="0">`;
+}
+
+function renderAllTables() {
+  document.getElementById('alarm-tbl').innerHTML   = buildTable('alarm',   alarmRows());
+  document.getElementById('driver-tbl').innerHTML  = buildTable('driver',  driverRows());
+  document.getElementById('speed-tbl').innerHTML   = buildTable('speed',   speedRows());
+  document.getElementById('voltage-tbl').innerHTML = buildTable('voltage', voltageRows());
+  document.getElementById('current-tbl').innerHTML = buildTable('current', currentRows());
+  document.getElementById('servo-tbl').innerHTML   = buildTable('servo',   servoRows());
+
+  document.getElementById('current-panel').style.display = has.currentMode() ? '' : 'none';
+
+  // Hide "Copy → All" when single axis
+  const hideCopy = numAxes <= 1;
+  ['copy-alarm','copy-driver','copy-speed','copy-voltage','copy-current','copy-servo'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = hideCopy ? 'none' : '';
+  });
+
+  if (loadedCfg) populateForm(loadedCfg);
+}
+
+// ── Network section ───────────────────────────────────────────────────────────
+function renderNetwork() {
+  const inp = (id, w) =>
+    `<input type="number" id="${id}" min="0" max="255" value="0" style="width:${w}px;font-family:var(--mono);font-size:13px;padding:2px 3px;text-align:center;border:1px solid var(--border);border-radius:3px;background:var(--input-bg);color:var(--text)">`;
+
+  const tipHtml = t => t ? ` <span class="tip" title="${t}">?</span>` : '';
+
+  function ipRow(key, label, tip) {
+    const parts = [0,1,2,3].map(i => inp(`net-${key}-${i}`, 52) + (i<3?'<span class="sep-dot">.</span>':'')).join('');
+    return `<div class="frow"><label>${label}${tipHtml(tip)}</label><div class="octet-grp">${parts}</div></div>`;
+  }
+
+  function macRow() {
+    const parts = [0,1,2,3,4,5].map(i => {
+      return `<input type="text" id="net-mac-${i}" maxlength="3" value="0" style="width:38px;font-family:var(--mono);font-size:13px;padding:2px 2px;text-align:center;border:1px solid var(--border);border-radius:3px;background:var(--input-bg);color:var(--text)">`
+        + (i<5?'<span class="sep-dot">:</span>':'');
+    }).join('');
+    const tip = 'Hardware MAC address of the board. Stored as decimal integers in the JSON. Use "Show Hex" to switch display to hexadecimal.';
+    return `<div class="frow"><label>MAC address${tipHtml(tip)}</label><div class="mac-grp">${parts}<button onclick="toggleMacHex()" id="mac-hex-btn" style="font-size:11px;padding:1px 6px;margin-left:6px">Show Hex</button></div></div>`;
+  }
+
+  function numRow(key, label, max, tip) {
+    return `<div class="frow"><label>${label}${tipHtml(tip)}</label><input type="number" id="net-${key}" min="0" max="${max}" value="0" style="width:90px;font-family:var(--mono);font-size:13px;padding:2px 5px;border:1px solid var(--border);border-radius:3px;background:var(--input-bg);color:var(--text)"></div>`;
+  }
+
+  function chkRow(key, label, tip) {
+    return `<div class="frow"><label>${label}${tipHtml(tip)}</label><input type="checkbox" id="net-${key}"></div>`;
+  }
+
+  document.getElementById('net-fields').innerHTML = `
+    <div>
+      ${ipRow('myIp',   'My IP address',  'IP address assigned to this board. Must be unique on the network.')}
+      ${ipRow('destIp', 'Destination IP', 'IP address of the host computer that receives OSC messages from the board. Set to the IP of the machine running your OSC application.')}
+      ${ipRow('dns',    'DNS server',     'DNS server address. Not used by the board firmware directly, but stored for reference.')}
+      ${ipRow('gateway','Gateway',        'Default gateway (router) IP address for the local network.')}
+      ${ipRow('subnet', 'Subnet mask',    'Subnet mask for the local network. Typically 255.255.255.0.')}
+    </div>
+    <div>
+      ${macRow()}
+      ${numRow('inPort', 'Incoming OSC port', 65535, 'UDP port the board listens on for incoming OSC messages.')}
+      ${numRow('outPort','Outgoing OSC port', 65535, 'UDP port the board sends OSC messages to on the destination IP.')}
+      ${chkRow('isMyIpAddId',          'Add board ID to my IP',          'If checked, the board ID number is added to the last octet of My IP. Useful for assigning unique IPs to multiple boards automatically.')}
+      ${chkRow('isOutPortAddId',       'Add board ID to outgoing port',  'If checked, the board ID is added to the outgoing OSC port number. Allows a host to distinguish messages from multiple boards on separate ports.')}
+      ${chkRow('isMacAddId',           'Add board ID to MAC address',    'If checked, the board ID is added to the last byte of the MAC address to ensure uniqueness when running multiple boards.')}
+      ${chkRow('bootedMsgEnable',      'Send booted message',            'If checked, the board sends an OSC notification message when it has finished booting.')}
+      ${chkRow('canSendMsgBeforeDestIp','Allow send before dest IP set', 'If checked, the board can send OSC messages even before the destination IP has been configured via OSC. Useful for boot-time notifications.')}
+      ${chkRow('reportError',          'Report errors via OSC',          'If checked, the board sends OSC error messages when a configuration or runtime error occurs.')}
+    </div>`;
+}
+
+function fillNetwork(net) {
+  if (!net) return;
+  ['myIp','destIp','dns','gateway','subnet'].forEach(key => {
+    const arr = net[key] || [];
+    for (let i = 0; i < 4; i++) {
+      const el = document.getElementById(`net-${key}-${i}`);
+      if (el) el.value = arr[i] ?? 0;
+    }
+  });
+
+  const mac = net.mac || [];
+  macHex = false;
+  for (let i = 0; i < 6; i++) {
+    const el = document.getElementById(`net-mac-${i}`);
+    if (el) el.value = mac[i] ?? 0;
+  }
+  const btn = document.getElementById('mac-hex-btn');
+  if (btn) btn.textContent = 'Show Hex';
+
+  if (net.inPort  != null) { const el = document.getElementById('net-inPort');  if (el) el.value = net.inPort;  }
+  if (net.outPort != null) { const el = document.getElementById('net-outPort'); if (el) el.value = net.outPort; }
+
+  ['isMyIpAddId','isOutPortAddId','isMacAddId','bootedMsgEnable','canSendMsgBeforeDestIp','reportError'].forEach(k => {
+    const el = document.getElementById(`net-${k}`);
+    if (el && net[k] != null) el.checked = net[k];
+  });
+}
+
+function getMacBytes() {
+  return [0,1,2,3,4,5].map(i => {
+    const el = document.getElementById(`net-mac-${i}`);
+    if (!el) return 0;
+    const v = macHex ? parseInt(el.value, 16) : parseInt(el.value, 10);
+    return isNaN(v) ? 0 : v;
+  });
+}
+
+function toggleMacHex() {
+  const bytes = getMacBytes();
+  macHex = !macHex;
+  for (let i = 0; i < 6; i++) {
+    const el = document.getElementById(`net-mac-${i}`);
+    if (el) el.value = macHex ? bytes[i].toString(16).padStart(2,'0') : bytes[i];
+  }
+  const btn = document.getElementById('mac-hex-btn');
+  if (btn) btn.textContent = macHex ? 'Show Dec' : 'Show Hex';
+}
+
+// ── Config apply ──────────────────────────────────────────────────────────────
+function applyConfig(cfg) {
+  loadedCfg = cfg;
+  numAxes = detectAxes(cfg);
+
+  // Axis selector: lock if from board (has board key), editable if from file
+  const sel = document.getElementById('bi-axes-sel');
+  const fixed = document.getElementById('bi-axes-fixed');
+  if (cfg.board) {
+    sel.style.display = 'none';
+    fixed.style.display = '';
+    fixed.textContent = `${numAxes} (from board)`;
+  } else {
+    sel.style.display = '';
+    sel.value = numAxes;
+    fixed.style.display = 'none';
+  }
+
+  // Board info
+  const b = cfg.board || {};
+  document.getElementById('bi-product').textContent = b.product || '—';
+  document.getElementById('bi-fw').textContent = Array.isArray(b.firmwareVersion) ? b.firmwareVersion.join('.') : '—';
+
+  const info = cfg.information || {};
+  document.getElementById('bi-cfgver').textContent =
+    Array.isArray(info.configVersion) ? info.configVersion.join('.') : (info.configVersion ?? '—');
+  document.getElementById('bi-cfgname').value = info.configName || '';
+  document.getElementById('bi-target').textContent = info.targetProduct || '—';
+
+  renderAllTables();
+  fillNetwork(cfg.network);
+}
+
+function populateForm(cfg) {
+  populateSection('alarm',   cfg.alarmAndReport || {}, alarmRows());
+  populateSection('driver',  cfg.driverSettings  || {}, driverRows());
+  populateSection('speed',   cfg.speedProfile    || {}, speedRows());
+  populateSection('voltage', cfg.voltageMode     || {}, voltageRows());
+  if (has.currentMode()) populateSection('current', cfg.currentMode || {}, currentRows());
+  populateSection('servo',   cfg.servoMode       || {}, servoRows());
+
+  // reportPositionListInterval — scalar
+  const rpl = cfg.alarmAndReport?.reportPositionListInterval;
+  if (rpl != null) {
+    const el = document.getElementById('f-rpl-interval');
+    if (el) el.value = rpl;
+  }
+}
+
+// Handle goUntilTimeout firmware spelling vs goUnitlTimeout typo in older config files
+function getFromData(data, key) {
+  if (key in data) return data[key];
+  if (key === 'goUntilTimeout' && 'goUnitlTimeout' in data) return data['goUnitlTimeout'];
+  return undefined;
+}
+
+function dataHasKey(data, key) {
+  return key in data || (key === 'goUntilTimeout' && 'goUnitlTimeout' in data);
+}
+
+function populateSection(secId, data, rows) {
+  for (const r of rows) {
+    if (r.hide) continue;
+    const vals = getFromData(data, r.k);
+    if (!Array.isArray(vals)) continue;
+    for (let i = 0; i < numAxes && i < vals.length; i++) {
+      setFldVal(`f-${secId}-${r.k}-${i}`, vals[i], r.t);
+    }
+  }
+}
+
+function setFldVal(id, val, type) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (type === 'chk') { el.checked = !!val; }
+  else {
+    // Coerce boolean to int for select elements.
+    // Old config files may store homingDirection as true/false instead of 1/0.
+    el.value = (typeof val === 'boolean') ? (val ? 1 : 0) : val;
+  }
+}
+
+function getFldVal(id, type) {
+  const el = document.getElementById(id);
+  if (!el) return 0;
+  if (type === 'chk') return el.checked;
+  if (type === 'sel') return parseInt(el.value, 10);
+  const v = parseFloat(el.value);
+  return isNaN(v) ? 0 : v;
+}
+
+// ── Config assembly (form → JSON) ─────────────────────────────────────────────
+function assembleConfig() {
+  if (!loadedCfg) { showErr('Load a config first.'); return null; }
+
+  const info = loadedCfg.information || {};
+  const cfg = {
+    information: {
+      configName: document.getElementById('bi-cfgname')?.value ?? info.configName ?? '',
+      targetProduct: info.targetProduct ?? '',
+      configVersion: info.configVersion,
+    },
+    network: assembleNetwork(),
+    alarmAndReport: assembleSec('alarm', alarmRows(), loadedCfg.alarmAndReport || {}),
+    driverSettings: assembleSec('driver', driverRows(), loadedCfg.driverSettings || {}),
+    speedProfile:   assembleSec('speed',  speedRows(),  loadedCfg.speedProfile  || {}),
+    voltageMode:    assembleSec('voltage',voltageRows(),loadedCfg.voltageMode   || {}),
+  };
+
+  // reportPositionListInterval scalar
+  const rplEl = document.getElementById('f-rpl-interval');
+  if (rplEl) cfg.alarmAndReport.reportPositionListInterval = parseInt(rplEl.value, 10) || 0;
+
+  if (has.currentMode()) cfg.currentMode = assembleSec('current', currentRows(), loadedCfg.currentMode || {});
+  cfg.servoMode = assembleSec('servo', servoRows(), loadedCfg.servoMode || {});
+
+  return cfg;
+}
+
+function assembleSec(secId, rows, origData) {
+  const result = {};
+  for (const r of rows) {
+    if (r.hide) continue;
+    if (!dataHasKey(origData, r.k)) continue;
+    const arr = [];
+    for (let i = 0; i < numAxes; i++) {
+      let v = getFldVal(`f-${secId}-${r.k}-${i}`, r.t);
+      if (r.outBool) v = !!v;   // e.g. homingDirection: write as boolean per config format
+      arr.push(v);
+    }
+    result[r.k] = arr;
+  }
+  return result;
+}
+
+function assembleNetwork() {
+  const net = {};
+  ['myIp','destIp','dns','gateway','subnet'].forEach(key => {
+    net[key] = [0,1,2,3].map(i => {
+      const el = document.getElementById(`net-${key}-${i}`);
+      return el ? (parseInt(el.value, 10) || 0) : 0;
+    });
+  });
+  net.mac = getMacBytes();
+  ['inPort','outPort'].forEach(k => {
+    const el = document.getElementById(`net-${k}`);
+    if (el) net[k] = parseInt(el.value, 10) || 0;
+  });
+  ['isMyIpAddId','isOutPortAddId','isMacAddId','bootedMsgEnable','canSendMsgBeforeDestIp','reportError'].forEach(k => {
+    const el = document.getElementById(`net-${k}`);
+    if (el) net[k] = el.checked;
+  });
+  return net;
+}
+
+// ── Copy Motor 1 → All ────────────────────────────────────────────────────────
+function copyAxis1ToAll(secId) {
+  if (numAxes <= 1) return;
+  const rowMap = {alarm:alarmRows, driver:driverRows, speed:speedRows, voltage:voltageRows, current:currentRows, servo:servoRows};
+  const rows = rowMap[secId]?.() || [];
+  for (const r of rows) {
+    if (r.hide) continue;
+    const src = document.getElementById(`f-${secId}-${r.k}-0`);
+    if (!src) continue;
+    for (let i = 1; i < numAxes; i++) {
+      const dst = document.getElementById(`f-${secId}-${r.k}-${i}`);
+      if (!dst) continue;
+      dst[r.t === 'chk' ? 'checked' : 'value'] = src[r.t === 'chk' ? 'checked' : 'value'];
+    }
+  }
+}
+
+// ── File operations ───────────────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fr = new FileReader();
+  fr.onload = ev => {
+    try {
+      applyConfig(JSON.parse(ev.target.result));
+      setStatus('Loaded from file: ' + file.name);
+    } catch(err) {
+      showErr('JSON parse failed: ' + err.message);
+    }
+  };
+  fr.readAsText(file);
+  e.target.value = '';
+});
+
+function downloadConfig() {
+  const cfg = assembleConfig();
+  if (!cfg) return;
+  const blob = new Blob([JSON.stringify(cfg, null, '\t')], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'config.txt'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Real-time status panel ────────────────────────────────────────────────────
+function bclass(val, thresholds) {
+  // thresholds: [[value, className], ...] checked in order; last is default
+  for (const [v, cls] of thresholds) {
+    if (val === v) return cls;
+  }
+  return thresholds[thresholds.length - 1][1];
+}
+
+function updateStatusPanel(s) {
+  const b = s.board || {};
+  const motors = s.motors || [];
+
+  const ip = Array.isArray(b.myIp) ? b.myIp.join('.') : '—';
+  const linkLabel = ['Unknown','● Link ON','● Link OFF'];
+  const linkClass = [' b-off',' b-ok',' b-err'];
+  const li = b.linkStatus ?? 0;
+  document.getElementById('rt-board').innerHTML =
+    `<b>Product:</b> ${b.product||'—'} &nbsp;|&nbsp; ` +
+    `<b>IP:</b> <span style="font-family:var(--mono)">${ip}</span> &nbsp;|&nbsp; ` +
+    `<b>Link:</b> <span class="badge${linkClass[li]||' b-off'}">${linkLabel[li]||li}</span> &nbsp;|&nbsp; ` +
+    `<b>SD:</b> <span class="badge ${b.sdInitialized?'b-ok':'b-err'}">${b.sdInitialized?'OK':'ERR'}</span> &nbsp;|&nbsp; ` +
+    `<b>Config:</b> <span class="badge ${b.configLoaded?'b-ok':'b-warn'}">${b.configLoaded?'Loaded':'Not loaded'}</span>`;
+
+  const MSTATUS = ['Stopped','Accel','Decel','Const'];
+  const TSTATUS  = ['Normal','Warn','Bridge SD','Device SD'];
+  const TCLASS   = ['b-ok','b-warn','b-err','b-err'];
+
+  let tbl = `<table class="ax-tbl"><thead><tr><th>Parameter</th>${motors.map((_,i)=>`<th>Motor ${i+1}</th>`).join('')}</tr></thead><tbody>`;
+
+  const rows = [
+    ['Position',  m => `<span style="font-family:var(--mono)">${m.position ?? 0}</span>`],
+    ['Speed (step/s)', m => `<span style="font-family:var(--mono)">${(m.speed||0).toFixed(1)}</span>`],
+    ['Busy',      m => m.busy ? '<span class="badge b-warn">BUSY</span>' : '<span class="badge b-ok">IDLE</span>'],
+    ['HiZ',       m => m.HiZ  ? '<span class="badge b-warn">HiZ</span>'  : '<span class="badge b-ok">ACTIVE</span>'],
+    ['Direction', m => m.dir  ? 'FWD' : 'REV'],
+    ['Motor Status', m => MSTATUS[m.motorStatus] ?? m.motorStatus],
+    ['Thermal',   m => `<span class="badge ${TCLASS[m.thermalStatus??0]}">${TSTATUS[m.thermalStatus??0]}</span>`],
+    ['UVLO',      m => m.uvlo  ? '<span class="badge b-err">UVLO</span>'  : '<span class="badge b-ok">OK</span>'],
+    ['OCD',       m => m.ocd   ? '<span class="badge b-err">OCD</span>'   : '<span class="badge b-ok">OK</span>'],
+    ['Stall',     m => m.stall ? '<span class="badge b-warn">STALL</span>': '<span class="badge b-ok">OK</span>'],
+    ['Home SW',   m => m.homeSwState ? '<span class="badge b-warn">ON</span>' : '<span class="badge b-off">OFF</span>'],
+    ['Homing Status', m => m.homingStatus ?? '—'],
+    ['Servo Mode',m => m.isServoMode ? '<span class="badge b-ok">ON</span>' : '<span class="badge b-off">OFF</span>'],
+  ];
+
+  for (const [label, fn] of rows) {
+    tbl += `<tr><td>${label}</td>${motors.map(m=>`<td>${fn(m)}</td>`).join('')}</tr>`;
+  }
+  tbl += '</tbody></table>';
+  document.getElementById('rt-motors').innerHTML = tbl;
+}
+
+// ── Button wiring ─────────────────────────────────────────────────────────────
+document.getElementById('btn-connect').addEventListener('click', async () => {
+  if (port) { await closeConn(); setStatus('Disconnected'); }
+  else await connectSerial();
+});
+document.getElementById('btn-read').addEventListener('click', () => cmdReadConfig());
+document.getElementById('btn-save').addEventListener('click', () => cmdSaveConfig());
+document.getElementById('btn-reboot').addEventListener('click', async () => {
+  if (confirm('Reboot the board now?\n\nUnsaved changes will be lost.')) await cmdReboot();
+});
+document.getElementById('btn-poll').addEventListener('click', () => togglePoll());
+document.getElementById('btn-load').addEventListener('click', () => document.getElementById('file-input').click());
+document.getElementById('btn-download').addEventListener('click', () => downloadConfig());
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(function init() {
+  if (!navigator.serial) {
+    document.getElementById('no-serial').style.display = 'block';
+    document.getElementById('btn-connect').disabled = true;
+  }
+  renderNetwork();
+  renderAllTables();
+})();
+</script>
+</body>
+</html>

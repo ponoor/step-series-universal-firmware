@@ -4,6 +4,7 @@
 
 #include "oscListeners.h"
 #include "utils.h"
+#include "diagnosis.h"
 
 void OSCMsgReceive()
 {
@@ -181,6 +182,7 @@ void OSCMsgReceive()
             bMsgRouted |= msgIN.route("/getElPos", getElPos);
             bMsgRouted |= msgIN.route("/setElPos", setElPos);
             bMsgRouted |= msgIN.route("/resetDevice", resetDevice);
+            bMsgRouted |= msgIN.route("/saveConfig", saveConfig);
             turnOnRXL();
             if ((!bMsgRouted) && reportErrors)
             {
@@ -331,6 +333,11 @@ void resetDevice(OSCMessage &msg, int addrOffset)
 {
     void (*resetFunc)(void) = 0;
     resetFunc();
+}
+
+void saveConfig(OSCMessage &msg, int addrOffset)
+{
+    saveCurrentConfigToSd();
 }
 
 void reportError(OSCMessage &msg, int addrOffset)

@@ -36,8 +36,14 @@ void testBrake();
 void printConfigAsJson();
 void printStatusAsJson();
 void receiveConfigJson();
-void applyConfigFromJson(JsonDocument& doc);
-void saveConfigToSd(JsonDocument& doc);
 void rebootBoard();
+
+// Shared config serialization
+void serializeConfigSectionsTo(Print& out);
+
+// SD save helpers
+void saveRawConfigToSd(const char* json, size_t len);
+void saveCurrentConfigAsJson();
+void saveCurrentConfigToSd();
 
 #endif

@@ -753,7 +753,28 @@ void printConfigAsJson() {
 }
 
 void printStatusAsJson() {
-	SerialUSB.print(F("{\"motors\":["));
+	SerialUSB.print(F("{\"board\":"));
+	{
+		JsonDocument doc;
+		JsonObject board = doc.to<JsonObject>();
+		board["product"] = PRODUCT_NAME;
+		JsonArray fwVer = board["firmwareVersion"].to<JsonArray>();
+		for (uint8_t i = 0; i < 3; i++) fwVer.add(firmwareVersion[i]);
+		JsonArray boardMyIp = board["myIp"].to<JsonArray>();
+		for (uint8_t i = 0; i < 4; i++) boardMyIp.add(myIp[i]);
+		board["myId"] = getMyId();
+		board["linkStatus"] = Ethernet.linkStatus();
+#ifdef HAVE_SD
+		board["sdInitialized"] = sdInitializeSucceeded;
+		board["configLoaded"] = configFileParseSucceeded;
+#else
+		board["sdInitialized"] = false;
+		board["configLoaded"] = false;
+#endif
+		serializeJson(doc, SerialUSB);
+	}
+
+	SerialUSB.print(F(",\"motors\":["));
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
 		if (i > 0) SerialUSB.print(F(","));
 		{
@@ -762,16 +783,19 @@ void printStatusAsJson() {
 			obj["position"] = stepper[i].getPos();
 			obj["speed"] = stepper[i].getSpeed();
 			obj["busy"] = busy[i];
-			obj["hiz"] = HiZ[i];
+			obj["HiZ"] = HiZ[i];
 			obj["dir"] = dir[i];
 			obj["motorStatus"] = motorStatus[i];
-			obj["homeSw"] = homeSwState[i];
+			obj["homeSwState"] = homeSwState[i];
 			obj["uvlo"] = uvloStatus[i];
 			obj["thermalStatus"] = thermalStatus[i];
+			obj["ocd"] = false;
+			obj["stall"] = false;
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-			obj["limitSw"] = limitSwState[i];
+			obj["limitSwState"] = limitSwState[i];
 #endif
-			obj["servo"] = isServoMode[i];
+			obj["homingStatus"] = homingStatus[i];
+			obj["isServoMode"] = isServoMode[i];
 			serializeJson(doc, SerialUSB);
 		}
 		Watchdog.reset();
@@ -830,6 +854,10 @@ void receiveConfigJson() {
 
 void applyConfigFromJson(JsonDocument& doc) {
 	uint8_t i;
+
+	// Information — configName only; version and targetProduct are read-only
+	const char* name = doc["information"]["configName"];
+	if (name) configName = name;
 
 	// Network
 	JsonObject network = doc["network"];

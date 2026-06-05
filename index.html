@@ -649,14 +649,21 @@ function voltageRows() { return [
   {k:'lowSpeedOptimize',    l:'Low speed optimize value',   t:'num', min:0, step:0.01, tip:'Low-speed optimization coefficient. Only active when low speed optimize is enabled.'},
 ];}
 
+// TVAL register → peak current mapping for STEP400 (sense resistor = 0.1 Ω):
+//   V_ref step = 7.8 mV (per PowerSTEP01 datasheet Table 18)
+//   I_peak = (TVAL + 1) × 7.8 mV / 0.1 Ω = (TVAL + 1) × 78 mA
+// Range: TVAL 0 → 78 mA, TVAL 127 → 9984 mA
+const TVAL_OPTS = Array.from({length:128}, (_, v) => ({v, l:`${(v+1)*78} mA (${v})`}));
+const TVAL_DEFAULT = 16; // firmware default (17 × 78 = 1326 mA)
+
 function currentRows() { return [
-  {k:'TVAL_HOLD',l:'TVAL_HOLD (0–127)', t:'num', min:0, max:127, tip:'Target current during hold. Each step ≈ 78mA (PowerSTEP01).'},
-  {k:'TVAL_RUN', l:'TVAL_RUN (0–127)',  t:'num', min:0, max:127, tip:'Target current during constant-speed running.'},
-  {k:'TVAL_ACC', l:'TVAL_ACC (0–127)',  t:'num', min:0, max:127, tip:'Target current during acceleration.'},
-  {k:'TVAL_DEC', l:'TVAL_DEC (0–127)',  t:'num', min:0, max:127, tip:'Target current during deceleration.'},
-  {k:'T_FAST',   l:'T_FAST (0–255)',    t:'num', min:0, max:255, tip:'Maximum fast decay time. Controls current decay during a step.'},
-  {k:'TON_MIN',  l:'TON_MIN (0–255)',   t:'num', min:0, max:255, tip:'Minimum ON time for the current control PWM.'},
-  {k:'TOFF_MIN', l:'TOFF_MIN (0–255)',  t:'num', min:0, max:255, tip:'Minimum OFF time for the current control PWM.'},
+  {k:'TVAL_HOLD',l:'TVAL_HOLD — hold current',        t:'sel', opts:TVAL_OPTS, dflt:TVAL_DEFAULT, tip:'Target current when the motor is stopped but energised. Lower values reduce heat during idle.'},
+  {k:'TVAL_RUN', l:'TVAL_RUN — run current',          t:'sel', opts:TVAL_OPTS, dflt:TVAL_DEFAULT, tip:'Target current during constant-speed running.'},
+  {k:'TVAL_ACC', l:'TVAL_ACC — acceleration current', t:'sel', opts:TVAL_OPTS, dflt:TVAL_DEFAULT, tip:'Target current during acceleration.'},
+  {k:'TVAL_DEC', l:'TVAL_DEC — deceleration current', t:'sel', opts:TVAL_OPTS, dflt:TVAL_DEFAULT, tip:'Target current during deceleration.'},
+  {k:'T_FAST',   l:'T_FAST (0–255)',    t:'num', min:0, max:255, tip:'Maximum fast decay time. Controls current decay during a step. See PowerSTEP01 datasheet for values.'},
+  {k:'TON_MIN',  l:'TON_MIN (0–255)',   t:'num', min:0, max:255, tip:'Minimum ON time for the current control PWM. See PowerSTEP01 datasheet for values.'},
+  {k:'TOFF_MIN', l:'TOFF_MIN (0–255)',  t:'num', min:0, max:255, tip:'Minimum OFF time for the current control PWM. See PowerSTEP01 datasheet for values.'},
 ];}
 
 function servoRows() { return [

@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include "wiring_private.h" // pinPeripheral() function
 #include <SPI.h>
-#include <SD.h>
 #include <Ethernet.h>
 #include <OSCMessage.h>         // https://github.com/CNMAT/OSC
 #include <ArduinoJson.h>        //https://arduinojson.org/
@@ -88,10 +87,10 @@ void setup()
     }
 
     myId = getMyId();
-    p("myId:%ld\n", myId);
+    dbgPrint("myId:%ld\n", myId);
     delay(1);
     initEthernet();
-    p("eth ok\n");
+    dbgPrint("eth ok\n");
     isWaitingSendBootMsg = bootedMsgEnable;
 
     Watchdog.enable(100);

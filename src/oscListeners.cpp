@@ -4,6 +4,7 @@
 
 #include "oscListeners.h"
 #include "utils.h"
+#include "diagnosis.h"
 
 void OSCMsgReceive()
 {
@@ -99,6 +100,7 @@ void OSCMsgReceive()
             bMsgRouted |= msgIN.route("/setDestIp", setDestIp);
             bMsgRouted |= msgIN.route("/getVersion", getVersion);
             bMsgRouted |= msgIN.route("/getConfigName", getConfigName);
+            bMsgRouted |= msgIN.route("/setConfigName", setConfigName);
             bMsgRouted |= msgIN.route("/getConfigRegister", getConfigRegister);
             bMsgRouted |= msgIN.route("/getStatus", getStatus);
             bMsgRouted |= msgIN.route("/getStatusList", getStatusList);
@@ -181,6 +183,7 @@ void OSCMsgReceive()
             bMsgRouted |= msgIN.route("/getElPos", getElPos);
             bMsgRouted |= msgIN.route("/setElPos", setElPos);
             bMsgRouted |= msgIN.route("/resetDevice", resetDevice);
+            bMsgRouted |= msgIN.route("/saveConfig", saveConfig);
             turnOnRXL();
             if ((!bMsgRouted) && reportErrors)
             {
@@ -249,12 +252,23 @@ void getConfigName(OSCMessage &msg, int addrOffset)
         return;
     }
     OSCMessage newMes("/configName");
-    newMes.add(configName.c_str()).add((int32_t)sdInitializeSucceeded).add((int32_t)configFileOpenSucceeded).add((int32_t)configFileParseSucceeded);
+    newMes.add(configName.c_str()).add((int32_t)sdInitializeSucceeded).add((int32_t)configFileOpenSucceeded).add((int32_t)configFileParseSucceeded).add(configFilename);
     Udp.beginPacket(destIp, outPort);
     newMes.send(Udp);
     Udp.endPacket();
     newMes.empty();
     turnOnTXL();
+}
+
+void setConfigName(OSCMessage &msg, int addrOffset)
+{
+    if (msg.isString(0))
+    {
+        int len = msg.getDataLength(0);
+        char buf[len + 1];
+        msg.getString(0, buf, len + 1);
+        configName = buf;
+    }
 }
 
 void getConfigRegister(uint8_t deviceId)
@@ -331,6 +345,11 @@ void resetDevice(OSCMessage &msg, int addrOffset)
 {
     void (*resetFunc)(void) = 0;
     resetFunc();
+}
+
+void saveConfig(OSCMessage &msg, int addrOffset)
+{
+    saveCurrentConfigToSd();
 }
 
 void reportError(OSCMessage &msg, int addrOffset)

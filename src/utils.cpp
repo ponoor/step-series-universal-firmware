@@ -6,7 +6,7 @@
 #include "oscListeners.h"
 #include <stdarg.h>
 
-char* p_(const __FlashStringHelper* fmt, ...)
+char* dbgPrint_(const __FlashStringHelper* fmt, ...)
 {
 	char buf[128]; // resulting string limited to 128 chars
 	va_list args;
@@ -118,13 +118,13 @@ void sendCommandError(uint8_t motorId, uint8_t errorNum)
     if (reportErrors) {
         sendTwoData(F("/error/command"), commandErrorText[errorNum].c_str(), motorId);
         //if (SerialUSB)
-            //p("/error/command %s %d\n", commandErrorText[errorNum].c_str(), motorId);
+            //dbgPrint("/error/command %s %d\n", commandErrorText[errorNum].c_str(), motorId);
     }
 }
 
 void resetMotorDriver(uint8_t deviceID) {
     if (MOTOR_ID_FIRST <= deviceID && deviceID <= MOTOR_ID_LAST) {
-        p("ID: %d CONFIG: 0x%02X", deviceID, stepper[deviceID-1].getParam(CONFIG));
+        dbgPrint("ID: %d CONFIG: 0x%02X", deviceID, stepper[deviceID-1].getParam(CONFIG));
         deviceID -= MOTOR_ID_FIRST;
         stepper[deviceID].resetDev();
         stepper[deviceID].hardHiZ(); // Required when HOME_SW is activated during reset L6470. PowerSTEP01 doesn't have this issue.
@@ -176,7 +176,7 @@ void resetMotorDriver(uint8_t deviceID) {
 
         delay(1);
         stepper[deviceID].getStatus(); // clears error flags
-        p(" -> 0x%02X\n", stepper[deviceID].getParam(CONFIG));
+        dbgPrint(" -> 0x%02X\n", stepper[deviceID].getParam(CONFIG));
     }
 }
 
@@ -198,7 +198,7 @@ void initEthernet() {
     Ethernet.init(PIN_W5500_CS);
     Ethernet.begin(mac, myIp, dns, gateway, subnet);
     Udp.begin(inPort);
-    p("New IP: %d.%d.%d.%d\n", myIp[0], myIp[1], myIp[2], myIp[3]);
+    dbgPrint("New IP: %d.%d.%d.%d\n", myIp[0], myIp[1], myIp[2], myIp[3]);
 }
 
 void sendBootMsg(uint32_t _currentTime) {

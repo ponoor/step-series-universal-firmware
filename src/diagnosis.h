@@ -32,4 +32,19 @@ void printHeader(String header);
 void testBrake();
 #endif
 
+// Web Serial API commands
+void printConfigAsJson();
+void printStatusAsJson();
+void receiveConfigJson();
+void receiveFilename();
+void rebootBoard();
+
+// Shared config serialization (writes all sections except "board" to any Print stream)
+void serializeConfigSectionsTo(Print& out);
+
+// SD save helpers
+void saveRawConfigToSd(const char* json, size_t len); // diagnostic-only, kept for reference
+void saveCurrentConfigAsJson();   // Web Serial: re-serialize globals → SD, respond with JSON
+void saveCurrentConfigToSd();     // OSC /saveConfig: same write, respond with OSC
+
 #endif

@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include "wiring_private.h" // pinPeripheral() function
 #include <SPI.h>
-#include <SD.h>
 #include <Ethernet.h>
 #include <OSCMessage.h>         // https://github.com/CNMAT/OSC
 #include <ArduinoJson.h>        //https://arduinojson.org/

@@ -83,14 +83,19 @@ input[type=number]:focus,input[type=text]:focus,select:focus{
   outline:2px solid var(--accent);outline-offset:-1px}
 input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
 select{width:auto;min-width:80px}
+#sd-filename{width:30ch;min-width:30ch}
 
 /* ── Network layout ── */
-.net-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:4px 24px}
-.frow{display:flex;align-items:center;gap:8px;padding:2px 0}
-.frow label{font-weight:500;min-width:190px;white-space:nowrap;font-size:13px}
-.octet-grp,.mac-grp{display:flex;align-items:center;gap:2px}
+.net-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:24px;row-gap:4px;align-items:start}
+.net-grid .net-col{min-width:0}
+.frow{display:grid;grid-template-columns:var(--net-label-width,210px) minmax(0,1fr);align-items:center;column-gap:8px;padding:2px 0;min-width:0}
+.frow label{font-weight:500;min-width:0;white-space:normal;line-height:1.25;font-size:13px}
+.octet-grp,.mac-grp{display:flex;align-items:center;gap:2px;min-width:0;flex-wrap:wrap}
 .octet-grp input,.mac-grp input{width:52px;text-align:center}
 .sep-dot{color:var(--text-muted);padding:0 1px}
+@media (max-width:1120px){
+  .net-grid{grid-template-columns:1fr}
+}
 
 /* ── Board info ── */
 .bi-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center;max-width:480px}
@@ -152,6 +157,7 @@ select{width:auto;min-width:80px}
   <div class="sep"></div>
   <button id="btn-connect" class="primary">⬡ Connect</button>
   <button id="btn-read" disabled>↓ Read from Board</button>
+  <input type="text" id="sd-filename" value="/config.txt" size="24" placeholder="/config.txt" title="SD card save filename" style="font-family:var(--mono);font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--input-bg);color:var(--text)">
   <button id="btn-save" disabled>↑ Save to SD</button>
   <button id="btn-reboot" class="danger" disabled>↺ Reboot</button>
   <button id="btn-poll" disabled>▶ Start Status</button>
@@ -283,6 +289,7 @@ let pollTimer = null;
 let macHex = false; // display MAC as hex; JSON stores decimal
 let lastPort = null;        // retained across closeConn() so reconnect() can reuse it
 let intentionalClose = false; // suppresses the disconnect banner during cmdReboot()
+let netLayoutTimer = null;
 
 // ── Serial: connect / disconnect ─────────────────────────────────────────────
 async function connectSerial() {
@@ -448,6 +455,18 @@ async function cmdSaveConfig() {
     const cfg = assembleConfig();
     if (!cfg) return;
     setStatus('Saving…');
+
+    // Send target filename first so firmware saves to the right path
+    const sdFilename = (document.getElementById('sd-filename')?.value?.trim()) || '/config.txt';
+    await send('F' + sdFilename + '\n');
+    const fnLine = await nextLine(3000);
+    const fnRes = JSON.parse(fnLine);
+    if (fnRes.result !== 'ok') {
+      showErr('Filename rejected: ' + fnRes.message);
+      setStatus('Save failed');
+      return;
+    }
+
     await send(JSON.stringify(cfg));
     const line = await nextLine(15000);
     const res = JSON.parse(line);
@@ -729,14 +748,14 @@ function renderNetwork() {
   }
 
   document.getElementById('net-fields').innerHTML = `
-    <div>
+    <div class="net-col">
       ${ipRow('myIp',   'My IP address',  'IP address assigned to this board. Must be unique on the network.')}
       ${ipRow('destIp', 'Destination IP', 'IP address of the host computer that receives OSC messages from the board. Set to the IP of the machine running your OSC application.')}
       ${ipRow('dns',    'DNS server',     'DNS server address. Not used by the board firmware directly, but stored for reference.')}
       ${ipRow('gateway','Gateway',        'Default gateway (router) IP address for the local network.')}
       ${ipRow('subnet', 'Subnet mask',    'Subnet mask for the local network. Typically 255.255.255.0.')}
     </div>
-    <div>
+    <div class="net-col">
       ${macRow()}
       ${numRow('inPort', 'Incoming OSC port', 65535, 'UDP port the board listens on for incoming OSC messages.')}
       ${numRow('outPort','Outgoing OSC port', 65535, 'UDP port the board sends OSC messages to on the destination IP.')}
@@ -747,7 +766,29 @@ function renderNetwork() {
       ${chkRow('canSendMsgBeforeDestIp','Allow send before dest IP set', 'If checked, the board can send OSC messages even before the destination IP has been configured via OSC. Useful for boot-time notifications.')}
       ${chkRow('reportError',          'Report errors via OSC',          'If checked, the board sends OSC error messages when a configuration or runtime error occurs.')}
     </div>`;
+
+  // Measure the first column and adapt label/column widths to avoid overlap.
+  requestAnimationFrame(layoutNetworkColumns);
 }
+
+function layoutNetworkColumns() {
+  const grid = document.getElementById('net-fields');
+  if (!grid) return;
+
+  const labels = grid.querySelectorAll('.frow label');
+  let widestLabel = 210;
+  labels.forEach(label => {
+    widestLabel = Math.max(widestLabel, Math.ceil(label.scrollWidth));
+  });
+
+  const labelWidth = Math.min(Math.max(widestLabel + 10, 210), 280);
+  grid.style.setProperty('--net-label-width', `${labelWidth}px`);
+}
+
+window.addEventListener('resize', () => {
+  clearTimeout(netLayoutTimer);
+  netLayoutTimer = setTimeout(layoutNetworkColumns, 120);
+});
 
 function fillNetwork(net) {
   if (!net) return;
@@ -819,6 +860,10 @@ function applyConfig(cfg) {
   const b = cfg.board || {};
   document.getElementById('bi-product').textContent = b.product || '—';
   document.getElementById('bi-fw').textContent = Array.isArray(b.firmwareVersion) ? b.firmwareVersion.join('.') : '—';
+  if (b.configFilename) {
+    const el = document.getElementById('sd-filename');
+    if (el) el.value = b.configFilename;
+  }
 
   const info = cfg.information || {};
   document.getElementById('bi-cfgver').textContent =
@@ -978,6 +1023,9 @@ document.getElementById('file-input').addEventListener('change', e => {
     try {
       applyConfig(JSON.parse(ev.target.result));
       setStatus('Loaded from file: ' + file.name);
+      // Suggest this filename for SD save (prepend '/' for SD path)
+      const sdEl = document.getElementById('sd-filename');
+      if (sdEl) sdEl.value = '/' + file.name;
     } catch(err) {
       showErr('JSON parse failed: ' + err.message);
     }
@@ -992,7 +1040,19 @@ function downloadConfig() {
   const blob = new Blob([JSON.stringify(cfg, null, '\t')], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'config.txt'; a.click();
+  a.href = url;
+
+  // Suggest filename: loaded SD filename → product name → fallback
+  let suggestedName = 'config.txt';
+  const sdFn = document.getElementById('sd-filename')?.value?.trim();
+  if (sdFn && sdFn.length > 1) {
+    suggestedName = sdFn.replace(/^\//, '');
+  } else if (loadedCfg?.board?.product) {
+    suggestedName = loadedCfg.board.product + '_config.json';
+  }
+  a.download = suggestedName;
+
+  a.click();
   URL.revokeObjectURL(url);
 }
 

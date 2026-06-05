@@ -4,6 +4,7 @@
 
 #include "diagnosis.h"
 #include "utils.h"
+#include <strings.h>
 
 String configVersionCompareString[5] = {
 	F("CONFIG_VERSION_UNDEFINED"),
@@ -45,6 +46,9 @@ void diagnosisCommand(uint8_t inByte) {
 	case '{':
 		receiveConfigJson();
 		break;
+	case 'F':
+		receiveFilename();
+		break;
 	case 'R':
 		rebootBoard();
 		break;
@@ -64,6 +68,7 @@ void printMenu() {
 	dbgPrint("G: print config as JSON\n");
 	dbgPrint("T: print status as JSON\n");
 	dbgPrint("{: receive config JSON\n");
+	dbgPrint("F<filename>: set save filename\n");
 	dbgPrint("R: reboot board\n");
 }
 
@@ -757,6 +762,7 @@ void printConfigAsJson() {
 		obj["numMotors"] = NUM_OF_MOTOR;
 		JsonArray fwVer = obj["firmwareVersion"].to<JsonArray>();
 		for (uint8_t i = 0; i < 3; i++) fwVer.add(firmwareVersion[i]);
+		obj["configFilename"] = configFilename;
 		SerialUSB.print(F("\"board\":"));
 		serializeJson(doc, SerialUSB);
 	}
@@ -782,9 +788,11 @@ void printStatusAsJson() {
 #ifdef HAVE_SD
 		board["sdInitialized"] = sdInitializeSucceeded;
 		board["configLoaded"] = configFileParseSucceeded;
+		board["configFilename"] = configFilename;
 #else
 		board["sdInitialized"] = false;
 		board["configLoaded"] = false;
+		board["configFilename"] = configFilename;
 #endif
 		serializeJson(doc, SerialUSB);
 	}
@@ -1147,6 +1155,36 @@ parse_error:
 }
 
 
+void receiveFilename() {
+	char buf[MAX_CONFIG_FILENAME];
+	uint8_t idx = 0;
+	uint32_t t = millis();
+	while ((millis() - t) < 2000) {
+		if (SerialUSB.available()) {
+			char c = SerialUSB.read();
+			if (c == '\n' || c == '\r') break;
+			if (idx < MAX_CONFIG_FILENAME - 1) buf[idx++] = c;
+			t = millis();
+		}
+	}
+	buf[idx] = '\0';
+
+	if (idx < 2 || buf[0] != '/') {
+		SerialUSB.println(F("{\"result\":\"error\",\"message\":\"Filename must start with /\"}"));
+		return;
+	}
+	char* dot = strrchr(buf, '.');
+	if (!dot || (strcasecmp(dot, ".json") != 0 && strcasecmp(dot, ".txt") != 0)) {
+		SerialUSB.println(F("{\"result\":\"error\",\"message\":\"Filename must end with .json or .txt\"}"));
+		return;
+	}
+
+	strncpy(configFilename, buf, MAX_CONFIG_FILENAME);
+	SerialUSB.print(F("{\"result\":\"ok\",\"configFilename\":\""));
+	SerialUSB.print(configFilename);
+	SerialUSB.println(F("\"}"));
+}
+
 void saveRawConfigToSd(const char* json, size_t len) {
 	// Not called by the current code path; saveCurrentConfigAsJson() is used instead.
 	// Kept to satisfy the header declaration.
@@ -1177,9 +1215,10 @@ static bool sdSaveConfig() {
 		return false;
 	}
 	Watchdog.disable();   // SD first-write can take > 128 ms; re-enabled after close
-	SD.remove(filename);
-	File file = SD.open(filename, O_RDWR | O_CREAT);
-	if (!file) {
+	sd.remove(configFilename);
+	File32 file;
+	file.open(configFilename, O_RDWR | O_CREAT);
+	if (!file.isOpen()) {
 		Watchdog.enable(100);
 		return false;
 	}

@@ -10,9 +10,10 @@
 #endif
 
 #include <ArduinoJson.h>
-#include <SD.h>
+#include <SdFat.h>
 #include <SPI.h>
 #include "globals.h"
+extern SdFat sd;
 #include "utils.h"
 #include "boardsDef.h"
 

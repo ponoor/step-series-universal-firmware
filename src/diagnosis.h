@@ -36,6 +36,7 @@ void testBrake();
 void printConfigAsJson();
 void printStatusAsJson();
 void receiveConfigJson();
+void receiveFilename();
 void rebootBoard();
 
 // Shared config serialization (writes all sections except "board" to any Print stream)

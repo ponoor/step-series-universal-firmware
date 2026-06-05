@@ -1,14 +1,17 @@
-// 
-// 
-// 
+//
+//
+//
 
 #include "globals.h"
+#include <SdFat.h>
 
 // Tx, Rx LED
 bool rxLedEnabled = false, txLedEnabled = false;
 uint32_t RXL_blinkStartTime, TXL_blinkStartTime;
 
 // Json configuration file
+SdFat sd;
+char configFilename[MAX_CONFIG_FILENAME] = "/config.txt";
 String configName;
 String configTargetProduct;
 bool sdInitializeSucceeded = false;

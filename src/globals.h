@@ -36,7 +36,9 @@ extern uint32_t RXL_blinkStartTime, TXL_blinkStartTime;
 #define RXL_TXL_BLINK_DURATION	30 // ms
 
 // Json configuration file
-constexpr char* filename = "/config.txt";
+constexpr char defaultConfigFilename[] = "/config.txt";
+constexpr uint8_t MAX_CONFIG_FILENAME = 64;
+extern char configFilename[MAX_CONFIG_FILENAME];
 extern String configName;
 extern String configTargetProduct;
 extern bool sdInitializeSucceeded;

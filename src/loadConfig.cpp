@@ -1,7 +1,47 @@
-// 
-// 
-// 
+//
+//
+//
 #include "loadConfig.h"
+#include <Adafruit_SleepyDog.h>
+#include <strings.h>
+
+static bool findFirstValidJson(JsonDocument& doc) {
+    char bestName[MAX_CONFIG_FILENAME] = "";
+    char candidateName[MAX_CONFIG_FILENAME];
+
+    File32 dir;
+    File32 entry;
+    if (!dir.open("/")) return false;
+
+    while (entry.openNext(&dir, O_RDONLY)) {
+        Watchdog.reset();
+        if (entry.isDir()) { entry.close(); continue; }
+        candidateName[0] = '/';
+        entry.getName(candidateName + 1, MAX_CONFIG_FILENAME - 1);
+        entry.close();
+
+        char* dot = strrchr(candidateName, '.');
+        if (!dot || strcasecmp(dot, ".json") != 0) continue;
+
+        if (bestName[0] == '\0' || strcasecmp(candidateName, bestName) < 0) {
+            strncpy(bestName, candidateName, MAX_CONFIG_FILENAME);
+        }
+    }
+    dir.close();
+
+    if (bestName[0] == '\0') return false;
+
+    File32 file;
+    if (!file.open(bestName, O_RDONLY)) return false;
+    DeserializationError err = deserializeJson(doc, file);
+    file.close();
+    if (err) return false;
+
+    if (doc["information"]["configVersion"].isNull()) return false;
+
+    strncpy(configFilename, bestName, MAX_CONFIG_FILENAME);
+    return true;
+}
 
 void loadConfig() {
     uint8_t i;
@@ -15,21 +55,33 @@ void loadConfig() {
     if (digitalRead(PIN_SD_DETECT) == LOW)
     #endif
     {
-        sdInitializeSucceeded = SD.begin(PIN_SD_CS);
+        sdInitializeSucceeded = sd.begin(PIN_SD_CS);
     }
-    File file = SD.open(filename, FILE_READ);
-    configFileOpenSucceeded = (file != false);
-    // Allocate a temporary JsonDocument
-    // Don't forget to change the capacity to match your requirements.
-    // Use arduinojson.org/v6/assistant to compute the capacity.
     JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, file);
-    if (error) {
-        dbgPrint("Failed to read file: %s\nUsing default configuration.\n", error.f_str());
+    configFileOpenSucceeded = false;
+    configFileParseSucceeded = false;
+    if (sdInitializeSucceeded) {
+        // Priority 1: config.txt
+        File32 file;
+        if (file.open(defaultConfigFilename, O_RDONLY)) {
+            configFileOpenSucceeded = true;
+            DeserializationError error = deserializeJson(doc, file);
+            file.close();
+            if (!error) {
+                configFileParseSucceeded = true;
+                strncpy(configFilename, defaultConfigFilename, MAX_CONFIG_FILENAME);
+            } else {
+                dbgPrint("Failed to read file: %s\nUsing default configuration.\n", error.f_str());
+            }
+        }
+        // Priority 2: alphabetically first *.json
+        if (!configFileParseSucceeded) {
+            if (findFirstValidJson(doc)) {
+                configFileOpenSucceeded = true;
+                configFileParseSucceeded = true;
+            }
+        }
     }
-    configFileParseSucceeded = (error == DeserializationError::Ok);
-    file.close();
-    // SD.end();
 #endif
 
     // Information

@@ -14,3 +14,8 @@ tmpclaude-*
 *.tmp
 *.tmp.*
 claude_temp_*
+platformio_local.ini
+TASK_*.md
+*-plan.md
+.DS_Store
+.claude/settings.local.json

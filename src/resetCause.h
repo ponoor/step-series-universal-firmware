@@ -29,4 +29,8 @@ ResetCause resetCauseFromSamd21Rcause(uint8_t rcause);
 // Name of the MCU for the diagnosis output.
 const char *mcuName();
 
+// MCU-specific: resets the MCU (reported as RESET_CAUSE_SOFTWARE after the restart).
+// Does not return on supported MCUs; does nothing on unsupported MCUs.
+void systemReset();
+
 #endif

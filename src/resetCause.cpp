@@ -56,3 +56,10 @@ const char *mcuName()
     return "unknown";
 #endif
 }
+
+void systemReset()
+{
+#ifdef RESET_CAUSE_SAMD21
+    NVIC_SystemReset();
+#endif
+}

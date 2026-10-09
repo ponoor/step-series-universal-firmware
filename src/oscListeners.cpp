@@ -8,6 +8,7 @@
 #include "packedTransfer.h"
 #include "oscRouter.h"
 #include "perfStats.h"
+#include "resetCause.h"
 
 // Receive buffer with guard bytes for oscRouteMatches(), see oscRouter.h
 static uint8_t oscRxStorage[OSC_RX_GUARD_BEFORE + OSC_RX_BUFFER_SIZE + OSC_RX_GUARD_AFTER];
@@ -211,8 +212,7 @@ void getAdcVal(OscMessage &msg)
 
 void resetDevice(OscMessage &msg)
 {
-    void (*resetFunc)(void) = 0;
-    resetFunc();
+    systemReset();
 }
 
 void saveConfig(OscMessage &msg)

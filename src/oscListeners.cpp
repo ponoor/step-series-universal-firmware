@@ -5,6 +5,7 @@
 #include "oscListeners.h"
 #include "utils.h"
 #include "diagnosis.h"
+#include "packedTransfer.h"
 
 bool OSCMsgReceive()
 {
@@ -760,9 +761,11 @@ void getStatus(OSCMessage &msg, int addrOffset)
     }
     else if (motorID == MOTOR_ID_ALL)
     {
+        uint16_t status[NUM_OF_MOTOR];
+        readAllStatus(status);
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/status", i + MOTOR_ID_FIRST, stepper[i].getStatus());
+            sendTwoData("/status", i + MOTOR_ID_FIRST, (int)status[i]);
         }
     }
 }
@@ -773,10 +776,12 @@ void getStatusList(OSCMessage &msg, int addrOffset)
     {
         return;
     }
+    uint16_t status[NUM_OF_MOTOR];
+    readAllStatus(status);
     OSCMessage newMes("/statusList");
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        newMes.add((int32_t)stepper[i].getStatus());
+        newMes.add((int32_t)status[i]);
     }
 
     Udp.beginPacket(destIp, outPort);
@@ -2328,9 +2333,11 @@ void getPosition(OSCMessage &msg, int addrOffset)
     }
     else if (motorID == MOTOR_ID_ALL)
     {
+        int32_t pos[NUM_OF_MOTOR];
+        readAllPositions(pos);
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/position", i + MOTOR_ID_FIRST, stepper[i].getPos());
+            sendTwoData("/position", i + MOTOR_ID_FIRST, pos[i]);
         }
     }
 }
@@ -2338,10 +2345,7 @@ void getPosition(OSCMessage &msg, int addrOffset)
 void getPositionList()
 {
     int32_t pos[NUM_OF_MOTOR];
-    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-    {
-        pos[i] = stepper[i].getPos();
-    }
+    readAllPositions(pos);
     sendAllData("/positionList", pos);
 }
 void getPositionList(OSCMessage &msg, int addrOffset)

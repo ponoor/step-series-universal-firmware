@@ -51,10 +51,11 @@ extern bool configProductApplicable;
 
 // Motor drivers
 #ifdef DRIVER_POWERSTEP01
-extern powerSTEP stepper[]; // boardsSpecific.cpp
+typedef powerSTEP MotorDriver;
 #else
-extern AutoDriver stepper[]; // boardsSpecific.cpp
+typedef AutoDriver MotorDriver;
 #endif
+extern MotorDriver stepper[]; // boardsSpecific.cpp
 #define MOTOR_ID_ALL    255
 #define MOTOR_ID_FIRST  1
 #define MOTOR_ID_LAST   NUM_OF_MOTOR

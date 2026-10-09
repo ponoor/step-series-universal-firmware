@@ -20,6 +20,7 @@
 #include "oscListeners.h"
 #include "diagnosis.h"
 #include "perfStats.h"
+#include "packedTransfer.h"
 
 const String productName = PRODUCT_NAME;
 const char *firmwareName = FIRMWARE_NAME;
@@ -108,9 +109,11 @@ void setup()
 void checkStatus()
 {
     uint32_t t;
+    uint16_t statusList[NUM_OF_MOTOR];
+    readAllStatus(statusList);
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        const auto status = stepper[i].getStatus();
+        const uint16_t status = statusList[i];
         // HiZ, high for HiZ
         t = (status & STATUS_HIZ) > 0;
         if (HiZ[i] != t)
@@ -307,15 +310,25 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
 void updatePositionReport(uint32_t _currentTimeMillis)
 {
     static uint32_t lastPollTime[NUM_OF_MOTOR] = {0};
+    bool due[NUM_OF_MOTOR];
+    bool anyDue = false;
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        if (reportPosition[i])
+        due[i] = reportPosition[i] &&
+                 ((uint32_t)(_currentTimeMillis - lastPollTime[i]) >= reportPositionInterval[i]);
+        anyDue |= due[i];
+    }
+    if (!anyDue)
+        return;
+    // Reading every position with one packed transfer costs the same as reading one.
+    int32_t pos[NUM_OF_MOTOR];
+    readAllPositions(pos);
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (due[i])
         {
-            if ((uint32_t)(_currentTimeMillis - lastPollTime[i]) >= reportPositionInterval[i])
-            {
-                sendTwoData("/position", i + MOTOR_ID_FIRST, stepper[i].getPos());
-                lastPollTime[i] = _currentTimeMillis;
-            }
+            sendTwoData("/position", i + MOTOR_ID_FIRST, pos[i]);
+            lastPollTime[i] = _currentTimeMillis;
         }
     }
 }
@@ -394,14 +407,31 @@ bool updateServo(uint32_t currentTimeMillis)
         perfAdd(perfStats.servoInterval, nowMicros - lastServoUpdateMicros);
     lastServoUpdateMicros = nowMicros;
 
+    bool anyServo = false;
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        anyServo |= isServoMode[i];
+    if (anyServo)
     {
-        if (isServoMode[i])
+        int32_t pos[NUM_OF_MOTOR];
+        bool dir[NUM_OF_MOTOR];
+        float absSpd[NUM_OF_MOTOR];
+        readAllPositions(pos);
+        // Motors not in the servo mode stay unprepared and receive NOP.
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            bool dir;
-            float absSpd;
-            computeServoSpeed(i, stepper[i].getPos(), dir, absSpd);
-            stepper[i].run(dir, absSpd);
+            if (isServoMode[i])
+            {
+                computeServoSpeed(i, pos[i], dir[i], absSpd[i]);
+                stepper[i].prepareRun(dir[i], absSpd[i]);
+            }
+        }
+        if (!performPreparedTransfer())
+        {
+            for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+            {
+                if (isServoMode[i])
+                    stepper[i].run(dir[i], absSpd[i]);
+            }
         }
     }
     lastServoUpdateTime = currentTimeMillis;

@@ -48,14 +48,6 @@ OscWriter &OscWriter::addString(const char *value)
     return *this;
 }
 
-OscWriter &OscWriter::addBool(bool value)
-{
-    Arg *arg = next();
-    if (arg)
-        arg->type = value ? 'T' : 'F';
-    return *this;
-}
-
 namespace
 {
     struct Output
@@ -136,7 +128,7 @@ uint16_t OscWriter::encode(uint8_t *buffer, uint16_t capacity) const
         case 's':
             out.paddedString(arg.s);
             break;
-        default: // 'T', 'F': no data
+        default:
             break;
         }
     }

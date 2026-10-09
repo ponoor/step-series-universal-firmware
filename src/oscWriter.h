@@ -24,6 +24,7 @@ public:
     explicit OscWriter(const char *address) : address(address), count(0), overflow(false) {}
 
     // Integers of up to 4 bytes (including enums) are sent as 'i'.
+    // bool is also sent as 'i' (0 / 1); STEP series never send the T / F type tags.
     template <typename T>
     typename std::enable_if<(std::is_integral<T>::value || std::is_enum<T>::value) &&
                                 !std::is_same<T, bool>::value && (sizeof(T) <= 4),
@@ -32,7 +33,7 @@ public:
     {
         return addInt((int32_t)value);
     }
-    OscWriter &add(bool value) { return addBool(value); }
+    OscWriter &add(bool value) { return addInt(value ? 1 : 0); }
     OscWriter &add(float value) { return addFloat(value); }
     // The string must stay valid until encode().
     OscWriter &add(const char *value) { return addString(value); }
@@ -40,7 +41,6 @@ public:
     OscWriter &addInt(int32_t value);
     OscWriter &addFloat(float value);
     OscWriter &addString(const char *value);
-    OscWriter &addBool(bool value);
 
     uint8_t size() const { return count; }
     // Writes the message to buffer. Returns its length, or 0 if it does not fit

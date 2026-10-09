@@ -415,7 +415,7 @@ bool updateServo(uint32_t currentTimeMillis)
     if (anyServo)
     {
         int32_t pos[NUM_OF_MOTOR];
-        bool dir[NUM_OF_MOTOR];
+        bool runDir[NUM_OF_MOTOR];
         float absSpd[NUM_OF_MOTOR];
         readAllPositions(pos);
         // Motors not in the servo mode stay unprepared and receive NOP.
@@ -423,8 +423,8 @@ bool updateServo(uint32_t currentTimeMillis)
         {
             if (isServoMode[i])
             {
-                computeServoSpeed(i, pos[i], dir[i], absSpd[i]);
-                stepper[i].prepareRun(dir[i], absSpd[i]);
+                computeServoSpeed(i, pos[i], runDir[i], absSpd[i]);
+                stepper[i].prepareRun(runDir[i], absSpd[i]);
             }
         }
         if (!performPreparedTransfer())
@@ -432,7 +432,7 @@ bool updateServo(uint32_t currentTimeMillis)
             for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
             {
                 if (isServoMode[i])
-                    stepper[i].run(dir[i], absSpd[i]);
+                    stepper[i].run(runDir[i], absSpd[i]);
             }
         }
     }

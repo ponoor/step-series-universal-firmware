@@ -10,6 +10,7 @@
 #endif
 
 #include <OSCMessage.h>
+#include "oscParser.h"
 #include <Ethernet.h>
 #include <Adafruit_SleepyDog.h>
 #include "globals.h"
@@ -38,9 +39,9 @@ void turnOnRXL();
 void turnOnTXL();
 void updateRxTxLed(uint32_t _currentTimeMillis);
 
-int getInt(OSCMessage &msg, uint8_t offset);
-float getFloat(OSCMessage &msg, uint8_t offset);
-bool getBool(OSCMessage &msg, uint8_t offset);
+int getInt(OscMessage &msg, uint8_t offset);
+float getFloat(OscMessage &msg, uint8_t offset);
+bool getBool(OscMessage &msg, uint8_t offset);
 
 bool isBrakeDisEngaged(uint8_t motorId);
 #ifdef HAVE_BRAKE

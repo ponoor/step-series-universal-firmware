@@ -6,185 +6,210 @@
 #include "utils.h"
 #include "diagnosis.h"
 #include "packedTransfer.h"
+#include <OSCMatch.h>
+
+static uint8_t oscRxBuffer[OSC_RX_BUFFER_SIZE];
+static OscMessage msgIN;
+
+// Same rule as CNMAT OSCMessage::route(): the received address is the pattern, and a
+// partial match is accepted if the address continues with '/'.
+static bool route(OscMessage &msg, const char *pattern, void (*callback)(OscMessage &))
+{
+    const char *address = msg.getAddress();
+    int patternOffset, addressOffset;
+    int ret = osc_match(address, pattern, &patternOffset, &addressOffset);
+    if ((ret == 3) || (patternOffset > 0 && address[patternOffset] == '/'))
+    {
+        callback(msg);
+        return true;
+    }
+    return false;
+}
 
 bool OSCMsgReceive()
 {
     bool bMsgHasError = false, bMsgRouted = false;
-    OSCMessage msgIN;
     int size;
     if ((size = Udp.parsePacket()) > 0)
     {
-        while (size--)
-            msgIN.fill(Udp.read());
-
-        bMsgHasError = msgIN.hasError();
+        if (size > OSC_RX_BUFFER_SIZE)
+        {
+            // Too large: the rest of the packet is discarded by the next parsePacket().
+            bMsgHasError = true;
+        }
+        else
+        {
+            int len = Udp.read(oscRxBuffer, size);
+            msgIN.decode(oscRxBuffer, len > 0 ? len : 0);
+            bMsgHasError = msgIN.hasError();
+        }
         if (!bMsgHasError)
         {
             // some possible frequent messages
-            bMsgRouted |= msgIN.route("/setTargetPosition", setTargetPosition);
-            bMsgRouted |= msgIN.route("/setTargetPositionList", setTargetPositionList);
-            bMsgRouted |= msgIN.route("/getPosition", getPosition);
-            bMsgRouted |= msgIN.route("/getPositionList", getPositionList);
+            bMsgRouted |= route(msgIN, "/setTargetPosition", setTargetPosition);
+            bMsgRouted |= route(msgIN, "/setTargetPositionList", setTargetPositionList);
+            bMsgRouted |= route(msgIN, "/getPosition", getPosition);
+            bMsgRouted |= route(msgIN, "/getPositionList", getPositionList);
 
-            bMsgRouted |= msgIN.route("/getSpeed", getSpeed);
-            bMsgRouted |= msgIN.route("/run", run);
-            bMsgRouted |= msgIN.route("/runRaw", runRaw);
+            bMsgRouted |= route(msgIN, "/getSpeed", getSpeed);
+            bMsgRouted |= route(msgIN, "/run", run);
+            bMsgRouted |= route(msgIN, "/runRaw", runRaw);
 
             // combined
-            bMsgRouted |= msgIN.route("/combine/move", combinedMove);
-            bMsgRouted |= msgIN.route("/combine/goTo", combinedGoTo);
-            bMsgRouted |= msgIN.route("/combine/goToDir", combinedGoToDir);
-            bMsgRouted |= msgIN.route("/combine/run", combinedRun);
-            bMsgRouted |= msgIN.route("/combine/runRaw", combinedRunRaw);
-            bMsgRouted |= msgIN.route("/combine/hardHiZ", combinedHardHiZ);
-            bMsgRouted |= msgIN.route("/combine/hardStop", combinedHardStop);
-            bMsgRouted |= msgIN.route("/combine/softHiZ", combinedSoftHiZ);
-            bMsgRouted |= msgIN.route("/combine/softStop", combinedSoftStop);
+            bMsgRouted |= route(msgIN, "/combine/move", combinedMove);
+            bMsgRouted |= route(msgIN, "/combine/goTo", combinedGoTo);
+            bMsgRouted |= route(msgIN, "/combine/goToDir", combinedGoToDir);
+            bMsgRouted |= route(msgIN, "/combine/run", combinedRun);
+            bMsgRouted |= route(msgIN, "/combine/runRaw", combinedRunRaw);
+            bMsgRouted |= route(msgIN, "/combine/hardHiZ", combinedHardHiZ);
+            bMsgRouted |= route(msgIN, "/combine/hardStop", combinedHardStop);
+            bMsgRouted |= route(msgIN, "/combine/softHiZ", combinedSoftHiZ);
+            bMsgRouted |= route(msgIN, "/combine/softStop", combinedSoftStop);
 
             // motion
-            bMsgRouted |= msgIN.route("/move", move);
-            bMsgRouted |= msgIN.route("/goTo", goTo);
-            bMsgRouted |= msgIN.route("/goToDir", goToDir);
-            bMsgRouted |= msgIN.route("/goUntil", goUntil);
-            bMsgRouted |= msgIN.route("/goUntilRaw", goUntilRaw);
-            bMsgRouted |= msgIN.route("/releaseSw", releaseSw);
-            bMsgRouted |= msgIN.route("/goHome", goHome);
-            bMsgRouted |= msgIN.route("/goMark", goMark);
-            bMsgRouted |= msgIN.route("/setMark", setMark);
-            bMsgRouted |= msgIN.route("/getMark", getMark);
-            bMsgRouted |= msgIN.route("/setPosition", setPosition);
-            bMsgRouted |= msgIN.route("/resetPos", resetPos);
-            bMsgRouted |= msgIN.route("/softStop", softStop);
-            bMsgRouted |= msgIN.route("/hardStop", hardStop);
-            bMsgRouted |= msgIN.route("/softHiZ", softHiZ);
-            bMsgRouted |= msgIN.route("/hardHiZ", hardHiZ);
+            bMsgRouted |= route(msgIN, "/move", move);
+            bMsgRouted |= route(msgIN, "/goTo", goTo);
+            bMsgRouted |= route(msgIN, "/goToDir", goToDir);
+            bMsgRouted |= route(msgIN, "/goUntil", goUntil);
+            bMsgRouted |= route(msgIN, "/goUntilRaw", goUntilRaw);
+            bMsgRouted |= route(msgIN, "/releaseSw", releaseSw);
+            bMsgRouted |= route(msgIN, "/goHome", goHome);
+            bMsgRouted |= route(msgIN, "/goMark", goMark);
+            bMsgRouted |= route(msgIN, "/setMark", setMark);
+            bMsgRouted |= route(msgIN, "/getMark", getMark);
+            bMsgRouted |= route(msgIN, "/setPosition", setPosition);
+            bMsgRouted |= route(msgIN, "/resetPos", resetPos);
+            bMsgRouted |= route(msgIN, "/softStop", softStop);
+            bMsgRouted |= route(msgIN, "/hardStop", hardStop);
+            bMsgRouted |= route(msgIN, "/softHiZ", softHiZ);
+            bMsgRouted |= route(msgIN, "/hardHiZ", hardHiZ);
 #ifdef HAVE_BRAKE
-            bMsgRouted |= msgIN.route("/activate", activate);
-            bMsgRouted |= msgIN.route("/free", free);
+            bMsgRouted |= route(msgIN, "/activate", activate);
+            bMsgRouted |= route(msgIN, "/free", free);
 #endif
-            bMsgRouted |= msgIN.route("/homing", homing);
+            bMsgRouted |= route(msgIN, "/homing", homing);
             // servo mode
-            bMsgRouted |= msgIN.route("/enableServoMode", enableServoMode);
-            bMsgRouted |= msgIN.route("/setServoParam", setServoParam);
-            bMsgRouted |= msgIN.route("/getServoParam", getServoParam);
+            bMsgRouted |= route(msgIN, "/enableServoMode", enableServoMode);
+            bMsgRouted |= route(msgIN, "/setServoParam", setServoParam);
+            bMsgRouted |= route(msgIN, "/getServoParam", getServoParam);
 
             // speed
-            bMsgRouted |= msgIN.route("/setSpeedProfile", setSpeedProfile);
-            bMsgRouted |= msgIN.route("/setMaxSpeed", setMaxSpeed);
-            bMsgRouted |= msgIN.route("/setMinSpeed", setMinSpeed);
-            bMsgRouted |= msgIN.route("/getMinSpeed", getMinSpeed);
-            bMsgRouted |= msgIN.route("/setFullstepSpeed", setFullstepSpeed);
-            bMsgRouted |= msgIN.route("/getFullstepSpeed", getFullstepSpeed);
-            bMsgRouted |= msgIN.route("/setAcc", setAcc);
-            bMsgRouted |= msgIN.route("/setDec", setDec);
-            bMsgRouted |= msgIN.route("/getSpeedProfile", getSpeedProfile);
+            bMsgRouted |= route(msgIN, "/setSpeedProfile", setSpeedProfile);
+            bMsgRouted |= route(msgIN, "/setMaxSpeed", setMaxSpeed);
+            bMsgRouted |= route(msgIN, "/setMinSpeed", setMinSpeed);
+            bMsgRouted |= route(msgIN, "/getMinSpeed", getMinSpeed);
+            bMsgRouted |= route(msgIN, "/setFullstepSpeed", setFullstepSpeed);
+            bMsgRouted |= route(msgIN, "/getFullstepSpeed", getFullstepSpeed);
+            bMsgRouted |= route(msgIN, "/setAcc", setAcc);
+            bMsgRouted |= route(msgIN, "/setDec", setDec);
+            bMsgRouted |= route(msgIN, "/getSpeedProfile", getSpeedProfile);
 
             // Kval
-            bMsgRouted |= msgIN.route("/setKval", setKval);
-            bMsgRouted |= msgIN.route("/setAccKval", setAccKval);
-            bMsgRouted |= msgIN.route("/setDecKval", setDecKval);
-            bMsgRouted |= msgIN.route("/setRunKval", setRunKval);
-            bMsgRouted |= msgIN.route("/setHoldKval", setHoldKval);
-            bMsgRouted |= msgIN.route("/getKval", getKval);
+            bMsgRouted |= route(msgIN, "/setKval", setKval);
+            bMsgRouted |= route(msgIN, "/setAccKval", setAccKval);
+            bMsgRouted |= route(msgIN, "/setDecKval", setDecKval);
+            bMsgRouted |= route(msgIN, "/setRunKval", setRunKval);
+            bMsgRouted |= route(msgIN, "/setHoldKval", setHoldKval);
+            bMsgRouted |= route(msgIN, "/getKval", getKval);
 
             // TVAL
 #ifdef DRIVER_POWERSTEP01
-            bMsgRouted |= msgIN.route("/setTval", setTval);
-            bMsgRouted |= msgIN.route("/setAccTval", setAccTval);
-            bMsgRouted |= msgIN.route("/setDecTval", setDecTval);
-            bMsgRouted |= msgIN.route("/setRunTval", setRunTval);
-            bMsgRouted |= msgIN.route("/setHoldTval", setHoldTval);
-            bMsgRouted |= msgIN.route("/getTval", getTval);
-            bMsgRouted |= msgIN.route("/getTval_mA", getTval_mA);
+            bMsgRouted |= route(msgIN, "/setTval", setTval);
+            bMsgRouted |= route(msgIN, "/setAccTval", setAccTval);
+            bMsgRouted |= route(msgIN, "/setDecTval", setDecTval);
+            bMsgRouted |= route(msgIN, "/setRunTval", setRunTval);
+            bMsgRouted |= route(msgIN, "/setHoldTval", setHoldTval);
+            bMsgRouted |= route(msgIN, "/getTval", getTval);
+            bMsgRouted |= route(msgIN, "/getTval_mA", getTval_mA);
 #endif
             // config
-            bMsgRouted |= msgIN.route("/setDestIp", setDestIp);
-            bMsgRouted |= msgIN.route("/getVersion", getVersion);
-            bMsgRouted |= msgIN.route("/getConfigName", getConfigName);
-            bMsgRouted |= msgIN.route("/setConfigName", setConfigName);
-            bMsgRouted |= msgIN.route("/getConfigRegister", getConfigRegister);
-            bMsgRouted |= msgIN.route("/getStatus", getStatus);
-            bMsgRouted |= msgIN.route("/getStatusList", getStatusList);
-            bMsgRouted |= msgIN.route("/reportError", reportError);
-            bMsgRouted |= msgIN.route("/getHomeSw", getHomeSw);
-            bMsgRouted |= msgIN.route("/getBusy", getBusy);
-            bMsgRouted |= msgIN.route("/getDir", getDir);
-            bMsgRouted |= msgIN.route("/getHiZ", getHiZ);
-            bMsgRouted |= msgIN.route("/getUvlo", getUvlo);
-            bMsgRouted |= msgIN.route("/getMotorStatus", getMotorStatus);
-            bMsgRouted |= msgIN.route("/getThermalStatus", getThermalStatus);
-            bMsgRouted |= msgIN.route("/resetMotorDriver", resetMotorDriver);
-            bMsgRouted |= msgIN.route("/enableBusyReport", enableBusyReport);
-            bMsgRouted |= msgIN.route("/enableHizReport", enableHizReport);
-            bMsgRouted |= msgIN.route("/enableHomeSwReport", enableHomeSwReport);
-            bMsgRouted |= msgIN.route("/enableDirReport", enableDirReport);
-            bMsgRouted |= msgIN.route("/enableMotorStatusReport", enableMotorStatusReport);
-            bMsgRouted |= msgIN.route("/enableSwEventReport", enableSwEventReport);
-            bMsgRouted |= msgIN.route("/enableUvloReport", enableUvloReport);
-            bMsgRouted |= msgIN.route("/enableThermalStatusReport", enableThermalStatusReport);
-            bMsgRouted |= msgIN.route("/enableOverCurrentReport", enableOverCurrentReport);
-            bMsgRouted |= msgIN.route("/enableStallReport", enableStallReport);
-            bMsgRouted |= msgIN.route("/setPositionReportInterval", setPositionReportInterval);
-            bMsgRouted |= msgIN.route("/setPositionListReportInterval", setPositionListReportInterval);
+            bMsgRouted |= route(msgIN, "/setDestIp", setDestIp);
+            bMsgRouted |= route(msgIN, "/getVersion", getVersion);
+            bMsgRouted |= route(msgIN, "/getConfigName", getConfigName);
+            bMsgRouted |= route(msgIN, "/setConfigName", setConfigName);
+            bMsgRouted |= route(msgIN, "/getConfigRegister", getConfigRegister);
+            bMsgRouted |= route(msgIN, "/getStatus", getStatus);
+            bMsgRouted |= route(msgIN, "/getStatusList", getStatusList);
+            bMsgRouted |= route(msgIN, "/reportError", reportError);
+            bMsgRouted |= route(msgIN, "/getHomeSw", getHomeSw);
+            bMsgRouted |= route(msgIN, "/getBusy", getBusy);
+            bMsgRouted |= route(msgIN, "/getDir", getDir);
+            bMsgRouted |= route(msgIN, "/getHiZ", getHiZ);
+            bMsgRouted |= route(msgIN, "/getUvlo", getUvlo);
+            bMsgRouted |= route(msgIN, "/getMotorStatus", getMotorStatus);
+            bMsgRouted |= route(msgIN, "/getThermalStatus", getThermalStatus);
+            bMsgRouted |= route(msgIN, "/resetMotorDriver", resetMotorDriver);
+            bMsgRouted |= route(msgIN, "/enableBusyReport", enableBusyReport);
+            bMsgRouted |= route(msgIN, "/enableHizReport", enableHizReport);
+            bMsgRouted |= route(msgIN, "/enableHomeSwReport", enableHomeSwReport);
+            bMsgRouted |= route(msgIN, "/enableDirReport", enableDirReport);
+            bMsgRouted |= route(msgIN, "/enableMotorStatusReport", enableMotorStatusReport);
+            bMsgRouted |= route(msgIN, "/enableSwEventReport", enableSwEventReport);
+            bMsgRouted |= route(msgIN, "/enableUvloReport", enableUvloReport);
+            bMsgRouted |= route(msgIN, "/enableThermalStatusReport", enableThermalStatusReport);
+            bMsgRouted |= route(msgIN, "/enableOverCurrentReport", enableOverCurrentReport);
+            bMsgRouted |= route(msgIN, "/enableStallReport", enableStallReport);
+            bMsgRouted |= route(msgIN, "/setPositionReportInterval", setPositionReportInterval);
+            bMsgRouted |= route(msgIN, "/setPositionListReportInterval", setPositionListReportInterval);
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-            bMsgRouted |= msgIN.route("/getLimitSw", getLimitSw);
-            bMsgRouted |= msgIN.route("/getLimitSwMode", getLimitSwMode);
-            bMsgRouted |= msgIN.route("/setLimitSwMode", setLimitSwMode);
-            bMsgRouted |= msgIN.route("/enableLimitSwReport", enableLimitSwReport);
+            bMsgRouted |= route(msgIN, "/getLimitSw", getLimitSw);
+            bMsgRouted |= route(msgIN, "/getLimitSwMode", getLimitSwMode);
+            bMsgRouted |= route(msgIN, "/setLimitSwMode", setLimitSwMode);
+            bMsgRouted |= route(msgIN, "/enableLimitSwReport", enableLimitSwReport);
 #endif
 #ifdef HAVE_BRAKE
-            bMsgRouted |= msgIN.route("/enableElectromagnetBrake", enableElectromagnetBrake);
-            bMsgRouted |= msgIN.route("/setBrakeTransitionDuration", setBrakeTransitionDuration);
-            bMsgRouted |= msgIN.route("/getBrakeTransitionDuration", getBrakeTransitionDuration);
+            bMsgRouted |= route(msgIN, "/enableElectromagnetBrake", enableElectromagnetBrake);
+            bMsgRouted |= route(msgIN, "/setBrakeTransitionDuration", setBrakeTransitionDuration);
+            bMsgRouted |= route(msgIN, "/getBrakeTransitionDuration", getBrakeTransitionDuration);
 #endif
-            bMsgRouted |= msgIN.route("/setMicrostepMode", setMicrostepMode);
-            bMsgRouted |= msgIN.route("/getMicrostepMode", getMicrostepMode);
-            bMsgRouted |= msgIN.route("/getHomeSwMode", getHomeSwMode);
-            bMsgRouted |= msgIN.route("/setHomeSwMode", setHomeSwMode);
-            bMsgRouted |= msgIN.route("/setStallThreshold", setStallThreshold);
-            bMsgRouted |= msgIN.route("/getStallThreshold", getStallThreshold);
-            bMsgRouted |= msgIN.route("/setOverCurrentThreshold", setOverCurrentThreshold);
-            bMsgRouted |= msgIN.route("/getOverCurrentThreshold", getOverCurrentThreshold);
-            bMsgRouted |= msgIN.route("/enableLowSpeedOptimize", enableLowSpeedOptimize);
-            bMsgRouted |= msgIN.route("/setLowSpeedOptimizeThreshold", setLowSpeedOptimizeThreshold);
-            bMsgRouted |= msgIN.route("/getLowSpeedOptimizeThreshold", getLowSpeedOptimizeThreshold);
+            bMsgRouted |= route(msgIN, "/setMicrostepMode", setMicrostepMode);
+            bMsgRouted |= route(msgIN, "/getMicrostepMode", getMicrostepMode);
+            bMsgRouted |= route(msgIN, "/getHomeSwMode", getHomeSwMode);
+            bMsgRouted |= route(msgIN, "/setHomeSwMode", setHomeSwMode);
+            bMsgRouted |= route(msgIN, "/setStallThreshold", setStallThreshold);
+            bMsgRouted |= route(msgIN, "/getStallThreshold", getStallThreshold);
+            bMsgRouted |= route(msgIN, "/setOverCurrentThreshold", setOverCurrentThreshold);
+            bMsgRouted |= route(msgIN, "/getOverCurrentThreshold", getOverCurrentThreshold);
+            bMsgRouted |= route(msgIN, "/enableLowSpeedOptimize", enableLowSpeedOptimize);
+            bMsgRouted |= route(msgIN, "/setLowSpeedOptimizeThreshold", setLowSpeedOptimizeThreshold);
+            bMsgRouted |= route(msgIN, "/getLowSpeedOptimizeThreshold", getLowSpeedOptimizeThreshold);
 
-            bMsgRouted |= msgIN.route("/setSpeedProfileRaw", setSpeedProfileRaw);
-            bMsgRouted |= msgIN.route("/setMaxSpeedRaw", setMaxSpeedRaw);
-            bMsgRouted |= msgIN.route("/setMinSpeedRaw", setMinSpeedRaw);
-            bMsgRouted |= msgIN.route("/setFullstepSpeedRaw", setFullstepSpeedRaw);
-            bMsgRouted |= msgIN.route("/setAccRaw", setAccRaw);
-            bMsgRouted |= msgIN.route("/setDecRaw", setDecRaw);
-            bMsgRouted |= msgIN.route("/getSpeedProfileRaw", getSpeedProfileRaw);
+            bMsgRouted |= route(msgIN, "/setSpeedProfileRaw", setSpeedProfileRaw);
+            bMsgRouted |= route(msgIN, "/setMaxSpeedRaw", setMaxSpeedRaw);
+            bMsgRouted |= route(msgIN, "/setMinSpeedRaw", setMinSpeedRaw);
+            bMsgRouted |= route(msgIN, "/setFullstepSpeedRaw", setFullstepSpeedRaw);
+            bMsgRouted |= route(msgIN, "/setAccRaw", setAccRaw);
+            bMsgRouted |= route(msgIN, "/setDecRaw", setDecRaw);
+            bMsgRouted |= route(msgIN, "/getSpeedProfileRaw", getSpeedProfileRaw);
 
-            bMsgRouted |= msgIN.route("/setBemfParam", setBemfParam);
-            bMsgRouted |= msgIN.route("/getBemfParam", getBemfParam);
+            bMsgRouted |= route(msgIN, "/setBemfParam", setBemfParam);
+            bMsgRouted |= route(msgIN, "/getBemfParam", getBemfParam);
 #ifdef DRIVER_POWERSTEP01
-            bMsgRouted |= msgIN.route("/setVoltageMode", setVoltageMode);
-            bMsgRouted |= msgIN.route("/setCurrentMode", setCurrentMode);
-            bMsgRouted |= msgIN.route("/setDecayModeParam", setDecayModeParam);
-            bMsgRouted |= msgIN.route("/getDecayModeParam", getDecayModeParam);
+            bMsgRouted |= route(msgIN, "/setVoltageMode", setVoltageMode);
+            bMsgRouted |= route(msgIN, "/setCurrentMode", setCurrentMode);
+            bMsgRouted |= route(msgIN, "/setDecayModeParam", setDecayModeParam);
+            bMsgRouted |= route(msgIN, "/getDecayModeParam", getDecayModeParam);
 #endif
-            bMsgRouted |= msgIN.route("/getAdcVal", getAdcVal);
-            bMsgRouted |= msgIN.route("/setGoUntilTimeout", setGoUntilTimeout);
-            bMsgRouted |= msgIN.route("/getGoUntilTimeout", getGoUntilTimeout);
-            bMsgRouted |= msgIN.route("/setReleaseSwTimeout", setReleaseSwTimeout);
-            bMsgRouted |= msgIN.route("/getReleaseSwTimeout", getReleaseSwTimeout);
-            bMsgRouted |= msgIN.route("/setHomingDirection", setHomingDirection);
-            bMsgRouted |= msgIN.route("/getHomingDirection", getHomingDirection);
-            bMsgRouted |= msgIN.route("/setHomingSpeed", setHomingSpeed);
-            bMsgRouted |= msgIN.route("/getHomingSpeed", getHomingSpeed);
-            bMsgRouted |= msgIN.route("/getHomingStatus", getHomingStatus);
-            bMsgRouted |= msgIN.route("/setProhibitMotionOnHomeSw", setProhibitMotionOnHomeSw);
-            bMsgRouted |= msgIN.route("/getProhibitMotionOnHomeSw", getProhibitMotionOnHomeSw);
+            bMsgRouted |= route(msgIN, "/getAdcVal", getAdcVal);
+            bMsgRouted |= route(msgIN, "/setGoUntilTimeout", setGoUntilTimeout);
+            bMsgRouted |= route(msgIN, "/getGoUntilTimeout", getGoUntilTimeout);
+            bMsgRouted |= route(msgIN, "/setReleaseSwTimeout", setReleaseSwTimeout);
+            bMsgRouted |= route(msgIN, "/getReleaseSwTimeout", getReleaseSwTimeout);
+            bMsgRouted |= route(msgIN, "/setHomingDirection", setHomingDirection);
+            bMsgRouted |= route(msgIN, "/getHomingDirection", getHomingDirection);
+            bMsgRouted |= route(msgIN, "/setHomingSpeed", setHomingSpeed);
+            bMsgRouted |= route(msgIN, "/getHomingSpeed", getHomingSpeed);
+            bMsgRouted |= route(msgIN, "/getHomingStatus", getHomingStatus);
+            bMsgRouted |= route(msgIN, "/setProhibitMotionOnHomeSw", setProhibitMotionOnHomeSw);
+            bMsgRouted |= route(msgIN, "/getProhibitMotionOnHomeSw", getProhibitMotionOnHomeSw);
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-            bMsgRouted |= msgIN.route("/setProhibitMotionOnLimitSw", setProhibitMotionOnLimitSw);
-            bMsgRouted |= msgIN.route("/getProhibitMotionOnLimitSw", getProhibitMotionOnLimitSw);
+            bMsgRouted |= route(msgIN, "/setProhibitMotionOnLimitSw", setProhibitMotionOnLimitSw);
+            bMsgRouted |= route(msgIN, "/getProhibitMotionOnLimitSw", getProhibitMotionOnLimitSw);
 #endif
-            bMsgRouted |= msgIN.route("/getElPos", getElPos);
-            bMsgRouted |= msgIN.route("/setElPos", setElPos);
-            bMsgRouted |= msgIN.route("/resetDevice", resetDevice);
-            bMsgRouted |= msgIN.route("/saveConfig", saveConfig);
+            bMsgRouted |= route(msgIN, "/getElPos", getElPos);
+            bMsgRouted |= route(msgIN, "/setElPos", setElPos);
+            bMsgRouted |= route(msgIN, "/resetDevice", resetDevice);
+            bMsgRouted |= route(msgIN, "/saveConfig", saveConfig);
             turnOnRXL();
             if ((!bMsgRouted) && reportErrors)
             {
@@ -223,7 +248,7 @@ bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
 }
 
 #pragma region config_commands_osc_listener
-void setDestIp(OSCMessage &msg, int addrOffset)
+void setDestIp(OscMessage &msg)
 {
     bool bIpUpdated = false;
     OSCMessage newMes("/destIp");
@@ -242,13 +267,13 @@ void setDestIp(OSCMessage &msg, int addrOffset)
     turnOnTXL();
 }
 
-void getVersion(OSCMessage &msg, int addrOffset)
+void getVersion(OscMessage &msg)
 {
     String version = String(FIRMWARE_NAME) + String(" ") + String(firmwareVersion[0]) + String(".") + String(firmwareVersion[1]) + String(".") + String(firmwareVersion[2]) + String(" ") + String(COMPILE_DATE) + String(" ") + String(COMPILE_TIME);
     sendOneDatum("/version", version.c_str());
 }
 
-void getConfigName(OSCMessage &msg, int addrOffset)
+void getConfigName(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -263,7 +288,7 @@ void getConfigName(OSCMessage &msg, int addrOffset)
     turnOnTXL();
 }
 
-void setConfigName(OSCMessage &msg, int addrOffset)
+void setConfigName(OscMessage &msg)
 {
     if (msg.isString(0))
     {
@@ -278,7 +303,7 @@ void getConfigRegister(uint8_t deviceId)
 {
     sendTwoData("/configRegister", deviceId + MOTOR_ID_FIRST, stepper[deviceId].getParam(CONFIG));
 }
-void getConfigRegister(OSCMessage &msg, int addrOffset)
+void getConfigRegister(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -296,7 +321,7 @@ void getConfigRegister(OSCMessage &msg, int addrOffset)
 }
 
 // reset the motor driver chip and setup it
-void resetMotorDriver(OSCMessage &msg, int addrOffset)
+void resetMotorDriver(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -312,7 +337,7 @@ void resetMotorDriver(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getAdcVal(OSCMessage &msg, int addrOffset)
+void getAdcVal(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -329,7 +354,7 @@ void getAdcVal(OSCMessage &msg, int addrOffset)
 }
 
 // // simply send reset command to the driverchip via SPI
-// void resetDev(OSCMessage& msg, int addrOffset) {
+// void resetDev(OscMessage& msg) {
 //     uint8_t motorID = getInt(msg, 0);
 //     if(isCorrectMotorId(motorID)) {
 //         motorID -= MOTOR_ID_FIRST;
@@ -344,23 +369,23 @@ void getAdcVal(OSCMessage &msg, int addrOffset)
 //     }
 // }
 
-void resetDevice(OSCMessage &msg, int addrOffset)
+void resetDevice(OscMessage &msg)
 {
     void (*resetFunc)(void) = 0;
     resetFunc();
 }
 
-void saveConfig(OSCMessage &msg, int addrOffset)
+void saveConfig(OscMessage &msg)
 {
     saveCurrentConfigToSd();
 }
 
-void reportError(OSCMessage &msg, int addrOffset)
+void reportError(OscMessage &msg)
 {
     reportErrors = getBool(msg, 0);
 }
 
-void enableBusyReport(OSCMessage &msg, int addrOffset)
+void enableBusyReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -377,7 +402,7 @@ void enableBusyReport(OSCMessage &msg, int addrOffset)
     }
 }
 
-void enableHizReport(OSCMessage &msg, int addrOffset)
+void enableHizReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -393,7 +418,7 @@ void enableHizReport(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void enableHomeSwReport(OSCMessage &msg, int addrOffset)
+void enableHomeSwReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -410,7 +435,7 @@ void enableHomeSwReport(OSCMessage &msg, int addrOffset)
     }
 }
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-void enableLimitSwReport(OSCMessage &msg, int addrOffset)
+void enableLimitSwReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -428,7 +453,7 @@ void enableLimitSwReport(OSCMessage &msg, int addrOffset)
 }
 #endif
 
-void enableDirReport(OSCMessage &msg, int addrOffset)
+void enableDirReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -444,7 +469,7 @@ void enableDirReport(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void enableMotorStatusReport(OSCMessage &msg, int addrOffset)
+void enableMotorStatusReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -460,7 +485,7 @@ void enableMotorStatusReport(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void enableSwEventReport(OSCMessage &msg, int addrOffset)
+void enableSwEventReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -476,7 +501,7 @@ void enableSwEventReport(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void enableUvloReport(OSCMessage &msg, int addrOffset)
+void enableUvloReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -492,7 +517,7 @@ void enableUvloReport(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void enableThermalStatusReport(OSCMessage &msg, int addrOffset)
+void enableThermalStatusReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -508,7 +533,7 @@ void enableThermalStatusReport(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void enableOverCurrentReport(OSCMessage &msg, int addrOffset)
+void enableOverCurrentReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -524,7 +549,7 @@ void enableOverCurrentReport(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void enableStallReport(OSCMessage &msg, int addrOffset)
+void enableStallReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -541,7 +566,7 @@ void enableStallReport(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setPositionReportInterval(OSCMessage &msg, int addrOffset)
+void setPositionReportInterval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int16_t interval = getInt(msg, 1);
@@ -569,7 +594,7 @@ void setPositionReportInterval(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setPositionListReportInterval(OSCMessage &msg, int addrOffset)
+void setPositionListReportInterval(OscMessage &msg)
 {
     int16_t interval = getInt(msg, 0);
     if (interval < 0)
@@ -587,7 +612,7 @@ void setPositionListReportInterval(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getHomeSw(OSCMessage &msg, int addrOffset)
+void getHomeSw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -609,7 +634,7 @@ void getHomeSw(uint8_t motorId)
 }
 
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-void getLimitSw(OSCMessage &msg, int addrOffset)
+void getLimitSw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -631,7 +656,7 @@ void getLimitSw(uint8_t motorId)
 }
 #endif
 
-void getBusy(OSCMessage &msg, int addrOffset)
+void getBusy(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -650,7 +675,7 @@ void getBusy(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getDir(OSCMessage &msg, int addrOffset)
+void getDir(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -669,7 +694,7 @@ void getDir(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getHiZ(OSCMessage &msg, int addrOffset)
+void getHiZ(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -688,7 +713,7 @@ void getHiZ(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getUvlo(OSCMessage &msg, int addrOffset)
+void getUvlo(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -708,7 +733,7 @@ void getUvlo(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getMotorStatus(OSCMessage &msg, int addrOffset)
+void getMotorStatus(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -728,7 +753,7 @@ void getMotorStatus(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getThermalStatus(OSCMessage &msg, int addrOffset)
+void getThermalStatus(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -748,7 +773,7 @@ void getThermalStatus(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getStatus(OSCMessage &msg, int addrOffset)
+void getStatus(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -770,7 +795,7 @@ void getStatus(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getStatusList(OSCMessage &msg, int addrOffset)
+void getStatusList(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -791,7 +816,7 @@ void getStatusList(OSCMessage &msg, int addrOffset)
     turnOnTXL();
 }
 
-void setMicrostepMode(OSCMessage &msg, int addrOffset)
+void setMicrostepMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t value = getInt(msg, 1);
@@ -811,7 +836,7 @@ void setMicrostepMode(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getMicrostepMode(OSCMessage &msg, int addrOffset)
+void getMicrostepMode(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -831,7 +856,7 @@ void getMicrostepMode(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getHomeSwMode(OSCMessage &msg, int addrOffset)
+void getHomeSwMode(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -851,7 +876,7 @@ void getHomeSwMode(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setHomeSwMode(OSCMessage &msg, int addrOffset)
+void setHomeSwMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t value = (getBool(msg, 1)) ? SW_USER : SW_HARD_STOP;
@@ -870,7 +895,7 @@ void setHomeSwMode(OSCMessage &msg, int addrOffset)
     }
 }
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-void getLimitSwMode(OSCMessage &msg, int addrOffset)
+void getLimitSwMode(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -890,7 +915,7 @@ void getLimitSwMode(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setLimitSwMode(OSCMessage &msg, int addrOffset)
+void setLimitSwMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t switchMode = (getBool(msg, 1)) ? SW_USER : SW_HARD_STOP;
@@ -908,7 +933,7 @@ void setLimitSwMode(OSCMessage &msg, int addrOffset)
 }
 #endif
 
-void getHomingStatus(OSCMessage &msg, int addrOffset)
+void getHomingStatus(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -930,7 +955,7 @@ void getHomingStatus(OSCMessage &msg, int addrOffset)
 }
 
 // STALL_TH register is 5bit in PowerSTEP01, 7bit in L6470
-void setStallThreshold(OSCMessage &msg, int addrOffset)
+void setStallThreshold(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
 #ifdef DRIVER_L6470
@@ -968,7 +993,7 @@ void getStallThreshold(uint8_t motorId)
 #endif
     sendTwoData("/stallThreshold", motorId + MOTOR_ID_FIRST, threshold);
 }
-void getStallThreshold(OSCMessage &msg, int addrOffset)
+void getStallThreshold(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -985,7 +1010,7 @@ void getStallThreshold(OSCMessage &msg, int addrOffset)
     }
 }
 // OCD_TH register is 5bit in PowerSTEP01, 4bit in L6470
-void setOverCurrentThreshold(OSCMessage &msg, int addrOffset)
+void setOverCurrentThreshold(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
 #ifdef DRIVER_L6470
@@ -1024,7 +1049,7 @@ void getOverCurrentThreshold(uint8_t motorID)
 #endif
     sendTwoData("/overCurrentThreshold", motorID, threshold);
 }
-void getOverCurrentThreshold(OSCMessage &msg, int addrOffset)
+void getOverCurrentThreshold(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1040,7 +1065,7 @@ void getOverCurrentThreshold(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setLowSpeedOptimizeThreshold(OSCMessage &msg, int addrOffset)
+void setLowSpeedOptimizeThreshold(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _lowSpdOptThreshold = getFloat(msg, 1);
@@ -1061,7 +1086,7 @@ void setLowSpeedOptimizeThreshold(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getLowSpeedOptimizeThreshold(OSCMessage &msg, int addrOffset)
+void getLowSpeedOptimizeThreshold(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1095,7 +1120,7 @@ void getLowSpeedOptimizeThreshold(uint8_t motorId)
     turnOnTXL();
 }
 
-void enableLowSpeedOptimize(OSCMessage &msg, int addrOffset)
+void enableLowSpeedOptimize(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool state = getBool(msg, 1);
@@ -1131,7 +1156,7 @@ void enableLowSpeedOptimize(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setBemfParam(OSCMessage &msg, int addrOffset)
+void setBemfParam(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t intSpeed = constrain(getInt(msg, 1), 0, 0x3FFF);
@@ -1166,7 +1191,7 @@ void setBemfParam(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getBemfParam(OSCMessage &msg, int addrOffset)
+void getBemfParam(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1202,7 +1227,7 @@ void getBemfParam(uint8_t motorId)
 }
 
 #ifdef DRIVER_POWERSTEP01
-void setDecayModeParam(OSCMessage &msg, int addrOffset)
+void setDecayModeParam(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t
@@ -1232,7 +1257,7 @@ void setDecayModeParam(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getDecayModeParam(OSCMessage &msg, int addrOffset)
+void getDecayModeParam(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1280,7 +1305,7 @@ void enableElectromagnetBrake(uint8_t motorId, bool bEnable)
         setBrake(motorId, false);
     }
 }
-void enableElectromagnetBrake(OSCMessage &msg, int addrOffset)
+void enableElectromagnetBrake(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -1298,7 +1323,7 @@ void enableElectromagnetBrake(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setBrakeTransitionDuration(OSCMessage &msg, int addrOffset)
+void setBrakeTransitionDuration(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t duration = getInt(msg, 1);
@@ -1316,7 +1341,7 @@ void setBrakeTransitionDuration(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getBrakeTransitionDuration(OSCMessage &msg, int addrOffset)
+void getBrakeTransitionDuration(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1334,7 +1359,7 @@ void getBrakeTransitionDuration(OSCMessage &msg, int addrOffset)
 }
 #endif
 
-void setGoUntilTimeout(OSCMessage &msg, int addrOffset)
+void setGoUntilTimeout(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint32_t timeout = getInt(msg, 1);
@@ -1351,7 +1376,7 @@ void setGoUntilTimeout(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getGoUntilTimeout(OSCMessage &msg, int addrOffset)
+void getGoUntilTimeout(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1366,7 +1391,7 @@ void getGoUntilTimeout(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setReleaseSwTimeout(OSCMessage &msg, int addrOffset)
+void setReleaseSwTimeout(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint32_t timeout = getInt(msg, 1);
@@ -1383,7 +1408,7 @@ void setReleaseSwTimeout(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getReleaseSwTimeout(OSCMessage &msg, int addrOffset)
+void getReleaseSwTimeout(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1399,7 +1424,7 @@ void getReleaseSwTimeout(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setHomingDirection(OSCMessage &msg, int addrOffset)
+void setHomingDirection(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool dir = getBool(msg, 1);
@@ -1416,7 +1441,7 @@ void setHomingDirection(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getHomingDirection(OSCMessage &msg, int addrOffset)
+void getHomingDirection(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1432,7 +1457,7 @@ void getHomingDirection(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setHomingSpeed(OSCMessage &msg, int addrOffset)
+void setHomingSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float spd = getFloat(msg, 1);
@@ -1450,7 +1475,7 @@ void setHomingSpeed(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getHomingSpeed(OSCMessage &msg, int addrOffset)
+void getHomingSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1466,7 +1491,7 @@ void getHomingSpeed(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setProhibitMotionOnHomeSw(OSCMessage &msg, int addrOffset)
+void setProhibitMotionOnHomeSw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool state = getBool(msg, 1);
@@ -1483,7 +1508,7 @@ void setProhibitMotionOnHomeSw(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getProhibitMotionOnHomeSw(OSCMessage &msg, int addrOffset)
+void getProhibitMotionOnHomeSw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1500,7 +1525,7 @@ void getProhibitMotionOnHomeSw(OSCMessage &msg, int addrOffset)
 }
 
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-void setProhibitMotionOnLimitSw(OSCMessage &msg, int addrOffset)
+void setProhibitMotionOnLimitSw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool state = getBool(msg, 1);
@@ -1517,7 +1542,7 @@ void setProhibitMotionOnLimitSw(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getProhibitMotionOnLimitSw(OSCMessage &msg, int addrOffset)
+void getProhibitMotionOnLimitSw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1555,7 +1580,7 @@ void setKval(uint8_t motorId, uint8_t hold, uint8_t run, uint8_t acc, uint8_t de
     kvalDec[motorId] = dec;
 }
 
-void setKval(OSCMessage &msg, int addrOffset)
+void setKval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int hold = getInt(msg, 1);
@@ -1580,7 +1605,7 @@ void setKval(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setHoldKval(OSCMessage &msg, int addrOffset)
+void setHoldKval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
@@ -1609,7 +1634,7 @@ void setHoldKval(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setRunKval(OSCMessage &msg, int addrOffset)
+void setRunKval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
@@ -1639,7 +1664,7 @@ void setRunKval(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setAccKval(OSCMessage &msg, int addrOffset)
+void setAccKval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
@@ -1668,7 +1693,7 @@ void setAccKval(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setDecKval(OSCMessage &msg, int addrOffset)
+void setDecKval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t kvalInput = constrain(getInt(msg, 1), 0, 255);
@@ -1698,7 +1723,7 @@ void setDecKval(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getKval(OSCMessage &msg, int addrOffset)
+void getKval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1750,7 +1775,7 @@ void setTval(uint8_t motorId, uint8_t hold, uint8_t run, uint8_t acc, uint8_t de
     tvalAcc[motorId] = acc;
     tvalDec[motorId] = dec;
 }
-void setTval(OSCMessage &msg, int addrOffset)
+void setTval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int hold = constrain(getInt(msg, 1), 0, TVAL_LIMIT_VAL);
@@ -1771,7 +1796,7 @@ void setTval(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setHoldTval(OSCMessage &msg, int addrOffset)
+void setHoldTval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t tvalInput = constrain(getInt(msg, 1), 0, TVAL_LIMIT_VAL);
@@ -1796,7 +1821,7 @@ void setHoldTval(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setRunTval(OSCMessage &msg, int addrOffset)
+void setRunTval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t tvalInput = constrain(getInt(msg, 1), 0, TVAL_LIMIT_VAL);
@@ -1822,7 +1847,7 @@ void setRunTval(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setAccTval(OSCMessage &msg, int addrOffset)
+void setAccTval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t tvalInput = constrain(getInt(msg, 1), 0, TVAL_LIMIT_VAL);
@@ -1847,7 +1872,7 @@ void setAccTval(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setDecTval(OSCMessage &msg, int addrOffset)
+void setDecTval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t tvalInput = constrain(getInt(msg, 1), 0, TVAL_LIMIT_VAL);
@@ -1873,7 +1898,7 @@ void setDecTval(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getTval(OSCMessage &msg, int addrOffset)
+void getTval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1929,7 +1954,7 @@ void getTval_mA(uint8_t motorId)
     newMes.empty();
     turnOnTXL();
 }
-void getTval_mA(OSCMessage &msg, int addrOffset)
+void getTval_mA(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -1950,7 +1975,7 @@ void getTval_mA(OSCMessage &msg, int addrOffset)
 
 #pragma region speed_commands_osc_listener
 
-void setSpeedProfile(OSCMessage &msg, int addrOffset)
+void setSpeedProfile(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _acc = getFloat(msg, 1);
@@ -1981,7 +2006,7 @@ void setSpeedProfile(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setMaxSpeed(OSCMessage &msg, int addrOffset)
+void setMaxSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _maxSpeed = getFloat(msg, 1);
@@ -2001,7 +2026,7 @@ void setMaxSpeed(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setMinSpeed(OSCMessage &msg, int addrOffset)
+void setMinSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _minSpeed = getFloat(msg, 1);
@@ -2027,7 +2052,7 @@ void setMinSpeed(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getMinSpeed(OSCMessage &msg, int addrOffset)
+void getMinSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -2043,7 +2068,7 @@ void getMinSpeed(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setFullstepSpeed(OSCMessage &msg, int addrOffset)
+void setFullstepSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _fullStepSpeed = getFloat(msg, 1);
@@ -2062,7 +2087,7 @@ void setFullstepSpeed(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getFullstepSpeed(OSCMessage &msg, int addrOffset)
+void getFullstepSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _fullStepSpeed;
@@ -2080,7 +2105,7 @@ void getFullstepSpeed(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setAcc(OSCMessage &msg, int addrOffset)
+void setAcc(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _acc = getFloat(msg, 1);
@@ -2099,7 +2124,7 @@ void setAcc(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setDec(OSCMessage &msg, int addrOffset)
+void setDec(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _dec = getFloat(msg, 1);
@@ -2119,7 +2144,7 @@ void setDec(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setSpeedProfileRaw(OSCMessage &msg, int addrOffset)
+void setSpeedProfileRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t _accRaw = getInt(msg, 1);
@@ -2143,7 +2168,7 @@ void setSpeedProfileRaw(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setMaxSpeedRaw(OSCMessage &msg, int addrOffset)
+void setMaxSpeedRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
@@ -2159,7 +2184,7 @@ void setMaxSpeedRaw(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setMinSpeedRaw(OSCMessage &msg, int addrOffset)
+void setMinSpeedRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
@@ -2176,7 +2201,7 @@ void setMinSpeedRaw(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setFullstepSpeedRaw(OSCMessage &msg, int addrOffset)
+void setFullstepSpeedRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
@@ -2193,7 +2218,7 @@ void setFullstepSpeedRaw(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setAccRaw(OSCMessage &msg, int addrOffset)
+void setAccRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
@@ -2209,7 +2234,7 @@ void setAccRaw(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setDecRaw(OSCMessage &msg, int addrOffset)
+void setDecRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
@@ -2226,7 +2251,7 @@ void setDecRaw(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getSpeed(OSCMessage &msg, int addrOffset)
+void getSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float s;
@@ -2253,7 +2278,7 @@ void getSpeed(OSCMessage &msg, int addrOffset)
     }
 }
 
-void getSpeedProfile(OSCMessage &msg, int addrOffset)
+void getSpeedProfile(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -2287,7 +2312,7 @@ void getSpeedProfile(uint8_t motorId)
     turnOnTXL();
 }
 
-void getSpeedProfileRaw(OSCMessage &msg, int addrOffset)
+void getSpeedProfileRaw(OscMessage &msg)
 {
     if (!isDestIpSet)
     {
@@ -2324,7 +2349,7 @@ void getSpeedProfileRaw(uint8_t motorId)
 
 #pragma region operational_commands_osc_listener
 
-void getPosition(OSCMessage &msg, int addrOffset)
+void getPosition(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -2348,12 +2373,12 @@ void getPositionList()
     readAllPositions(pos);
     sendAllData("/positionList", pos);
 }
-void getPositionList(OSCMessage &msg, int addrOffset)
+void getPositionList(OscMessage &msg)
 {
     getPositionList();
 }
 
-void getMark(OSCMessage &msg, int addrOffset)
+void getMark(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -2390,7 +2415,7 @@ void run(uint8_t motorID, float absSpeed, bool dir)
         }
     }
 }
-void run(OSCMessage &msg, int addrOffset)
+void run(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float stepsPerSec = getFloat(msg, 1);
@@ -2399,7 +2424,7 @@ void run(OSCMessage &msg, int addrOffset)
     run(motorID, absSpeed, dir);
 }
 
-void combinedRun(OSCMessage &msg, int addrOffset)
+void combinedRun(OscMessage &msg)
 {
     uint8_t motorID[2];
     motorID[0] = getInt(msg, 0);
@@ -2432,7 +2457,7 @@ void runRaw(uint8_t motorID, bool dir, int32_t speed)
     }
 }
 
-void runRaw(OSCMessage &msg, int addrOffset)
+void runRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t speed = getInt(msg, 1);
@@ -2441,7 +2466,7 @@ void runRaw(OSCMessage &msg, int addrOffset)
 
     runRaw(motorID, dir, speed);
 }
-void combinedRunRaw(OSCMessage &msg, int addrOffset)
+void combinedRunRaw(OscMessage &msg)
 {
     uint8_t motorID[2];
     motorID[0] = getInt(msg, 0);
@@ -2474,7 +2499,7 @@ void move(uint8_t motorID, bool newDir, int32_t steps)
         }
     }
 }
-void move(OSCMessage &msg, int addrOffset)
+void move(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t steps = getInt(msg, 1);
@@ -2483,7 +2508,7 @@ void move(OSCMessage &msg, int addrOffset)
     move(motorID, newDir, steps);
 }
 
-void combinedMove(OSCMessage &msg, int addrOffset)
+void combinedMove(OscMessage &msg)
 {
     uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
     int32_t steps = getInt(msg, 2);
@@ -2546,13 +2571,13 @@ void goTo(uint8_t motorID, int32_t pos)
         }
     }
 }
-void goTo(OSCMessage &msg, int addrOffset)
+void goTo(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t pos = getInt(msg, 1);
     goTo(motorID, pos);
 }
-void combinedGoTo(OSCMessage &msg, int addrOffset)
+void combinedGoTo(OscMessage &msg)
 {
     uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
     int32_t pos = getInt(msg, 2);
@@ -2595,14 +2620,14 @@ void goToDir(uint8_t motorID, bool dir, int32_t pos)
         }
     }
 }
-void goToDir(OSCMessage &msg, int addrOffset)
+void goToDir(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     boolean dir = getBool(msg, 1);
     int32_t pos = getInt(msg, 2);
     goToDir(motorID, dir, pos);
 }
-void combinedGoToDir(OSCMessage &msg, int addrOffset)
+void combinedGoToDir(OscMessage &msg)
 {
     uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
     boolean dir = getBool(msg, 2);
@@ -2636,7 +2661,7 @@ void homing(uint8_t motorId)
         sendTwoData("/homingStatus", motorId + MOTOR_ID_FIRST, homingStatus[motorId]);
     }
 }
-void homing(OSCMessage &msg, int addrOffset)
+void homing(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -2664,7 +2689,7 @@ void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec) {
         }
     }
 }
-void goUntil(OSCMessage &msg, int addrOffset)
+void goUntil(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool action = getBool(msg, 1);
@@ -2684,7 +2709,7 @@ void goUntil(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void goUntilRaw(OSCMessage& msg, int addrOffset) {
+void goUntilRaw(OscMessage& msg) {
     uint8_t motorID = getInt(msg, 0);
     bool action = getBool(msg, 1);
     int32_t speed = getInt(msg, 2);
@@ -2724,7 +2749,7 @@ void releaseSw(uint8_t motorId, bool action, bool dir) {
         homingStartTime[motorId] = millis();
     }
 }
-void releaseSw(OSCMessage& msg, int addrOffset) {
+void releaseSw(OscMessage& msg) {
     uint8_t motorID = getInt(msg, 0);
     uint8_t action = getInt(msg, 1);
     bool dir = getBool(msg, 2);
@@ -2739,7 +2764,7 @@ void releaseSw(OSCMessage& msg, int addrOffset) {
     }
 }
 
-void goHome(OSCMessage &msg, int addrOffset)
+void goHome(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool dir;
@@ -2774,7 +2799,7 @@ void goHome(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void goMark(OSCMessage &msg, int addrOffset)
+void goMark(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool dir;
@@ -2809,7 +2834,7 @@ void goMark(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setMark(OSCMessage &msg, int addrOffset)
+void setMark(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t newMark = getInt(msg, 1);
@@ -2825,7 +2850,7 @@ void setMark(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void setPosition(OSCMessage &msg, int addrOffset)
+void setPosition(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t newPos = getInt(msg, 1);
@@ -2841,7 +2866,7 @@ void setPosition(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void resetPos(OSCMessage &msg, int addrOffset)
+void resetPos(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -2875,12 +2900,12 @@ void softStop(uint8_t motorID)
         }
     }
 }
-void softStop(OSCMessage &msg, int addrOffset)
+void softStop(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     softStop(motorID);
 }
-void combinedSoftStop(OSCMessage &msg, int addrOffset)
+void combinedSoftStop(OscMessage &msg)
 {
     uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
     softStop(motorID[0]);
@@ -2905,12 +2930,12 @@ void hardStop(uint8_t motorID)
         }
     }
 }
-void hardStop(OSCMessage &msg, int addrOffset)
+void hardStop(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     hardStop(motorID);
 }
-void combinedHardStop(OSCMessage &msg, int addrOffset)
+void combinedHardStop(OscMessage &msg)
 {
     uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
     hardStop(motorID[0]);
@@ -2955,12 +2980,12 @@ void softHiZ(uint8_t motorID)
         }
     }
 }
-void softHiZ(OSCMessage &msg, int addrOffset)
+void softHiZ(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     softHiZ(motorID);
 }
-void combinedSoftHiZ(OSCMessage &msg, int addrOffset)
+void combinedSoftHiZ(OscMessage &msg)
 {
     uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
     softHiZ(motorID[0]);
@@ -3005,12 +3030,12 @@ void hardHiZ(uint8_t motorID)
         }
     }
 }
-void hardHiZ(OSCMessage &msg, int addrOffset)
+void hardHiZ(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     hardHiZ(motorID);
 }
-void combinedHardHiZ(OSCMessage &msg, int addrOffset)
+void combinedHardHiZ(OscMessage &msg)
 {
     uint8_t motorID[2] = { getInt(msg, 0), getInt(msg, 1) };
     hardHiZ(motorID[0]);
@@ -3072,7 +3097,7 @@ void activate(uint8_t motorId, bool state)
         sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
     }
 }
-void activate(OSCMessage &msg, int addrOffset)
+void activate(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool state = getBool(msg, 1);
@@ -3104,7 +3129,7 @@ void free(uint8_t motorId)
         sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
     }
 }
-void free(OSCMessage &msg, int addrOffset)
+void free(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -3126,7 +3151,7 @@ void free(OSCMessage &msg, int addrOffset)
 
 #pragma region servo_commands_osc_listener
 
-void setTargetPosition(OSCMessage &msg, int addrOffset)
+void setTargetPosition(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     int32_t position = getInt(msg, 1);
@@ -3143,7 +3168,7 @@ void setTargetPosition(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setTargetPositionList(OSCMessage &msg, int addrOffset)
+void setTargetPositionList(OscMessage &msg)
 {
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
@@ -3169,7 +3194,7 @@ void enableServoMode(uint8_t motorId, bool enable)
     }
     isServoMode[motorId] = enable;
 }
-void enableServoMode(OSCMessage &msg, int addrOffset)
+void enableServoMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
@@ -3187,7 +3212,7 @@ void enableServoMode(OSCMessage &msg, int addrOffset)
     }
 }
 
-void setServoParam(OSCMessage &msg, int addrOffset)
+void setServoParam(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float
@@ -3233,7 +3258,7 @@ void getServoParam(uint8_t motorId)
     turnOnTXL();
 }
 
-void getServoParam(OSCMessage &msg, int addrOffset)
+void getServoParam(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -3268,7 +3293,7 @@ void setVoltageMode(uint8_t motorId)
     stepper[motorId].setVoltageMode();
     isCurrentMode[motorId] = false;
 }
-void setVoltageMode(OSCMessage &msg, int addrOffset)
+void setVoltageMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -3305,7 +3330,7 @@ void setCurrentMode(uint8_t motorId)
     stepper[motorId].setCurrentMode();
     isCurrentMode[motorId] = true;
 }
-void setCurrentMode(OSCMessage &msg, int addrOffset)
+void setCurrentMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
@@ -3323,7 +3348,7 @@ void setCurrentMode(OSCMessage &msg, int addrOffset)
 }
 #endif
 
-void setElPos(OSCMessage &msg, int addrOffset)
+void setElPos(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint8_t newFullStep = getInt(msg, 1);
@@ -3343,7 +3368,7 @@ void setElPos(OSCMessage &msg, int addrOffset)
         }
     }
 }
-void getElPos(OSCMessage &msg, int addrOffset)
+void getElPos(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t elPos;

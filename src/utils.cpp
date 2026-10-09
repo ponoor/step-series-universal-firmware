@@ -58,7 +58,7 @@ void sendWrongDataTypeError() {
         sendOneDatum(F("/error/osc"),"WrongDataType");
 }
 
-int getInt(OSCMessage &msg, uint8_t offset) 
+int getInt(OscMessage &msg, uint8_t offset) 
 {
 	int msgVal = 0;
 	if (msg.isFloat(offset))
@@ -75,7 +75,7 @@ int getInt(OSCMessage &msg, uint8_t offset)
 	return msgVal;
 }
 
-float getFloat(OSCMessage &msg, uint8_t offset)
+float getFloat(OscMessage &msg, uint8_t offset)
 {
 	float msgVal = 0;
 	if (msg.isFloat(offset))
@@ -92,7 +92,7 @@ float getFloat(OSCMessage &msg, uint8_t offset)
 	return msgVal;
 }
 
-bool getBool(OSCMessage &msg, uint8_t offset)
+bool getBool(OscMessage &msg, uint8_t offset)
 {
     bool msgVal = 0;
 	if (msg.isFloat(offset))

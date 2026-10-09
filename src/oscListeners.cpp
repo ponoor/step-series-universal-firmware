@@ -2704,7 +2704,7 @@ void goUntilRaw(OSCMessage& msg, int addrOffset) {
                 if (homeSwState[i]) {
                     sendTwoData("/error/command", "HomeSwActivated", i+MOTOR_ID_FIRST);
                 } else {
-                    stepper[i].goUntil(action, dir, speed);
+                    stepper[i].goUntilRaw(action, dir, speed);
                     homingStatus[i] = HOMING_GOUNTIL;
                     homingStartTime[i] = millis();
                 }

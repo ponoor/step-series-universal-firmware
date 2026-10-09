@@ -27,6 +27,8 @@
 extern const uint8_t firmwareVersion[3]; // defined in boardsDef.h
 extern int8_t loadedConfigVersion[2];
 extern const uint8_t applicableConfigVersion[2]; // defined in boardsDef.h
+extern uint8_t resetCause;    // ResetCause (resetCause.h), sent with /booted
+extern uint8_t resetCauseRaw; // raw MCU register value, diagnosis output only
 #define STATUS_POLL_PERIOD   10 // [ms]
 // Watchdog timeout. A UDP send blocks until ARP is resolved (W5500 retries every 200 ms),
 // which can exceed 100 ms.

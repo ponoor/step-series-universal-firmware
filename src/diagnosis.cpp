@@ -6,6 +6,7 @@
 #include "utils.h"
 #include <strings.h>
 #include "perfStats.h"
+#include "resetCause.h"
 
 String configVersionCompareString[5] = {
 	F("CONFIG_VERSION_UNDEFINED"),
@@ -784,6 +785,9 @@ void printStatusAsJson() {
 		JsonDocument doc;
 		JsonObject board = doc.to<JsonObject>();
 		board["product"] = PRODUCT_NAME;
+		board["mcu"] = mcuName();
+		board["resetCause"] = resetCause;
+		board["resetCauseRaw"] = resetCauseRaw;
 		JsonArray fwVer = board["firmwareVersion"].to<JsonArray>();
 		for (uint8_t i = 0; i < 3; i++) fwVer.add(firmwareVersion[i]);
 		JsonArray boardMyIp = board["myIp"].to<JsonArray>();

@@ -21,6 +21,7 @@
 #include "diagnosis.h"
 #include "perfStats.h"
 #include "packedTransfer.h"
+#include "resetCause.h"
 
 const String productName = PRODUCT_NAME;
 const char *firmwareName = FIRMWARE_NAME;
@@ -41,6 +42,7 @@ void checkLimitSw();
 
 void setup()
 {
+    resetCause = readResetCause(&resetCauseRaw); // before any other initialization
     SerialUSB.begin(9600);
     // while (!SerialUSB); // DEBUG
 

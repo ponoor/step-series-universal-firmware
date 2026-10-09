@@ -5,6 +5,10 @@
 #include "globals.h"
 #include <SdFat.h>
 
+// Reset cause, read at the beginning of setup()
+uint8_t resetCause = 0;
+uint8_t resetCauseRaw = 0;
+
 // Tx, Rx LED
 bool rxLedEnabled = false, txLedEnabled = false;
 uint32_t RXL_blinkStartTime, TXL_blinkStartTime;

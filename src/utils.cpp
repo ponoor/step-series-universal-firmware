@@ -238,7 +238,7 @@ void sendBootMsg(uint32_t _currentTime) {
         if ((uint32_t)(_currentTime - linkedTime) < BOOT_MSG_WAIT_TIME) return;
     }
     OscWriter newMes("/booted");
-    newMes.add(myId);
+    newMes.add(myId).add(resetCause);
     sendOscMessage(newMes, broadcastIp, outPort);
     isWaitingSendBootMsg = false;
 }

@@ -1,0 +1,30 @@
+// perfStats.cpp
+
+#include <string.h>
+#include "perfStats.h"
+#include "utils.h"
+
+PerfStats perfStats;
+
+void perfStatsReset()
+{
+    memset(&perfStats, 0, sizeof(perfStats));
+}
+
+static void printStat(const char *name, const PerfStat &stat)
+{
+    uint32_t avg = stat.count ? (uint32_t)(stat.sumUs / stat.count) : 0;
+    dbgPrint("%-14s max %6lu us  avg %6lu us  n %lu\n", name,
+             (unsigned long)stat.maxUs, (unsigned long)avg, (unsigned long)stat.count);
+}
+
+void perfStatsPrint()
+{
+    PerfStats s = perfStats; // snapshot, then reset
+    perfStatsReset();
+    printStat("loop", s.loop);
+    printStat("oscReceive", s.oscReceive);
+    printStat("updateServo", s.updateServo);
+    printStat("checkStatus", s.checkStatus);
+    printStat("servoInterval", s.servoInterval);
+}

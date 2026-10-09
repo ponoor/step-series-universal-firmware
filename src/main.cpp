@@ -19,6 +19,7 @@
 #include "loadConfig.h"
 #include "oscListeners.h"
 #include "diagnosis.h"
+#include "perfStats.h"
 
 const String productName = PRODUCT_NAME;
 const char *firmwareName = FIRMWARE_NAME;
@@ -29,7 +30,7 @@ constexpr auto position_tolerance = 0; // steps
 
 // for PlatformIO
 void checkStatus();
-void updateServo(uint32_t currentTimeMicros);
+bool updateServo(uint32_t currentTimeMicros);
 void checkHomingTimeout(uint32_t _currentTimeMillis);
 void updatePositionReport(uint32_t _currentTimeMillis);
 void updatePositionReportList(uint32_t _currentTimeMillis);
@@ -329,14 +330,21 @@ void updatePositionReportList(uint32_t _currentTimeMillis)
     }
 }
 #define INTEGRAL_LIMIT 1500.0f
-void updateServo(uint32_t _currentTime)
+bool updateServo(uint32_t _currentTime)
 {
     static uint32_t lastServoUpdateTime = 0;
+    static uint32_t lastServoUpdateMicros = 0;
+    bool updated = false;
     static float eZ1[NUM_OF_MOTOR] = {0.0},
                  //  eZ2[NUM_OF_MOTOR] = {0.0},
         integral[NUM_OF_MOTOR] = {0.0};
         if ((uint32_t)(_currentTime - lastServoUpdateTime) >= servoPollPeriod)
         {
+            const uint32_t nowMicros = micros();
+            if (lastServoUpdateMicros != 0)
+                perfAdd(perfStats.servoInterval, nowMicros - lastServoUpdateMicros);
+            lastServoUpdateMicros = nowMicros;
+            updated = true;
             for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
             {
                 if (isServoMode[i])
@@ -380,10 +388,17 @@ void updateServo(uint32_t _currentTime)
         }
         lastServoUpdateTime = _currentTime;
     }
+    return updated;
 }
 
 void loop()
 {
+    static uint32_t lastLoopStartMicros = 0;
+    const uint32_t loopStartMicros = micros();
+    if (lastLoopStartMicros != 0)
+        perfAdd(perfStats.loop, loopStartMicros - lastLoopStartMicros);
+    lastLoopStartMicros = loopStartMicros;
+
     uint32_t currentTimeMillis = millis();
     static uint32_t lastPollTime = 0;
 
@@ -399,7 +414,9 @@ void loop()
         updatePositionReport(currentTimeMillis);
         if (reportPositionList)
             updatePositionReportList(currentTimeMillis);
+        uint32_t t0 = micros();
         checkStatus();
+        perfAdd(perfStats.checkStatus, micros() - t0);
         updateRxTxLed(currentTimeMillis);
         uint8_t t = getMyId();
         if (myId != t)
@@ -419,6 +436,10 @@ void loop()
     {
         diagnosisCommand(SerialUSB.read());
     }
-    OSCMsgReceive();
-    updateServo(currentTimeMillis);
+    uint32_t t0 = micros();
+    if (OSCMsgReceive())
+        perfAdd(perfStats.oscReceive, micros() - t0);
+    t0 = micros();
+    if (updateServo(currentTimeMillis))
+        perfAdd(perfStats.updateServo, micros() - t0);
 }

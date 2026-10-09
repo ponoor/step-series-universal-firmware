@@ -5,6 +5,7 @@
 #include "diagnosis.h"
 #include "utils.h"
 #include <strings.h>
+#include "perfStats.h"
 
 String configVersionCompareString[5] = {
 	F("CONFIG_VERSION_UNDEFINED"),
@@ -52,6 +53,9 @@ void diagnosisCommand(uint8_t inByte) {
 	case 'R':
 		rebootBoard();
 		break;
+	case 'p':
+		perfStatsPrint();
+		break;
 	default:
 		break;
 	}
@@ -70,6 +74,7 @@ void printMenu() {
 	dbgPrint("{: receive config JSON\n");
 	dbgPrint("F<filename>: set save filename\n");
 	dbgPrint("R: reboot board\n");
+	dbgPrint("p: print timing stats [us] and reset them\n");
 }
 
 void testMotion() {

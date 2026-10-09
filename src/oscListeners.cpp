@@ -6,7 +6,7 @@
 #include "utils.h"
 #include "diagnosis.h"
 
-void OSCMsgReceive()
+bool OSCMsgReceive()
 {
     bool bMsgHasError = false, bMsgRouted = false;
     OSCMessage msgIN;
@@ -194,7 +194,9 @@ void OSCMsgReceive()
         {
             sendOneDatum("/error/osc", "OscSyntaxError");
         }
+        return true;
     }
+    return false;
 }
 
 bool isCorrectMotorId(uint8_t motorID)

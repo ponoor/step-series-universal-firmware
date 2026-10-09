@@ -11,6 +11,7 @@
 
 #include <OSCMessage.h>
 #include "oscParser.h"
+#include "oscWriter.h"
 #include <Ethernet.h>
 #include <Adafruit_SleepyDog.h>
 #include "globals.h"
@@ -55,29 +56,37 @@ void resetMotorDriver(uint8_t deviceID);
 void initEthernet();
 void sendBootMsg(uint32_t _currentTime);
 
+// Largest outgoing message: /configName with a name set by /setConfigName (fits in
+// the 512-byte receive buffer) and the config filename.
+constexpr uint16_t OSC_TX_BUFFER_SIZE = 640;
+
+// Encodes msg into the static send buffer, sends it and lights TXL. A message that does not
+// fit is not sent (warning on USB serial once).
+void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port);
+
 template <class T>
-void sendOneDatum(String address, T data) {
+void sendOneDatum(const char *address, T data) {
 	if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
-    newMes.add(data);;
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    OscWriter newMes(address);
+    newMes.add(data);
+    sendOscMessage(newMes, destIp, outPort);
+}
+template <class T>
+void sendOneDatum(const __FlashStringHelper *address, T data) {
+    sendOneDatum(reinterpret_cast<const char *>(address), data);
 }
 
 template <class T, class U>
-void sendTwoData(String address, T data1, U data2) {
+void sendTwoData(const char *address, T data1, U data2) {
 	if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
+    OscWriter newMes(address);
     newMes.add(data1).add(data2);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
-void sendThreeInt(String address, int32_t data1, int32_t data2, int32_t data3);
-void sendAllData(String address, int32_t *data);
+template <class T, class U>
+void sendTwoData(const __FlashStringHelper *address, T data1, U data2) {
+    sendTwoData(reinterpret_cast<const char *>(address), data1, data2);
+}
+void sendThreeInt(const char *address, int32_t data1, int32_t data2, int32_t data3);
+void sendAllData(const char *address, int32_t *data);
 #endif

@@ -99,7 +99,7 @@ bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
 void setDestIp(OscMessage &msg)
 {
     bool bIpUpdated = false;
-    OSCMessage newMes("/destIp");
+    OscWriter newMes("/destIp");
     for (auto i = 0; i < 4; i++)
     {
         bIpUpdated |= (destIp[i] != Udp.remoteIP()[i]);
@@ -107,12 +107,8 @@ void setDestIp(OscMessage &msg)
     }
     destIp = Udp.remoteIP();
     newMes.add((int32_t)bIpUpdated);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
+    sendOscMessage(newMes, destIp, outPort);
     isDestIpSet = true;
-    turnOnTXL();
 }
 
 void getVersion(OscMessage &msg)
@@ -127,13 +123,9 @@ void getConfigName(OscMessage &msg)
     {
         return;
     }
-    OSCMessage newMes("/configName");
+    OscWriter newMes("/configName");
     newMes.add(configName.c_str()).add((int32_t)sdInitializeSucceeded).add((int32_t)configFileOpenSucceeded).add((int32_t)configFileParseSucceeded).add(configFilename);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 
 void setConfigName(OscMessage &msg)
@@ -651,17 +643,13 @@ void getStatusList(OscMessage &msg)
     }
     uint16_t status[NUM_OF_MOTOR];
     readAllStatus(status);
-    OSCMessage newMes("/statusList");
+    OscWriter newMes("/statusList");
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         newMes.add((int32_t)status[i]);
     }
 
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 
 void setMicrostepMode(OscMessage &msg)
@@ -957,15 +945,11 @@ void getLowSpeedOptimizeThreshold(uint8_t motorId)
         return;
     }
     bool optimizationEnabled = (stepper[motorId].getParam(MIN_SPEED) & (1 << 12)) > 0;
-    OSCMessage newMes("/lowSpeedOptimizeThreshold");
+    OscWriter newMes("/lowSpeedOptimizeThreshold");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
     newMes.add(lowSpeedOptimizeThreshold[motorId]);
     newMes.add(optimizationEnabled);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 
 void enableLowSpeedOptimize(OscMessage &msg)
@@ -1061,17 +1045,13 @@ void getBemfParam(uint8_t motorId)
     {
         return;
     }
-    OSCMessage newMes("/bemfParam");
+    OscWriter newMes("/bemfParam");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
     newMes.add((int32_t)stepper[motorId].getParam(INT_SPD));
     newMes.add((int32_t)stepper[motorId].getParam(ST_SLP));
     newMes.add((int32_t)stepper[motorId].getParam(FN_SLP_ACC));
     newMes.add((int32_t)stepper[motorId].getParam(FN_SLP_DEC));
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 
 #ifdef DRIVER_POWERSTEP01
@@ -1127,16 +1107,12 @@ void getDecayModeParam(uint8_t motorId)
     {
         return;
     }
-    OSCMessage newMes("/decayModeParam");
+    OscWriter newMes("/decayModeParam");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
     newMes.add((int32_t)stepper[motorId].getParam(T_FAST));
     newMes.add((int32_t)stepper[motorId].getParam(TON_MIN));
     newMes.add((int32_t)stepper[motorId].getParam(TOFF_MIN));
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 #endif
 
@@ -1592,18 +1568,14 @@ void getKval(uint8_t motorID)
     {
         return;
     }
-    OSCMessage newMes("/kval");
+    OscWriter newMes("/kval");
     newMes.add((int32_t)motorID);
     uint8_t motorId = motorID - MOTOR_ID_FIRST;
     newMes.add((int32_t)stepper[motorId].getHoldKVAL());
     newMes.add((int32_t)stepper[motorId].getRunKVAL());
     newMes.add((int32_t)stepper[motorId].getAccKVAL());
     newMes.add((int32_t)stepper[motorId].getDecKVAL());
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 #pragma endregion kval_commands_osc_listener
 
@@ -1767,18 +1739,14 @@ void getTval(uint8_t motorID)
     {
         return;
     }
-    OSCMessage newMes("/tval");
+    OscWriter newMes("/tval");
     newMes.add((int32_t)motorID);
     uint8_t motorId = motorID - MOTOR_ID_FIRST;
     newMes.add((int32_t)stepper[motorId].getHoldTVAL());
     newMes.add((int32_t)stepper[motorId].getRunTVAL());
     newMes.add((int32_t)stepper[motorId].getAccTVAL());
     newMes.add((int32_t)stepper[motorId].getDecTVAL());
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 float TvalToCurrent(uint8_t tval)
 {
@@ -1790,17 +1758,13 @@ void getTval_mA(uint8_t motorId)
     {
         return;
     }
-    OSCMessage newMes("/tval_mA");
+    OscWriter newMes("/tval_mA");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
     newMes.add(TvalToCurrent(stepper[motorId].getHoldTVAL()));
     newMes.add(TvalToCurrent(stepper[motorId].getRunTVAL()));
     newMes.add(TvalToCurrent(stepper[motorId].getAccTVAL()));
     newMes.add(TvalToCurrent(stepper[motorId].getDecTVAL()));
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 void getTval_mA(OscMessage &msg)
 {
@@ -2148,16 +2112,12 @@ void getSpeedProfile(uint8_t motorId)
     {
         return;
     }
-    OSCMessage newMes("/speedProfile");
+    OscWriter newMes("/speedProfile");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
     newMes.add((float)stepper[motorId].getAcc());
     newMes.add((float)stepper[motorId].getDec());
     newMes.add((float)stepper[motorId].getMaxSpeed());
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 
 void getSpeedProfileRaw(OscMessage &msg)
@@ -2182,16 +2142,12 @@ void getSpeedProfileRaw(OscMessage &msg)
 }
 void getSpeedProfileRaw(uint8_t motorId)
 {
-    OSCMessage newMes("/speedProfileRaw");
+    OscWriter newMes("/speedProfileRaw");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
     newMes.add((int32_t)stepper[motorId].getAccRaw());
     newMes.add((int32_t)stepper[motorId].getDecRaw());
     newMes.add((int32_t)stepper[motorId].getMaxSpeedRaw());
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 #pragma endregion speed_commands_osc_listener
 
@@ -3096,14 +3052,10 @@ void getServoParam(uint8_t motorId)
     {
         return;
     }
-    OSCMessage newMes("/servoParam");
+    OscWriter newMes("/servoParam");
     newMes.add(motorId + MOTOR_ID_FIRST);
     newMes.add(kP[motorId]).add(kI[motorId]).add(kD[motorId]);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }
 
 void getServoParam(OscMessage &msg)

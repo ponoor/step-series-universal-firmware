@@ -237,13 +237,9 @@ void sendBootMsg(uint32_t _currentTime) {
     else {
         if ((uint32_t)(_currentTime - linkedTime) < BOOT_MSG_WAIT_TIME) return;
     }
-    OSCMessage newMes("/booted");
+    OscWriter newMes("/booted");
     newMes.add(myId);
-    Udp.beginPacket(broadcastIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, broadcastIp, outPort);
     isWaitingSendBootMsg = false;
 }
 bool isBrakeDisEngaged(uint8_t motorId) {
@@ -320,27 +316,36 @@ bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatu
     return true;
 }
 
-void sendThreeInt(String address, int32_t data1, int32_t data2, int32_t data3) {
-    if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
-    newMes.add(data1).add(data2).add(data3);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
+void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
+    static uint8_t oscTxBuffer[OSC_TX_BUFFER_SIZE];
+    static bool warned = false;
+    const uint16_t len = msg.encode(oscTxBuffer, sizeof(oscTxBuffer));
+    if (len == 0) {
+        if (!warned) {
+            warned = true;
+            dbgPrint("Warning: OSC message too long, not sent\n");
+        }
+        return;
+    }
+    Udp.beginPacket(ip, port);
+    Udp.write(oscTxBuffer, len);
     Udp.endPacket();
-    newMes.empty();
     turnOnTXL();
 }
 
-void sendAllData(String address, int32_t *data) {
+void sendThreeInt(const char *address, int32_t data1, int32_t data2, int32_t data3) {
     if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
+    OscWriter newMes(address);
+    newMes.add(data1).add(data2).add(data3);
+    sendOscMessage(newMes, destIp, outPort);
+}
+
+void sendAllData(const char *address, int32_t *data) {
+    if (!isDestIpSet) { return; }
+    OscWriter newMes(address);
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         newMes.add(data[i]);
     }
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }

@@ -91,6 +91,7 @@ void setup()
     myId = getMyId();
     dbgPrint("myId:%ld\n", myId);
     delay(1);
+    initOscRouter();
     initEthernet();
     dbgPrint("eth ok\n");
     isWaitingSendBootMsg = bootedMsgEnable;

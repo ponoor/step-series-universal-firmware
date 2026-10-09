@@ -16,6 +16,7 @@
 // 'motorID' : 1-4/1-8, 255
 // 'motorId' : 0-3/0-7
 
+void initOscRouter();
 bool OSCMsgReceive(); // returns true if a packet was received
 bool isCorrectMotorId(uint8_t motorID);
 

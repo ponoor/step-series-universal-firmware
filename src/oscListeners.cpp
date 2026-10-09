@@ -6,29 +6,32 @@
 #include "utils.h"
 #include "diagnosis.h"
 #include "packedTransfer.h"
-#include <OSCMatch.h>
+#include "oscRouter.h"
+#include "perfStats.h"
 
-static uint8_t oscRxBuffer[OSC_RX_BUFFER_SIZE];
+// Receive buffer with guard bytes for oscRouteMatches(), see oscRouter.h
+static uint8_t oscRxStorage[OSC_RX_GUARD_BEFORE + OSC_RX_BUFFER_SIZE + OSC_RX_GUARD_AFTER];
+static uint8_t *const oscRxBuffer = oscRxStorage + OSC_RX_GUARD_BEFORE;
 static OscMessage msgIN;
 
-// Same rule as CNMAT OSCMessage::route(): the received address is the pattern, and a
-// partial match is accepted if the address continues with '/'.
-static bool route(OscMessage &msg, const char *pattern, void (*callback)(OscMessage &))
+#define OSC_ROUTE(address, handler) {address, handler},
+static const OscRoute oscRoutes[] = {
+#include "oscRoutes.h"
+};
+#undef OSC_ROUTE
+constexpr size_t OSC_ROUTE_COUNT = sizeof(oscRoutes) / sizeof(oscRoutes[0]);
+static_assert(OSC_ROUTE_COUNT <= 255, "the route index is uint8_t");
+static uint8_t oscRouteIndex[OSC_ROUTE_COUNT];
+static OscRouter oscRouter;
+
+void initOscRouter()
 {
-    const char *address = msg.getAddress();
-    int patternOffset, addressOffset;
-    int ret = osc_match(address, pattern, &patternOffset, &addressOffset);
-    if ((ret == 3) || (patternOffset > 0 && address[patternOffset] == '/'))
-    {
-        callback(msg);
-        return true;
-    }
-    return false;
+    oscRouter.begin(oscRoutes, OSC_ROUTE_COUNT, oscRouteIndex);
 }
 
 bool OSCMsgReceive()
 {
-    bool bMsgHasError = false, bMsgRouted = false;
+    bool bMsgHasError = false;
     int size;
     if ((size = Udp.parsePacket()) > 0)
     {
@@ -40,180 +43,25 @@ bool OSCMsgReceive()
         else
         {
             int len = Udp.read(oscRxBuffer, size);
-            msgIN.decode(oscRxBuffer, len > 0 ? len : 0);
+            if (len < 0)
+                len = 0;
+            oscSetRxGuards(oscRxBuffer, len);
+            msgIN.decode(oscRxBuffer, len);
             bMsgHasError = msgIN.hasError();
         }
         if (!bMsgHasError)
         {
-            // some possible frequent messages
-            bMsgRouted |= route(msgIN, "/setTargetPosition", setTargetPosition);
-            bMsgRouted |= route(msgIN, "/setTargetPositionList", setTargetPositionList);
-            bMsgRouted |= route(msgIN, "/getPosition", getPosition);
-            bMsgRouted |= route(msgIN, "/getPositionList", getPositionList);
-
-            bMsgRouted |= route(msgIN, "/getSpeed", getSpeed);
-            bMsgRouted |= route(msgIN, "/run", run);
-            bMsgRouted |= route(msgIN, "/runRaw", runRaw);
-
-            // combined
-            bMsgRouted |= route(msgIN, "/combine/move", combinedMove);
-            bMsgRouted |= route(msgIN, "/combine/goTo", combinedGoTo);
-            bMsgRouted |= route(msgIN, "/combine/goToDir", combinedGoToDir);
-            bMsgRouted |= route(msgIN, "/combine/run", combinedRun);
-            bMsgRouted |= route(msgIN, "/combine/runRaw", combinedRunRaw);
-            bMsgRouted |= route(msgIN, "/combine/hardHiZ", combinedHardHiZ);
-            bMsgRouted |= route(msgIN, "/combine/hardStop", combinedHardStop);
-            bMsgRouted |= route(msgIN, "/combine/softHiZ", combinedSoftHiZ);
-            bMsgRouted |= route(msgIN, "/combine/softStop", combinedSoftStop);
-
-            // motion
-            bMsgRouted |= route(msgIN, "/move", move);
-            bMsgRouted |= route(msgIN, "/goTo", goTo);
-            bMsgRouted |= route(msgIN, "/goToDir", goToDir);
-            bMsgRouted |= route(msgIN, "/goUntil", goUntil);
-            bMsgRouted |= route(msgIN, "/goUntilRaw", goUntilRaw);
-            bMsgRouted |= route(msgIN, "/releaseSw", releaseSw);
-            bMsgRouted |= route(msgIN, "/goHome", goHome);
-            bMsgRouted |= route(msgIN, "/goMark", goMark);
-            bMsgRouted |= route(msgIN, "/setMark", setMark);
-            bMsgRouted |= route(msgIN, "/getMark", getMark);
-            bMsgRouted |= route(msgIN, "/setPosition", setPosition);
-            bMsgRouted |= route(msgIN, "/resetPos", resetPos);
-            bMsgRouted |= route(msgIN, "/softStop", softStop);
-            bMsgRouted |= route(msgIN, "/hardStop", hardStop);
-            bMsgRouted |= route(msgIN, "/softHiZ", softHiZ);
-            bMsgRouted |= route(msgIN, "/hardHiZ", hardHiZ);
-#ifdef HAVE_BRAKE
-            bMsgRouted |= route(msgIN, "/activate", activate);
-            bMsgRouted |= route(msgIN, "/free", free);
-#endif
-            bMsgRouted |= route(msgIN, "/homing", homing);
-            // servo mode
-            bMsgRouted |= route(msgIN, "/enableServoMode", enableServoMode);
-            bMsgRouted |= route(msgIN, "/setServoParam", setServoParam);
-            bMsgRouted |= route(msgIN, "/getServoParam", getServoParam);
-
-            // speed
-            bMsgRouted |= route(msgIN, "/setSpeedProfile", setSpeedProfile);
-            bMsgRouted |= route(msgIN, "/setMaxSpeed", setMaxSpeed);
-            bMsgRouted |= route(msgIN, "/setMinSpeed", setMinSpeed);
-            bMsgRouted |= route(msgIN, "/getMinSpeed", getMinSpeed);
-            bMsgRouted |= route(msgIN, "/setFullstepSpeed", setFullstepSpeed);
-            bMsgRouted |= route(msgIN, "/getFullstepSpeed", getFullstepSpeed);
-            bMsgRouted |= route(msgIN, "/setAcc", setAcc);
-            bMsgRouted |= route(msgIN, "/setDec", setDec);
-            bMsgRouted |= route(msgIN, "/getSpeedProfile", getSpeedProfile);
-
-            // Kval
-            bMsgRouted |= route(msgIN, "/setKval", setKval);
-            bMsgRouted |= route(msgIN, "/setAccKval", setAccKval);
-            bMsgRouted |= route(msgIN, "/setDecKval", setDecKval);
-            bMsgRouted |= route(msgIN, "/setRunKval", setRunKval);
-            bMsgRouted |= route(msgIN, "/setHoldKval", setHoldKval);
-            bMsgRouted |= route(msgIN, "/getKval", getKval);
-
-            // TVAL
-#ifdef DRIVER_POWERSTEP01
-            bMsgRouted |= route(msgIN, "/setTval", setTval);
-            bMsgRouted |= route(msgIN, "/setAccTval", setAccTval);
-            bMsgRouted |= route(msgIN, "/setDecTval", setDecTval);
-            bMsgRouted |= route(msgIN, "/setRunTval", setRunTval);
-            bMsgRouted |= route(msgIN, "/setHoldTval", setHoldTval);
-            bMsgRouted |= route(msgIN, "/getTval", getTval);
-            bMsgRouted |= route(msgIN, "/getTval_mA", getTval_mA);
-#endif
-            // config
-            bMsgRouted |= route(msgIN, "/setDestIp", setDestIp);
-            bMsgRouted |= route(msgIN, "/getVersion", getVersion);
-            bMsgRouted |= route(msgIN, "/getConfigName", getConfigName);
-            bMsgRouted |= route(msgIN, "/setConfigName", setConfigName);
-            bMsgRouted |= route(msgIN, "/getConfigRegister", getConfigRegister);
-            bMsgRouted |= route(msgIN, "/getStatus", getStatus);
-            bMsgRouted |= route(msgIN, "/getStatusList", getStatusList);
-            bMsgRouted |= route(msgIN, "/reportError", reportError);
-            bMsgRouted |= route(msgIN, "/getHomeSw", getHomeSw);
-            bMsgRouted |= route(msgIN, "/getBusy", getBusy);
-            bMsgRouted |= route(msgIN, "/getDir", getDir);
-            bMsgRouted |= route(msgIN, "/getHiZ", getHiZ);
-            bMsgRouted |= route(msgIN, "/getUvlo", getUvlo);
-            bMsgRouted |= route(msgIN, "/getMotorStatus", getMotorStatus);
-            bMsgRouted |= route(msgIN, "/getThermalStatus", getThermalStatus);
-            bMsgRouted |= route(msgIN, "/resetMotorDriver", resetMotorDriver);
-            bMsgRouted |= route(msgIN, "/enableBusyReport", enableBusyReport);
-            bMsgRouted |= route(msgIN, "/enableHizReport", enableHizReport);
-            bMsgRouted |= route(msgIN, "/enableHomeSwReport", enableHomeSwReport);
-            bMsgRouted |= route(msgIN, "/enableDirReport", enableDirReport);
-            bMsgRouted |= route(msgIN, "/enableMotorStatusReport", enableMotorStatusReport);
-            bMsgRouted |= route(msgIN, "/enableSwEventReport", enableSwEventReport);
-            bMsgRouted |= route(msgIN, "/enableUvloReport", enableUvloReport);
-            bMsgRouted |= route(msgIN, "/enableThermalStatusReport", enableThermalStatusReport);
-            bMsgRouted |= route(msgIN, "/enableOverCurrentReport", enableOverCurrentReport);
-            bMsgRouted |= route(msgIN, "/enableStallReport", enableStallReport);
-            bMsgRouted |= route(msgIN, "/setPositionReportInterval", setPositionReportInterval);
-            bMsgRouted |= route(msgIN, "/setPositionListReportInterval", setPositionListReportInterval);
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-            bMsgRouted |= route(msgIN, "/getLimitSw", getLimitSw);
-            bMsgRouted |= route(msgIN, "/getLimitSwMode", getLimitSwMode);
-            bMsgRouted |= route(msgIN, "/setLimitSwMode", setLimitSwMode);
-            bMsgRouted |= route(msgIN, "/enableLimitSwReport", enableLimitSwReport);
-#endif
-#ifdef HAVE_BRAKE
-            bMsgRouted |= route(msgIN, "/enableElectromagnetBrake", enableElectromagnetBrake);
-            bMsgRouted |= route(msgIN, "/setBrakeTransitionDuration", setBrakeTransitionDuration);
-            bMsgRouted |= route(msgIN, "/getBrakeTransitionDuration", getBrakeTransitionDuration);
-#endif
-            bMsgRouted |= route(msgIN, "/setMicrostepMode", setMicrostepMode);
-            bMsgRouted |= route(msgIN, "/getMicrostepMode", getMicrostepMode);
-            bMsgRouted |= route(msgIN, "/getHomeSwMode", getHomeSwMode);
-            bMsgRouted |= route(msgIN, "/setHomeSwMode", setHomeSwMode);
-            bMsgRouted |= route(msgIN, "/setStallThreshold", setStallThreshold);
-            bMsgRouted |= route(msgIN, "/getStallThreshold", getStallThreshold);
-            bMsgRouted |= route(msgIN, "/setOverCurrentThreshold", setOverCurrentThreshold);
-            bMsgRouted |= route(msgIN, "/getOverCurrentThreshold", getOverCurrentThreshold);
-            bMsgRouted |= route(msgIN, "/enableLowSpeedOptimize", enableLowSpeedOptimize);
-            bMsgRouted |= route(msgIN, "/setLowSpeedOptimizeThreshold", setLowSpeedOptimizeThreshold);
-            bMsgRouted |= route(msgIN, "/getLowSpeedOptimizeThreshold", getLowSpeedOptimizeThreshold);
-
-            bMsgRouted |= route(msgIN, "/setSpeedProfileRaw", setSpeedProfileRaw);
-            bMsgRouted |= route(msgIN, "/setMaxSpeedRaw", setMaxSpeedRaw);
-            bMsgRouted |= route(msgIN, "/setMinSpeedRaw", setMinSpeedRaw);
-            bMsgRouted |= route(msgIN, "/setFullstepSpeedRaw", setFullstepSpeedRaw);
-            bMsgRouted |= route(msgIN, "/setAccRaw", setAccRaw);
-            bMsgRouted |= route(msgIN, "/setDecRaw", setDecRaw);
-            bMsgRouted |= route(msgIN, "/getSpeedProfileRaw", getSpeedProfileRaw);
-
-            bMsgRouted |= route(msgIN, "/setBemfParam", setBemfParam);
-            bMsgRouted |= route(msgIN, "/getBemfParam", getBemfParam);
-#ifdef DRIVER_POWERSTEP01
-            bMsgRouted |= route(msgIN, "/setVoltageMode", setVoltageMode);
-            bMsgRouted |= route(msgIN, "/setCurrentMode", setCurrentMode);
-            bMsgRouted |= route(msgIN, "/setDecayModeParam", setDecayModeParam);
-            bMsgRouted |= route(msgIN, "/getDecayModeParam", getDecayModeParam);
-#endif
-            bMsgRouted |= route(msgIN, "/getAdcVal", getAdcVal);
-            bMsgRouted |= route(msgIN, "/setGoUntilTimeout", setGoUntilTimeout);
-            bMsgRouted |= route(msgIN, "/getGoUntilTimeout", getGoUntilTimeout);
-            bMsgRouted |= route(msgIN, "/setReleaseSwTimeout", setReleaseSwTimeout);
-            bMsgRouted |= route(msgIN, "/getReleaseSwTimeout", getReleaseSwTimeout);
-            bMsgRouted |= route(msgIN, "/setHomingDirection", setHomingDirection);
-            bMsgRouted |= route(msgIN, "/getHomingDirection", getHomingDirection);
-            bMsgRouted |= route(msgIN, "/setHomingSpeed", setHomingSpeed);
-            bMsgRouted |= route(msgIN, "/getHomingSpeed", getHomingSpeed);
-            bMsgRouted |= route(msgIN, "/getHomingStatus", getHomingStatus);
-            bMsgRouted |= route(msgIN, "/setProhibitMotionOnHomeSw", setProhibitMotionOnHomeSw);
-            bMsgRouted |= route(msgIN, "/getProhibitMotionOnHomeSw", getProhibitMotionOnHomeSw);
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-            bMsgRouted |= route(msgIN, "/setProhibitMotionOnLimitSw", setProhibitMotionOnLimitSw);
-            bMsgRouted |= route(msgIN, "/getProhibitMotionOnLimitSw", getProhibitMotionOnLimitSw);
-#endif
-            bMsgRouted |= route(msgIN, "/getElPos", getElPos);
-            bMsgRouted |= route(msgIN, "/setElPos", setElPos);
-            bMsgRouted |= route(msgIN, "/resetDevice", resetDevice);
-            bMsgRouted |= route(msgIN, "/saveConfig", saveConfig);
+            const OscDispatchResult result = oscRouter.dispatch(msgIN);
             turnOnRXL();
-            if ((!bMsgRouted) && reportErrors)
+            if (result == OSC_DISPATCH_SLOW)
             {
-                sendOneDatum("/error/osc", "MessageNotMatch");
+                perfStats.oscSlowPathCount++;
+            }
+            else if (result == OSC_DISPATCH_NOT_MATCHED)
+            {
+                perfStats.oscNotMatchedCount++;
+                if (reportErrors)
+                    sendOneDatum("/error/osc", "MessageNotMatch");
             }
         }
         else if (reportErrors)

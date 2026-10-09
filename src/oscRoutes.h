@@ -1,0 +1,172 @@
+// oscRoutes.h
+// OSC address table, in the order of the former OSCMessage::route() calls.
+// The order matters when a received address pattern matches several entries
+// (pattern matching path of oscRouter.cpp): handlers are called in this order.
+//
+// Usage: define OSC_ROUTE(address, handler) and include this file. No include guard.
+
+// some possible frequent messages
+OSC_ROUTE("/setTargetPosition", setTargetPosition)
+OSC_ROUTE("/setTargetPositionList", setTargetPositionList)
+OSC_ROUTE("/getPosition", getPosition)
+OSC_ROUTE("/getPositionList", getPositionList)
+
+OSC_ROUTE("/getSpeed", getSpeed)
+OSC_ROUTE("/run", run)
+OSC_ROUTE("/runRaw", runRaw)
+
+// combined
+OSC_ROUTE("/combine/move", combinedMove)
+OSC_ROUTE("/combine/goTo", combinedGoTo)
+OSC_ROUTE("/combine/goToDir", combinedGoToDir)
+OSC_ROUTE("/combine/run", combinedRun)
+OSC_ROUTE("/combine/runRaw", combinedRunRaw)
+OSC_ROUTE("/combine/hardHiZ", combinedHardHiZ)
+OSC_ROUTE("/combine/hardStop", combinedHardStop)
+OSC_ROUTE("/combine/softHiZ", combinedSoftHiZ)
+OSC_ROUTE("/combine/softStop", combinedSoftStop)
+
+// motion
+OSC_ROUTE("/move", move)
+OSC_ROUTE("/goTo", goTo)
+OSC_ROUTE("/goToDir", goToDir)
+OSC_ROUTE("/goUntil", goUntil)
+OSC_ROUTE("/goUntilRaw", goUntilRaw)
+OSC_ROUTE("/releaseSw", releaseSw)
+OSC_ROUTE("/goHome", goHome)
+OSC_ROUTE("/goMark", goMark)
+OSC_ROUTE("/setMark", setMark)
+OSC_ROUTE("/getMark", getMark)
+OSC_ROUTE("/setPosition", setPosition)
+OSC_ROUTE("/resetPos", resetPos)
+OSC_ROUTE("/softStop", softStop)
+OSC_ROUTE("/hardStop", hardStop)
+OSC_ROUTE("/softHiZ", softHiZ)
+OSC_ROUTE("/hardHiZ", hardHiZ)
+#ifdef HAVE_BRAKE
+OSC_ROUTE("/activate", activate)
+OSC_ROUTE("/free", free)
+#endif
+OSC_ROUTE("/homing", homing)
+// servo mode
+OSC_ROUTE("/enableServoMode", enableServoMode)
+OSC_ROUTE("/setServoParam", setServoParam)
+OSC_ROUTE("/getServoParam", getServoParam)
+
+// speed
+OSC_ROUTE("/setSpeedProfile", setSpeedProfile)
+OSC_ROUTE("/setMaxSpeed", setMaxSpeed)
+OSC_ROUTE("/setMinSpeed", setMinSpeed)
+OSC_ROUTE("/getMinSpeed", getMinSpeed)
+OSC_ROUTE("/setFullstepSpeed", setFullstepSpeed)
+OSC_ROUTE("/getFullstepSpeed", getFullstepSpeed)
+OSC_ROUTE("/setAcc", setAcc)
+OSC_ROUTE("/setDec", setDec)
+OSC_ROUTE("/getSpeedProfile", getSpeedProfile)
+
+// Kval
+OSC_ROUTE("/setKval", setKval)
+OSC_ROUTE("/setAccKval", setAccKval)
+OSC_ROUTE("/setDecKval", setDecKval)
+OSC_ROUTE("/setRunKval", setRunKval)
+OSC_ROUTE("/setHoldKval", setHoldKval)
+OSC_ROUTE("/getKval", getKval)
+
+// TVAL
+#ifdef DRIVER_POWERSTEP01
+OSC_ROUTE("/setTval", setTval)
+OSC_ROUTE("/setAccTval", setAccTval)
+OSC_ROUTE("/setDecTval", setDecTval)
+OSC_ROUTE("/setRunTval", setRunTval)
+OSC_ROUTE("/setHoldTval", setHoldTval)
+OSC_ROUTE("/getTval", getTval)
+OSC_ROUTE("/getTval_mA", getTval_mA)
+#endif
+// config
+OSC_ROUTE("/setDestIp", setDestIp)
+OSC_ROUTE("/getVersion", getVersion)
+OSC_ROUTE("/getConfigName", getConfigName)
+OSC_ROUTE("/setConfigName", setConfigName)
+OSC_ROUTE("/getConfigRegister", getConfigRegister)
+OSC_ROUTE("/getStatus", getStatus)
+OSC_ROUTE("/getStatusList", getStatusList)
+OSC_ROUTE("/reportError", reportError)
+OSC_ROUTE("/getHomeSw", getHomeSw)
+OSC_ROUTE("/getBusy", getBusy)
+OSC_ROUTE("/getDir", getDir)
+OSC_ROUTE("/getHiZ", getHiZ)
+OSC_ROUTE("/getUvlo", getUvlo)
+OSC_ROUTE("/getMotorStatus", getMotorStatus)
+OSC_ROUTE("/getThermalStatus", getThermalStatus)
+OSC_ROUTE("/resetMotorDriver", resetMotorDriver)
+OSC_ROUTE("/enableBusyReport", enableBusyReport)
+OSC_ROUTE("/enableHizReport", enableHizReport)
+OSC_ROUTE("/enableHomeSwReport", enableHomeSwReport)
+OSC_ROUTE("/enableDirReport", enableDirReport)
+OSC_ROUTE("/enableMotorStatusReport", enableMotorStatusReport)
+OSC_ROUTE("/enableSwEventReport", enableSwEventReport)
+OSC_ROUTE("/enableUvloReport", enableUvloReport)
+OSC_ROUTE("/enableThermalStatusReport", enableThermalStatusReport)
+OSC_ROUTE("/enableOverCurrentReport", enableOverCurrentReport)
+OSC_ROUTE("/enableStallReport", enableStallReport)
+OSC_ROUTE("/setPositionReportInterval", setPositionReportInterval)
+OSC_ROUTE("/setPositionListReportInterval", setPositionListReportInterval)
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+OSC_ROUTE("/getLimitSw", getLimitSw)
+OSC_ROUTE("/getLimitSwMode", getLimitSwMode)
+OSC_ROUTE("/setLimitSwMode", setLimitSwMode)
+OSC_ROUTE("/enableLimitSwReport", enableLimitSwReport)
+#endif
+#ifdef HAVE_BRAKE
+OSC_ROUTE("/enableElectromagnetBrake", enableElectromagnetBrake)
+OSC_ROUTE("/setBrakeTransitionDuration", setBrakeTransitionDuration)
+OSC_ROUTE("/getBrakeTransitionDuration", getBrakeTransitionDuration)
+#endif
+OSC_ROUTE("/setMicrostepMode", setMicrostepMode)
+OSC_ROUTE("/getMicrostepMode", getMicrostepMode)
+OSC_ROUTE("/getHomeSwMode", getHomeSwMode)
+OSC_ROUTE("/setHomeSwMode", setHomeSwMode)
+OSC_ROUTE("/setStallThreshold", setStallThreshold)
+OSC_ROUTE("/getStallThreshold", getStallThreshold)
+OSC_ROUTE("/setOverCurrentThreshold", setOverCurrentThreshold)
+OSC_ROUTE("/getOverCurrentThreshold", getOverCurrentThreshold)
+OSC_ROUTE("/enableLowSpeedOptimize", enableLowSpeedOptimize)
+OSC_ROUTE("/setLowSpeedOptimizeThreshold", setLowSpeedOptimizeThreshold)
+OSC_ROUTE("/getLowSpeedOptimizeThreshold", getLowSpeedOptimizeThreshold)
+
+OSC_ROUTE("/setSpeedProfileRaw", setSpeedProfileRaw)
+OSC_ROUTE("/setMaxSpeedRaw", setMaxSpeedRaw)
+OSC_ROUTE("/setMinSpeedRaw", setMinSpeedRaw)
+OSC_ROUTE("/setFullstepSpeedRaw", setFullstepSpeedRaw)
+OSC_ROUTE("/setAccRaw", setAccRaw)
+OSC_ROUTE("/setDecRaw", setDecRaw)
+OSC_ROUTE("/getSpeedProfileRaw", getSpeedProfileRaw)
+
+OSC_ROUTE("/setBemfParam", setBemfParam)
+OSC_ROUTE("/getBemfParam", getBemfParam)
+#ifdef DRIVER_POWERSTEP01
+OSC_ROUTE("/setVoltageMode", setVoltageMode)
+OSC_ROUTE("/setCurrentMode", setCurrentMode)
+OSC_ROUTE("/setDecayModeParam", setDecayModeParam)
+OSC_ROUTE("/getDecayModeParam", getDecayModeParam)
+#endif
+OSC_ROUTE("/getAdcVal", getAdcVal)
+OSC_ROUTE("/setGoUntilTimeout", setGoUntilTimeout)
+OSC_ROUTE("/getGoUntilTimeout", getGoUntilTimeout)
+OSC_ROUTE("/setReleaseSwTimeout", setReleaseSwTimeout)
+OSC_ROUTE("/getReleaseSwTimeout", getReleaseSwTimeout)
+OSC_ROUTE("/setHomingDirection", setHomingDirection)
+OSC_ROUTE("/getHomingDirection", getHomingDirection)
+OSC_ROUTE("/setHomingSpeed", setHomingSpeed)
+OSC_ROUTE("/getHomingSpeed", getHomingSpeed)
+OSC_ROUTE("/getHomingStatus", getHomingStatus)
+OSC_ROUTE("/setProhibitMotionOnHomeSw", setProhibitMotionOnHomeSw)
+OSC_ROUTE("/getProhibitMotionOnHomeSw", getProhibitMotionOnHomeSw)
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+OSC_ROUTE("/setProhibitMotionOnLimitSw", setProhibitMotionOnLimitSw)
+OSC_ROUTE("/getProhibitMotionOnLimitSw", getProhibitMotionOnLimitSw)
+#endif
+OSC_ROUTE("/getElPos", getElPos)
+OSC_ROUTE("/setElPos", setElPos)
+OSC_ROUTE("/resetDevice", resetDevice)
+OSC_ROUTE("/saveConfig", saveConfig)

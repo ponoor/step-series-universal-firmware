@@ -27,4 +27,6 @@ void perfStatsPrint()
     printStat("updateServo", s.updateServo);
     printStat("checkStatus", s.checkStatus);
     printStat("servoInterval", s.servoInterval);
+    dbgPrint("oscSlowPath    %lu\n", (unsigned long)s.oscSlowPathCount);
+    dbgPrint("oscNotMatched  %lu\n", (unsigned long)s.oscNotMatchedCount);
 }

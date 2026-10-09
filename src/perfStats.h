@@ -28,6 +28,8 @@ struct PerfStats
     PerfStat updateServo;   // updateServo(), only when the servo was updated
     PerfStat checkStatus;   // checkStatus()
     PerfStat servoInterval; // actual interval between servo updates
+    uint32_t oscSlowPathCount;   // messages dispatched by pattern matching (no exact address match)
+    uint32_t oscNotMatchedCount; // messages answered with MessageNotMatch
 };
 
 extern PerfStats perfStats;

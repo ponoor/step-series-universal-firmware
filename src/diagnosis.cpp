@@ -172,7 +172,7 @@ void printCurrentState() {
 			temp = stepper[i].getPos();
 			dbgPrint("\tABS_POS: 0x%02X (%dstep)\n",temp, temp);
 			temp = stepper[i].getElPos();
-			dbgPrint("\tEL_POS: 0x%02X (Fullstep:%d, Microstep:%d)\n", temp, (temp>>7),(temp%0x7F));
+			dbgPrint("\tEL_POS: 0x%02X (Fullstep:%d, Microstep:%d)\n", temp, (temp>>7),(temp&0x7F));
 			temp = stepper[i].getMark();
 			dbgPrint("\tMARK: 0x%02X (%dstep)\n", temp, temp);
 			dbgPrint("\tSPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getParam(SPEED), stepper[i].getSpeed());
@@ -225,34 +225,34 @@ void printCurrentState() {
 
 			temp = stepper[i].getParam(CONFIG);
 			dbgPrint("\tCONFIG: 0x%02X\n", temp);
-			dbgPrint("\t  OSC_SEL: %d\n", temp%0x7);
-			dbgPrint("\t  EXT_CLK: %d\n", (temp>>3)%0x1);
-			dbgPrint("\t  SW_MODE: %d\n", (temp>>4)%0x1);
+			dbgPrint("\t  OSC_SEL: %d\n", temp&0x7);
+			dbgPrint("\t  EXT_CLK: %d\n", (temp>>3)&0x1);
+			dbgPrint("\t  SW_MODE: %d\n", (temp>>4)&0x1);
 #ifdef DRIVER_POWERSTEP01
 			if (isCurrentMode[i])
 				dbgPrint("\t  EN_TQREG: %d\n", (temp>>5)&0x1);
 			else
-				dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
+				dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)&0x1);
 
-			dbgPrint("\t  OC_SD: %d\n", (temp>>7)%0x1);
-			dbgPrint("\t  UVLOVAL: %d\n", (temp>>8)%0x1);
-			dbgPrint("\t  VCCVAL: %d\n", (temp>>9)%0x1);
+			dbgPrint("\t  OC_SD: %d\n", (temp>>7)&0x1);
+			dbgPrint("\t  UVLOVAL: %d\n", (temp>>8)&0x1);
+			dbgPrint("\t  VCCVAL: %d\n", (temp>>9)&0x1);
 			if (isCurrentMode[i])
 			{
-				dbgPrint("\t  TSW: %d\n", (temp>>10)%0x1F);
-				dbgPrint("\t  PRED_EN: %d\n", (temp>>15)%0x1);
+				dbgPrint("\t  TSW: %d\n", (temp>>10)&0x1F);
+				dbgPrint("\t  PRED_EN: %d\n", (temp>>15)&0x1);
 			}
 			else{
-				dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)%0x7);
-				dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)%0x7);
+				dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)&0x7);
+				dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)&0x7);
 			}
 			
 #elif defined(DRIVER_L6470)
-			dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
-			dbgPrint("\t  OC_SD: %d\n", (temp>>7)%0x1);
-			dbgPrint("\t  POW_SR: %d\n", (temp>>8)%0x3);
-			dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)%0x7);
-			dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)%0x7);
+			dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)&0x1);
+			dbgPrint("\t  OC_SD: %d\n", (temp>>7)&0x1);
+			dbgPrint("\t  POW_SR: %d\n", (temp>>8)&0x3);
+			dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)&0x7);
+			dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)&0x7);
 #endif
 
 			dbgPrint("\tSTATUS: 0x%02X\n", status[i]);

@@ -229,7 +229,7 @@ void printCurrentState() {
 			dbgPrint("\t  SW_MODE: %d\n", (temp>>4)%0x1);
 #ifdef DRIVER_POWERSTEP01
 			if (isCurrentMode[i])
-				dbgPrint("\t  EN_TQREG: %d\n", (temp>>5)%0x1);
+				dbgPrint("\t  EN_TQREG: %d\n", (temp>>5)&0x1);
 			else
 				dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
 

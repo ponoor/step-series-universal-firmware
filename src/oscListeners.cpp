@@ -664,7 +664,7 @@ void getDir(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/dir", i + MOTOR_ID_FIRST, (int32_t)HiZ[i]);
+            sendTwoData("/dir", i + MOTOR_ID_FIRST, (int32_t)dir[i]);
         }
     }
 }
@@ -2014,7 +2014,7 @@ void setMinSpeed(OSCMessage &msg, int addrOffset)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             minSpeed[i] = _minSpeed;
-            if (!lowSpeedOptimizeEnable[motorID])
+            if (!lowSpeedOptimizeEnable[i])
             {
                 stepper[i].setMinSpeed(_minSpeed);
             }
@@ -2033,7 +2033,7 @@ void getMinSpeed(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/minSpeed", i + MOTOR_ID_FIRST, minSpeed[i]);
+            sendTwoData("/minSpeed", i + MOTOR_ID_FIRST, stepper[i].getMinSpeed());
         }
     }
 }

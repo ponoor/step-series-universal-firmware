@@ -100,8 +100,6 @@ void setBrake(uint8_t motorId, bool state)
     {
         bitClear(brakeOut, motorId);
     }
-#elif defined(STEP400_R1)
-    digitalWrite(brakePin[motorId], state);
 #endif
 }
 

@@ -1219,14 +1219,14 @@ static bool sdSaveConfig() {
 	File32 file;
 	file.open(configFilename, O_RDWR | O_CREAT);
 	if (!file.isOpen()) {
-		Watchdog.enable(100);
+		Watchdog.enable(WATCHDOG_TIMEOUT_MS);
 		return false;
 	}
 	file.print(F("{"));
 	serializeConfigSectionsTo(file);
 	file.println(F("}"));
 	file.close();
-	Watchdog.enable(100);
+	Watchdog.enable(WATCHDOG_TIMEOUT_MS);
 	return true;
 #else
 	return false;

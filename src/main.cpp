@@ -93,8 +93,7 @@ void setup()
     dbgPrint("eth ok\n");
     isWaitingSendBootMsg = bootedMsgEnable;
 
-    // A UDP send blocks until ARP is resolved (W5500 retries every 200 ms), which can exceed 100 ms.
-    Watchdog.enable(2000);
+    Watchdog.enable(WATCHDOG_TIMEOUT_MS);
 
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {

@@ -28,6 +28,9 @@ extern const uint8_t firmwareVersion[3]; // defined in boardsDef.h
 extern int8_t loadedConfigVersion[2];
 extern const uint8_t applicableConfigVersion[2]; // defined in boardsDef.h
 #define STATUS_POLL_PERIOD   10 // [ms]
+// Watchdog timeout. A UDP send blocks until ARP is resolved (W5500 retries every 200 ms),
+// which can exceed 100 ms.
+#define WATCHDOG_TIMEOUT_MS  2000 // [ms]
 
 
 // Tx, Rx LED

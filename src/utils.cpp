@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "oscListeners.h"
 #include <stdarg.h>
+#include <utility/w5100.h>
 
 char* dbgPrint_(const __FlashStringHelper* fmt, ...)
 {
@@ -180,6 +181,30 @@ void resetMotorDriver(uint8_t deviceID) {
     }
 }
 
+// The W5500 defaults (RTR 200 ms, RCR 8) can block Udp.endPacket() for about 1.8 s when
+// the destination does not answer ARP. The worst case is RTR x (RCR + 1).
+// Ethernet 2.0.2 setRetransmissionTimeout()/setRetransmissionCount() write the W5100
+// register addresses (0x0017/0x0019), which are SIR/SIMR and the upper byte of RTR on
+// the W5500. On the W5500, write RTR (0x0019-0x001A, 100 us units) and RCR (0x001B) directly.
+static void setEthernetRetransmission(uint16_t timeoutMs, uint8_t count) {
+    if (W5100.getChip() != 55) {
+        Ethernet.setRetransmissionTimeout(timeoutMs);
+        Ethernet.setRetransmissionCount(count);
+        return;
+    }
+    constexpr uint16_t W5500_RTR = 0x0019;
+    constexpr uint16_t W5500_RCR = 0x001B;
+    const uint16_t rtr = timeoutMs * 10;
+    const uint8_t rtrBytes[2] = {(uint8_t)(rtr >> 8), (uint8_t)(rtr & 0xFF)};
+    uint8_t readBack[3];
+    SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+    W5100.write(W5500_RTR, rtrBytes, 2);
+    W5100.write(W5500_RCR, count);
+    W5100.read(W5500_RTR, readBack, 3);
+    SPI.endTransaction();
+    dbgPrint("W5500 RTR:%u RCR:%u\n", (readBack[0] << 8) | readBack[1], readBack[2]);
+}
+
 void initEthernet() {
     Udp.stop();
 #ifdef PIN_W5500_RESET
@@ -197,6 +222,8 @@ void initEthernet() {
     if ( isOutPortAddId ) outPort = outPort_from_config + myId;
     Ethernet.init(PIN_W5500_CS);
     Ethernet.begin(mac, myIp, dns, gateway, subnet);
+    // Must be set after Ethernet.begin(), which resets the chip.
+    setEthernetRetransmission(W5500_RETRANSMISSION_TIMEOUT_MS, W5500_RETRANSMISSION_COUNT);
     Udp.begin(inPort);
     dbgPrint("New IP: %d.%d.%d.%d\n", myIp[0], myIp[1], myIp[2], myIp[3]);
 }

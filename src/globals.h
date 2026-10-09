@@ -80,6 +80,8 @@ extern bool
     isWaitingSendBootMsg,
     reportErrors;
 #define BOOT_MSG_WAIT_TIME  1000    //[ms], The waiting duration for sending a boot message after Ethernet has been linked
+#define W5500_RETRANSMISSION_TIMEOUT_MS 20 // [ms], W5500 RTR (see setEthernetRetransmission())
+#define W5500_RETRANSMISSION_COUNT      2  // W5500 RCR, worst-case block = 20 ms x (2 + 1)
 
 // Motor settings.
 #ifdef DRIVER_POWERSTEP01

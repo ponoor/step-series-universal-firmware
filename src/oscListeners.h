@@ -10,7 +10,6 @@
 #endif
 
 #include "globals.h"
-#include <OSCMessage.h>
 #include "oscParser.h"
 #include "boardsSpecific.h"
 // 'motorID' : 1-4/1-8, 255

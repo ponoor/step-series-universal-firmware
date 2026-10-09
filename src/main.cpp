@@ -2,7 +2,6 @@
 #include "wiring_private.h" // pinPeripheral() function
 #include <SPI.h>
 #include <Ethernet.h>
-#include <OSCMessage.h>         // https://github.com/CNMAT/OSC
 #include <ArduinoJson.h>        //https://arduinojson.org/
 #include <Adafruit_SleepyDog.h> // https://github.com/adafruit/Adafruit_SleepyDog
 

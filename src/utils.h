@@ -9,7 +9,6 @@
 	#include "WProgram.h"
 #endif
 
-#include <OSCMessage.h>
 #include "oscParser.h"
 #include "oscWriter.h"
 #include <Ethernet.h>

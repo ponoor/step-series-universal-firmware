@@ -1,4 +1,5 @@
 #include "boardsSpecific.h"
+#include "packedTransfer.h"
 #include "wiring_private.h" // pinPeripheral() function
 
 #if defined(STEP400_R1) || defined(STEP400_PROTO_R4) || defined(STEP400_PROTO_R3)
@@ -167,11 +168,15 @@ void initLimitSw()
 #endif
 void checkLimitSw()
 {
+#ifdef HAVE_LIMIT_ADC
+    uint32_t adcOut[NUM_OF_MOTOR];
+    readAllParams(ADC_OUT, adcOut);
+#endif
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         bool t;
 #ifdef HAVE_LIMIT_ADC
-        t = (stepper[i].getParam(ADC_OUT) < 15U);
+        t = (adcOut[i] < 15U);
 #elif defined(HAVE_LIMIT_GPIO)
         t = !digitalRead(limitSwPin[i]);
 #endif

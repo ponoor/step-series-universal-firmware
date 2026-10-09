@@ -15,5 +15,6 @@ bool performPreparedTransfer();
 
 void readAllPositions(int32_t pos[NUM_OF_MOTOR]);
 void readAllStatus(uint16_t status[NUM_OF_MOTOR]);
+void readAllParams(uint8_t param, uint32_t values[NUM_OF_MOTOR]);
 
 #endif

@@ -48,3 +48,19 @@ void readAllStatus(uint16_t status[NUM_OF_MOTOR])
             status[i] = stepper[i].getStatus();
     }
 }
+
+void readAllParams(uint8_t param, uint32_t values[NUM_OF_MOTOR])
+{
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        stepper[i].prepareGetParam(param);
+    if (performPreparedTransfer())
+    {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+            values[i] = stepper[i].preparedResult();
+    }
+    else
+    {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+            values[i] = stepper[i].getParam(param);
+    }
+}

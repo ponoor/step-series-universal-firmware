@@ -2803,41 +2803,39 @@ void combinedSoftHiZ(OscMessage &msg)
     softHiZ(motorID[1]);
 
 }
+void executeHardHiZ(uint8_t motorId)
+{
+    isServoMode[motorId] = false;
+    clearHomingStatus(motorId);
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId])
+    {
+        // Stop the motor (keeping it energized) before engaging the brake, so it does not
+        // keep running during brakeTransitionDuration. Not while the brake is engaged or
+        // engaging: the motor is already HiZ or going HiZ, and hardStop() would energize it.
+        if ((brakeStatus[motorId] == BRAKE_DISENGAGED) || (brakeStatus[motorId] == BRAKE_DISENGAGE_WAITING))
+        {
+            stepper[motorId].hardStop();
+        }
+        activate(motorId, false);
+    }
+    else
+#endif
+    {
+        stepper[motorId].hardHiZ();
+    }
+}
 void hardHiZ(uint8_t motorID)
 {
     if (isCorrectMotorId(motorID))
     {
-        uint8_t motorId = motorID - MOTOR_ID_FIRST;
-        isServoMode[motorId] = false;
-        clearHomingStatus(motorId);
-        stepper[motorId].softStop();
-#ifdef HAVE_BRAKE
-        if (electromagnetBrakeEnable[motorId])
-        {
-            activate(motorId, false);
-        }
-        else
-#endif
-        {
-            stepper[motorId].hardHiZ();
-        }
+        executeHardHiZ(motorID - MOTOR_ID_FIRST);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            isServoMode[i] = false;
-            clearHomingStatus(i);
-#ifdef HAVE_BRAKE
-            if (electromagnetBrakeEnable[i])
-            {
-                activate(i, false);
-            }
-            else
-#endif
-            {
-                stepper[i].hardHiZ();
-            }
+            executeHardHiZ(i);
         }
     }
 }

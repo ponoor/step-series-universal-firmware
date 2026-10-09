@@ -2492,7 +2492,7 @@ void homing(OscMessage &msg)
 void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec) {
     if (isBrakeDisEngaged(motorId)) {
         if (homeSwState[motorId]) {
-            sendTwoData("/error/command", "HomeSwActivated", motorId+MOTOR_ID_FIRST);
+            sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
         } else {
             stepper[motorId].goUntil(action, dir, stepsPerSec);
             homingStatus[motorId] = HOMING_GOUNTIL;
@@ -2530,7 +2530,7 @@ void goUntilRaw(OscMessage& msg) {
         motorID -= MOTOR_ID_FIRST;
         if (isBrakeDisEngaged(motorID)) {
             if (homeSwState[motorID]) {
-                sendTwoData("/error/command", "HomeSwActivated", motorID+MOTOR_ID_FIRST);
+                sendCommandError(motorID + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
             } else {
                 stepper[motorID].goUntilRaw(action, dir, speed);
                 homingStatus[motorID] = HOMING_GOUNTIL;
@@ -2542,7 +2542,7 @@ void goUntilRaw(OscMessage& msg) {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
             if (isBrakeDisEngaged(i)) {
                 if (homeSwState[i]) {
-                    sendTwoData("/error/command", "HomeSwActivated", i+MOTOR_ID_FIRST);
+                    sendCommandError(i + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
                 } else {
                     stepper[i].goUntilRaw(action, dir, speed);
                     homingStatus[i] = HOMING_GOUNTIL;

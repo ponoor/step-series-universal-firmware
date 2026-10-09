@@ -256,7 +256,7 @@ void checkStatus()
         // OCD, active low, latched
         t = (status & STATUS_OCD) == 0;
         if (t && reportOCD[i])
-            sendOneDatum("/overCurrent", i + 1);
+            sendOneDatum("/overCurrent", i + MOTOR_ID_FIRST);
 
         // STALL A&B, active low, latched
 #ifdef DRIVER_L6470

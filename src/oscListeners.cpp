@@ -702,7 +702,7 @@ void getUvlo(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/uvlo", i + 1, (int32_t)uvloStatus[i]);
+            sendTwoData("/uvlo", i + MOTOR_ID_FIRST, (int32_t)uvloStatus[i]);
         }
     }
 }
@@ -722,7 +722,7 @@ void getMotorStatus(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/motorStatus", i + 1, motorStatus[i]);
+            sendTwoData("/motorStatus", i + MOTOR_ID_FIRST, motorStatus[i]);
         }
     }
 }
@@ -742,7 +742,7 @@ void getThermalStatus(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/thermalStatus", i + 1, thermalStatus[i]);
+            sendTwoData("/thermalStatus", i + MOTOR_ID_FIRST, thermalStatus[i]);
         }
     }
 }
@@ -2033,7 +2033,7 @@ void getMinSpeed(OSCMessage &msg, int addrOffset)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/minSpeed", i + 1, minSpeed[i]);
+            sendTwoData("/minSpeed", i + MOTOR_ID_FIRST, minSpeed[i]);
         }
     }
 }
@@ -2071,7 +2071,7 @@ void getFullstepSpeed(OSCMessage &msg, int addrOffset)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             _fullStepSpeed = stepper[i].getFullSpeed();
-            sendTwoData("/fullstepSpeed", i + 1, _fullStepSpeed);
+            sendTwoData("/fullstepSpeed", i + MOTOR_ID_FIRST, _fullStepSpeed);
         }
     }
 }

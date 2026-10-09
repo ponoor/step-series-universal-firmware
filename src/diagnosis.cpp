@@ -167,7 +167,7 @@ void printCurrentState() {
 		for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
 		{
 			temp = 0;
-			dbgPrint("Driver ID#%d\n", i+1);
+			dbgPrint("Driver ID#%d\n", i + MOTOR_ID_FIRST);
 			temp = stepper[i].getPos();
 			dbgPrint("\tABS_POS: 0x%02X (%dstep)\n",temp, temp);
 			temp = stepper[i].getElPos();
@@ -343,7 +343,7 @@ void printCurrentState() {
 	dbgPrint("Brake status :\n");
 	String bsText[4] = {"BRAKE_ENGAGED","BRAKE_DISENGAGE_WAITING","BRAKE_DISENGAGED","BRAKE_MOTORHIZ_WAITING"};
 	for (uint8_t i=0; i<NUM_OF_MOTOR; i++) {
-		dbgPrint("#%d : %s\n",i+1,bsText[brakeStatus[i]].c_str());
+		dbgPrint("#%d : %s\n",i + MOTOR_ID_FIRST,bsText[brakeStatus[i]].c_str());
 	}
 #endif
 	printAllData(F("Homing status"), homingStatus);

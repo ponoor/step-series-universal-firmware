@@ -137,20 +137,10 @@ enum {
 #endif
     ERROR_GOUNTIL_TIMEOUT,
     ERROR_RELEASESW_TIMEOUT,
-    ERROR_IN_SERVO_MODE
+    ERROR_IN_SERVO_MODE,
+    ERROR_COUNT // number of error codes, keep last
 };
-const String commandErrorText[8] = {
-    F("CommandIgnored"),
-    F("MotorIdNotMatch"),
-    F("BrakeEngaged"),
-    F("HomeSwActivating"),
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-    F("LimitSwActivating"),
-#endif
-    F("GoUntilTimeout"),
-    F("ReleaseSwTimeout"),
-    F("InServoMode")
-};
+extern const char *const commandErrorText[]; // globals.cpp, ERROR_COUNT entries
 // These values will be initialized at loadConfig()
 extern bool
     busy[NUM_OF_MOTOR],

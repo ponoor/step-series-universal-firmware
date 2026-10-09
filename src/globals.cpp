@@ -20,6 +20,22 @@ bool configFileParseSucceeded = false;
 int8_t loadedConfigVersion[2] = {-1,0};
 bool configProductApplicable = false;
 
+// Command errors
+const char *const commandErrorText[] = {
+    "CommandIgnored",
+    "MotorIdNotMatch",
+    "BrakeEngaged",
+    "HomeSwActivating",
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+    "LimitSwActivating",
+#endif
+    "GoUntilTimeout",
+    "ReleaseSwTimeout",
+    "InServoMode"
+};
+static_assert(sizeof(commandErrorText) / sizeof(commandErrorText[0]) == ERROR_COUNT,
+              "commandErrorText must have one entry per error code");
+
 // Network
 uint8_t mac[] = { 0x60, 0x95, 0xCE, 0x10, 0x06, 0x00 },
 mac_from_config[],

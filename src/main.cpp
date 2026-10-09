@@ -30,7 +30,7 @@ constexpr auto position_tolerance = 0; // steps
 
 // for PlatformIO
 void checkStatus();
-bool updateServo(uint32_t currentTimeMicros);
+bool updateServo(uint32_t currentTimeMillis);
 void checkHomingTimeout(uint32_t _currentTimeMillis);
 void updatePositionReport(uint32_t _currentTimeMillis);
 void updatePositionReportList(uint32_t _currentTimeMillis);
@@ -330,65 +330,82 @@ void updatePositionReportList(uint32_t _currentTimeMillis)
     }
 }
 #define INTEGRAL_LIMIT 1500.0f
-bool updateServo(uint32_t _currentTime)
+// Gains are tuned for a 10 ms period. Scaling the I and D terms by the period keeps
+// the same kP/kI/kD usable when servoPollPeriod changes (identity at 10 ms).
+constexpr float servoDtRatio = servoPollPeriod / 10.0f;
+
+// PID state of the servo mode, reset by resetServoState() when the servo mode is enabled.
+static float servoIntegral[NUM_OF_MOTOR] = {0.0f};
+static float servoPrevError[NUM_OF_MOTOR] = {0.0f};
+
+void resetServoState(uint8_t motorId)
+{
+    servoIntegral[motorId] = 0.0f;
+    servoPrevError[motorId] = 0.0f;
+}
+
+// Computes the run command of a motor in the servo mode from its current position.
+static void computeServoSpeed(uint8_t i, int32_t currentPos, bool &dir, float &absSpd)
+{
+    float spd = 0.0f;
+    int32_t error = targetPosition[i] - currentPos;
+    // Wrap into the ABS_POS range (22 bit, -2^21 to 2^21-1).
+    if (error > 0x1FFFFFL)
+        error -= 0x400000L;
+    else if (error < -0x200000L)
+        error += 0x400000L;
+    if (labs(error) > position_tolerance)
+    {
+        servoIntegral[i] += (((float)error + servoPrevError[i]) * 0.5f) * servoDtRatio;
+        if (servoIntegral[i] > INTEGRAL_LIMIT)
+            servoIntegral[i] = INTEGRAL_LIMIT;
+        else if (servoIntegral[i] < -INTEGRAL_LIMIT)
+            servoIntegral[i] = -INTEGRAL_LIMIT;
+        float diff = ((float)error - servoPrevError[i]) / servoDtRatio;
+
+        spd = (float)error * kP[i] + servoIntegral[i] * kI[i] + diff * kD[i];
+    }
+    servoPrevError[i] = error;
+    absSpd = fabsf(spd);
+    dir = (spd > 0.0f);
+    if (homeSwState[i])
+    {
+        if ((bProhibitMotionOnHomeSw[i] || !homeSwMode[i]) && (homingDirection[i] == dir))
+            absSpd = 0.0f;
+    }
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+    else if (limitSwState[i])
+    {
+        if ((bProhibitMotionOnLimitSw[i] || !limitSwMode[i]) && (homingDirection[i] != dir))
+            absSpd = 0.0f;
+    }
+#endif
+}
+
+bool updateServo(uint32_t currentTimeMillis)
 {
     static uint32_t lastServoUpdateTime = 0;
     static uint32_t lastServoUpdateMicros = 0;
-    bool updated = false;
-    static float eZ1[NUM_OF_MOTOR] = {0.0},
-                 //  eZ2[NUM_OF_MOTOR] = {0.0},
-        integral[NUM_OF_MOTOR] = {0.0};
-        if ((uint32_t)(_currentTime - lastServoUpdateTime) >= servoPollPeriod)
-        {
-            const uint32_t nowMicros = micros();
-            if (lastServoUpdateMicros != 0)
-                perfAdd(perfStats.servoInterval, nowMicros - lastServoUpdateMicros);
-            lastServoUpdateMicros = nowMicros;
-            updated = true;
-            for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-            {
-                if (isServoMode[i])
-                {
-                float spd = 0.0;
-                int32_t error = targetPosition[i] - stepper[i].getPos();
-                if (error > 0x1FFFFFL)
-                    error -= 0x3FFFFFL; // wrap ABS_POS 22bit range.
-                else if (error < -0x1FFFFFL)
-                    error += 0x3FFFFFL;
-                if (labs(error) > position_tolerance)
-                {
-                    integral[i] += (((float)error + eZ1[i]) * 0.5f);
-                    if (integral[i] > INTEGRAL_LIMIT)
-                        integral[i] = INTEGRAL_LIMIT;
-                    else if (integral[i] < -INTEGRAL_LIMIT)
-                        integral[i] = -INTEGRAL_LIMIT;
-                    double diff = error - eZ1[i];
+    if ((uint32_t)(currentTimeMillis - lastServoUpdateTime) < servoPollPeriod)
+        return false;
 
-                    spd = (float)error * kP[i] + integral[i] * kI[i] + diff * kD[i];
-                }
-                // eZ2[i] = eZ1[i];
-                eZ1[i] = error;
-                float absSpd = fabsf(spd);
-                bool dir = (spd > 0.0f);
-                if (homeSwState[i])
-                {
-                    if ((bProhibitMotionOnHomeSw[i] || !homeSwMode[i]) && (homingDirection[i] == dir))
-                        absSpd = 0.0f;
-                }
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-                else if (limitSwState[i])
-                {
-                    if ((bProhibitMotionOnLimitSw[i] || !limitSwMode[i]) && (homingDirection[i] != dir))
-                        absSpd = 0.0f;
-                }
-#endif
-                stepper[i].run(dir, absSpd);
-                // sendTwoData("/integral", i + MOTOR_ID_FIRST, (int32_t)integral[i]); // debug
-            }
+    const uint32_t nowMicros = micros();
+    if (lastServoUpdateMicros != 0)
+        perfAdd(perfStats.servoInterval, nowMicros - lastServoUpdateMicros);
+    lastServoUpdateMicros = nowMicros;
+
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (isServoMode[i])
+        {
+            bool dir;
+            float absSpd;
+            computeServoSpeed(i, stepper[i].getPos(), dir, absSpd);
+            stepper[i].run(dir, absSpd);
         }
-        lastServoUpdateTime = _currentTime;
     }
-    return updated;
+    lastServoUpdateTime = currentTimeMillis;
+    return true;
 }
 
 void loop()

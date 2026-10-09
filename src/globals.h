@@ -234,5 +234,6 @@ constexpr uint32_t servoPollPeriod = 10; // [ms]
 extern int32_t targetPosition[NUM_OF_MOTOR];
 extern float kP[NUM_OF_MOTOR], kI[NUM_OF_MOTOR], kD[NUM_OF_MOTOR];
 extern boolean isServoMode[NUM_OF_MOTOR];
+void resetServoState(uint8_t motorId); // main.cpp
 #endif
 

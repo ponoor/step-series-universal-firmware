@@ -1869,15 +1869,22 @@ void getMinSpeed(OscMessage &msg)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/minSpeed", motorID, stepper[motorID - MOTOR_ID_FIRST].getMinSpeed());
+        sendMinSpeed(motorID - MOTOR_ID_FIRST);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            sendTwoData("/minSpeed", i + MOTOR_ID_FIRST, stepper[i].getMinSpeed());
+            sendMinSpeed(i);
         }
     }
+}
+// While low speed optimization is enabled, the MIN_SPEED register holds the
+// optimization threshold and the actual minimum speed is 0.
+void sendMinSpeed(uint8_t motorId)
+{
+    float value = lowSpeedOptimizeEnable[motorId] ? 0.0f : stepper[motorId].getMinSpeed();
+    sendTwoData("/minSpeed", (int32_t)motorId + MOTOR_ID_FIRST, value);
 }
 
 void setFullstepSpeed(OscMessage &msg)

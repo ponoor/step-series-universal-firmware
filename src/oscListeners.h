@@ -140,6 +140,7 @@ void setSpeedProfile(OscMessage& msg);
 void setMaxSpeed(OscMessage& msg);
 void setMinSpeed(OscMessage& msg);
 void getMinSpeed(OscMessage& msg);
+void sendMinSpeed(uint8_t motorId);
 void setFullstepSpeed(OscMessage& msg);
 void getFullstepSpeed(OscMessage& msg);
 void setAcc(OscMessage& msg);

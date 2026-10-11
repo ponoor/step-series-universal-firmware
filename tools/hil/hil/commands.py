@@ -6,6 +6,7 @@ import csv
 import json
 import math
 import subprocess
+import sys
 import threading
 import time
 from contextlib import ExitStack
@@ -87,6 +88,14 @@ def print_table(headers: list[str], rows: list[list]) -> None:
             print("  ".join("-" * w for w in widths))
 
 
+def prompt(message: str) -> None:
+    """Waits for Enter from the operator; without a terminal, only prints the message."""
+    if sys.stdin.isatty():
+        input(message)
+    else:
+        print(message + "(no terminal: continuing)")
+
+
 def mask_of(dios) -> int:
     m = 0
     for d in dios:
@@ -96,7 +105,9 @@ def mask_of(dios) -> int:
 
 def open_ad2(cfg: Config) -> AD2:
     a = cfg.ad2
-    return AD2(a.get("dwf_library", ""), a.get("serial_number", ""), float(a["scope"]["range_vpp"]))
+    conf = a.get("configuration", -1)
+    return AD2(a.get("dwf_library", ""), a.get("serial_number", ""), float(a["scope"]["range_vpp"]),
+               None if conf is None or int(conf) < 0 else int(conf))
 
 
 def open_link(cfg: Config) -> OscLink:
@@ -109,7 +120,7 @@ def connect_board(link: OscLink, timeout: float = 15.0) -> str:
     while True:
         try:
             return link.set_dest_ip()
-        except OscError:
+        except (OscError, OSError):  # OSError: no ARP entry yet while the board boots
             if time.monotonic() >= deadline:
                 raise
             time.sleep(0.5)
@@ -135,13 +146,33 @@ def host_s(cap: Capture, t_ns: int) -> float:
     return (t_ns - cap.host_trigger_ns) / 1e9
 
 
-def excitation_step(cfg: Config, cap: Capture) -> tuple[analyze.Step, np.ndarray, np.ndarray]:
+def scope_offset(cfg: Config, cap: Capture) -> tuple[float, dict]:
+    """Scope start minus Digital In start for this capture, from the P0 edges seen by
+    both instruments (ad2.scope.p0_ref); the configured constant without a reference."""
+    ref = int(cfg.ad2["scope"].get("p0_ref", 0))
+    if ref and ref in cap.analog and cap.digital is not None:
+        t_dig = analyze.bit_edges(cap.digital, cfg.probe_dio[0]).all
+        t_ana = analyze.comparator_edges(cap.analog[ref], cap.analog_rate, 1.65, 0.6)
+        tol = max(3 / cap.analog_rate, 1.5 / cap.digital.rate)
+        d, n = analyze.estimate_offset(t_ana, t_dig, tolerance=tol, max_offset=5e-3)
+        fraction = n / max(1, min(len(t_ana), len(t_dig)))
+        if fraction < 0.95:
+            raise RuntimeError(f"Scope / Digital In alignment failed: {n} of {min(len(t_ana), len(t_dig))} P0 edges matched")
+        return -d, {"method": "p0_ref", "scope_minus_digital_us": -d * 1e6, "matched_edges": n,
+                    "matched_fraction": fraction}
+    value = float(cfg.section("sync")["scope_minus_digital_s"])
+    return value, {"method": "config", "scope_minus_digital_us": value * 1e6}
+
+
+def excitation_step(cfg: Config, cap: Capture, shift: float | None = None) -> tuple[analyze.Step, np.ndarray, np.ndarray]:
+    """Excitation of the test axis on the Digital In time base (shift: scope minus digital)."""
     ex = cfg.section("excitation")
     ch = int(cfg.ad2["scope"]["out1a"])
     step, t_win, counts = analyze.excitation(cap.analog[ch], cap.analog_rate, float(ex["level_v"]),
                                              float(ex["hysteresis_v"]), float(ex["window_ms"]) / 1e3,
-                                             int(ex["min_edges"]))
-    shift = float(cfg.section("sync")["scope_minus_digital_s"])
+                                             int(ex["min_edges"]), ex.get("clamp_v"))
+    if shift is None:
+        shift = 0.0
     return analyze.Step(step.times + shift, step.values, step.t_end + shift), t_win + shift, counts
 
 
@@ -282,73 +313,70 @@ def _selftest_home_sw(cfg, ad2, diag, link, out, boot) -> dict:
 
 
 def _selftest_excitation(cfg, ad2, diag, link, out, boot) -> dict:
+    """OUT1A energized at EL_POS 0 (held low), energized at +64 microsteps (PWM), HiZ."""
     axis = cfg.test_axis
     b = cfg.section("brake")
-    ex = cfg.section("excitation")
     kval = int(b["kval"])
     link.send("/setKval", axis, kval, kval, kval, kval)
+    link.send("/setMaxSpeed", axis, float(b["max_speed"]))
     time.sleep(0.1)
     ch = int(cfg.ad2["scope"]["out1a"])
     rec = ad2.start_recording(None, analog_channels=(ch,), analog_rate=float(b["analog_rate"]))
     time.sleep(0.3)
-    t_stop = link.send("/hardStop", axis).t_ns
-    time.sleep(1.2)
-    t_hiz = link.send("/hardHiZ", axis).t_ns
-    time.sleep(1.2)
+    marks = [("energized EL_POS 0 (/hardStop)", link.send("/hardStop", axis).t_ns)]
+    time.sleep(1.0)
+    marks.append(("energized +64 usteps (/move)", link.send("/move", axis, 64).t_ns))
+    time.sleep(1.0)
+    marks.append(("HiZ (/hardHiZ)", link.send("/hardHiZ", axis).t_ns))
+    time.sleep(1.0)
     cap = rec.stop()
     check_capture(cap)
     cap.save(out / "excitation_capture.npz")
-    v = cap.analog[ch]
-    rate = cap.analog_rate
-    window = float(ex["window_ms"]) / 1e3
-    _, t_win, counts = analyze.excitation(v, rate, float(ex["level_v"]), float(ex["hysteresis_v"]), window,
-                                          int(ex["min_edges"]))
-    a, bnd = host_s(cap, t_stop), host_s(cap, t_hiz)
-    end = len(v) / rate
-    spans = {"excited": (a + 0.2, bnd - 0.05), "hiz": (bnd + 0.2, end - 0.05)}
-    res: dict = {"kval_sent": [kval] * 4, "spans_s": spans}
-    for name, (lo, hi) in spans.items():
-        sel = (t_win >= lo) & (t_win + window <= hi)
-        c = counts[sel]
-        vs = v[int(lo * rate):int(hi * rate)]
-        res[name] = {"edges_per_window": analyze.stats(c),
-                     "volts": {"p1": float(np.percentile(vs, 1)), "p50": float(np.median(vs)),
-                               "p99": float(np.percentile(vs, 99))}}
-    exc_min = res["excited"]["edges_per_window"]["min"]
-    hiz_max = res["hiz"]["edges_per_window"]["max"]
-    res["suggested_min_edges"] = int(math.floor((exc_min + hiz_max) / 2)) + 1 if exc_min > hiz_max else None
-    ok = exc_min >= int(ex["min_edges"]) > hiz_max
-    plots.waveform(out / "excitation_waveform.png", f"OUT1A, KVAL {kval}", rate, v,
-                   [("excited (/hardStop)", spans["excited"][0], spans["excited"][1]),
-                    ("HiZ (/hardHiZ)", spans["hiz"][0], spans["hiz"][1])])
-    plots.histograms({"edges/window excited": counts[(t_win >= spans["excited"][0]) & (t_win < spans["excited"][1])],
-                      "edges/window HiZ": counts[(t_win >= spans["hiz"][0]) & (t_win < spans["hiz"][1])]},
-                     out / "excitation_edges.png", unit="edges")
-    res["ok"] = ok
-    res["summary"] = (f"edges/{ex['window_ms']} ms: excited min {exc_min}, HiZ max {hiz_max}; "
-                      f"min_edges={ex['min_edges']} (suggested {res['suggested_min_edges']})")
+    step, t_win, counts = excitation_step(cfg, cap)
+    shift = 0.0
+    medians = analyze.window_medians(cap.analog[ch], cap.analog_rate, float(cfg.section("excitation")["window_ms"]) / 1e3)
+    end = len(cap.analog[ch]) / cap.analog_rate
+    starts = [host_s(cap, t) for _, t in marks] + [end]
+    res: dict = {"kval_sent": [kval] * 4, "analog_rate": cap.analog_rate, "spans": {}}
+    ok = True
+    for (name, _), lo, hi in zip(marks, starts[:-1], starts[1:]):
+        lo, hi = lo + 0.3, hi - 0.05
+        sel = (t_win >= lo + shift) & (t_win + 1e-3 <= hi + shift)
+        excited_frac = float(np.mean(step.at(t_win[sel] + 5e-4)))
+        expect = not name.startswith("HiZ")
+        ok &= excited_frac == (1.0 if expect else 0.0)
+        res["spans"][name] = {"edges_per_window": analyze.stats(counts[sel]),
+                              "median_v": analyze.stats(medians[:counts.size][sel]),
+                              "excited_fraction": excited_frac, "expected": expect}
+    plots.waveform(out / "excitation_waveform.png", f"OUT1A, KVAL {kval}", cap.analog_rate, cap.analog[ch],
+                   [(name, lo + 0.3, hi) for (name, _), lo, hi in zip(marks, starts[:-1], starts[1:])],
+                   snippet=0.3e-3)
+    res["ok"] = bool(ok)
+    res["summary"] = "; ".join(f"{n.split(' (')[0]}: excited {v['excited_fraction']:.3f}, "
+                               f"edges/ms p50 {v['edges_per_window']['p50']}, median {v['median_v']['p50']:.2f} V"
+                               for n, v in res["spans"].items())
     return res
 
 
 def _selftest_sync(cfg, ad2, diag, link, out, boot) -> dict:
-    """Scope and Digital In start offset, with Scope 2 temporarily on P0."""
-    input("Connect Scope 2+ to probe P0 (the DIO8 line) and 2- to GND, then press Enter: ")
+    """Per-capture Scope / Digital In alignment from P0 (Scope p0_ref on P0)."""
+    ref = int(cfg.ad2["scope"].get("p0_ref", 0))
+    if not ref:
+        return {"ok": False, "summary": "ad2.scope.p0_ref is 0"}
+    b = cfg.section("brake")
     p0 = cfg.probe_dio[0]
-    rate = 1e6
-    rec = ad2.start_recording(0.3, digital_rate=rate, sensible_mask=mask_of([p0]), analog_channels=(2,),
-                              analog_rate=rate)
-    cap = rec.wait()
-    input("Reconnect Scope 2+ to 3.3 V (J3-2), then press Enter: ")
-    check_capture(cap)
-    cap.save(out / "sync_capture.npz")
-    t_dig = analyze.bit_edges(cap.digital, p0).all
-    t_ana = analyze.comparator_edges(cap.analog[2], cap.analog_rate, 1.65, 0.6)
-    d, n = analyze.estimate_offset(t_ana, t_dig, tolerance=3 / rate, max_offset=5e-3)
-    scope_minus_digital = -d
-    ok = n >= 0.9 * min(len(t_ana), len(t_dig)) and n > 10
-    return {"ok": ok, "scope_minus_digital_s": scope_minus_digital, "matched_edges": n,
-            "edges": [len(t_ana), len(t_dig)],
-            "summary": f"scope - digital = {scope_minus_digital * 1e6:.2f} us ({n} edges matched)"}
+    runs = []
+    for i in range(5):
+        cap = ad2.record(0.3, digital_rate=float(b["digital_rate"]), sensible_mask=mask_of([p0]),
+                         analog_channels=(ref,), analog_rate=float(b["analog_rate"]))
+        check_capture(cap)
+        _, info = scope_offset(cfg, cap)
+        runs.append(info)
+    offsets = [r["scope_minus_digital_us"] for r in runs]
+    worst = min(r["matched_fraction"] for r in runs)
+    return {"ok": worst >= 0.99, "runs": runs,
+            "summary": f"scope - digital {min(offsets):.0f} to {max(offsets):.0f} us over {len(runs)} captures, "
+                       f"edges matched >= {worst * 100:.1f} %"}
 
 
 # --------------------------------------------------------------------------------------
@@ -534,10 +562,13 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
 
     probe = cfg.probe_dio
     brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
-    mask = mask_of(brake_dios + probe[1:] + [15])  # P0 left out: it toggles every loop
     out1a = int(cfg.ad2["scope"]["out1a"])
+    ref = int(cfg.ad2["scope"].get("p0_ref", 0))
+    # P0 is recorded only as the time reference of the Scope.
+    mask = mask_of(brake_dios + (probe if ref else probe[1:]) + [15])
     rec = ad2.start_recording(None, digital_rate=float(b["digital_rate"]), sensible_mask=mask,
-                              analog_channels=(out1a,), analog_rate=float(b["analog_rate"]))
+                              analog_channels=(out1a, ref) if ref else (out1a,),
+                              analog_rate=float(b["analog_rate"]))
     stop = threading.Event()
 
     def poll():
@@ -595,7 +626,12 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
 
     end = seg.duration
     released = analyze.Step.from_edges(analyze.bit_edges(seg, cfg.brake_dio))
-    excited, _, _ = excitation_step(cfg, cap)
+    try:
+        shift, res["scope_alignment"] = scope_offset(cfg, cap)
+    except RuntimeError as ex:
+        res.update(outcome="ERROR", error=str(ex))
+        return res
+    excited, _, _ = excitation_step(cfg, cap, shift)
     axis = cfg.test_axis
     rx = [e for e in link.entries("rx", cap.host_trigger_ns, cap.host_stop_ns)
           if e.address == "/position" and int(e.args[0]) == axis]
@@ -686,12 +722,12 @@ def cmd_powerup(cfg: Config, args) -> int:
     v33 = int(cfg.ad2["scope"]["v33"])
     runs = []
     with open_ad2(cfg) as ad2:
+        prompt(f"Scope {v33}+ must be on 3.3 V (J3-2), not on P0. Press Enter when it is: ")
         for i in range(args.repeat):
-            input(f"[{i + 1}/{args.repeat}] Turn off the STEP800 power supply and unplug its USB cable "
-                  "(USB can power the 3.3 V rail). Press Enter when it is off: ")
             rec = ad2.start_recording(args.duration, digital_rate=1e5, sensible_mask=mask_of(brake_dios + [p4]),
                                       analog_channels=(v33,), analog_rate=1e5, analog_trigger=(v33, 1.65))
-            print("Armed. Turn on the STEP800 power supply now (USB stays unplugged).")
+            print(f"[{i + 1}/{args.repeat}] Armed. Turn off the STEP800 power supply and unplug its USB "
+                  "cable (USB can power the 3.3 V rail), then turn the power supply on again.", flush=True)
             cap = rec.wait(timeout=120.0 + args.duration)
             if rec._thread is not None and rec._thread.is_alive():
                 cap = rec.stop()

@@ -22,6 +22,6 @@ TASK_*.md
 # HIL test bench (tools/hil)
 tools/hil/bench.toml
 tools/hil/results/
-tools/hil/.venv/
+tools/hil/.venv
 tools/hil/.pytest_cache/
 __pycache__/

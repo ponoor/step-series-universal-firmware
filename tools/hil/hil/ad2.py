@@ -178,7 +178,7 @@ class Recording:
                 done = done or (dig_done and ana_done)
             if done:
                 return
-            time.sleep(0.002)
+            time.sleep(0.0005)
 
     def _read_digital(self, api, h) -> None:
         cfg = self._ad2._dig
@@ -212,9 +212,9 @@ class Recording:
         self.capture.analog_corrupted += corrupt
         if avail > 0:
             for ch in cfg["channels"]:
-                buf = (ctypes.c_double * avail)()
-                api.dwf_analog_in_status_data(h, ch - 1, buf, avail)
-                self._analog_parts.setdefault(ch, []).append(np.frombuffer(buf, dtype=np.float64).copy())
+                buf = np.empty(avail, dtype=np.float64)
+                api.dwf_analog_in_status_data(h, ch - 1, buf.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), avail)
+                self._analog_parts.setdefault(ch, []).append(buf)
             self._analog_samples += avail
 
     def _finish(self) -> None:
@@ -238,9 +238,11 @@ class AD2:
     """Analog Discovery 2. Use as a context manager: the home switch output is always
     released before the device is closed, also on exceptions."""
 
-    def __init__(self, library: str = "", serial_number: str = "", range_vpp: float = 50.0):
+    def __init__(self, library: str = "", serial_number: str = "", range_vpp: float = 50.0,
+                 configuration: int | None = None):
         self._library = library
         self._serial = serial_number or None
+        self._configuration = configuration
         self._range = range_vpp
         self._device = None
         self._dig: dict | None = None
@@ -250,7 +252,15 @@ class AD2:
     # --- open / close ---
     def open(self) -> "AD2":
         dwfpy = load_dwfpy(self._library)
-        self._device = dwfpy.AnalogDiscovery2(serial_number=self._serial)
+        if dwfpy.bindings.dwf_enum(dwfpy.bindings.ENUMFILTER_ALL) == 0 and not os.path.exists(DWFPY_LIBRARY):
+            # The runtime finds the FTDI library and its data directory relative to the
+            # executable or under /Library/Frameworks/dwf.framework, so it sees no device
+            # when loaded from the app bundle by another program.
+            raise RuntimeError(
+                "no WaveForms device found. The runtime needs /Library/Frameworks/dwf.framework; "
+                "link it with: sudo ln -s /Applications/WaveForms.app/Contents/Frameworks/dwf.framework "
+                "/Library/Frameworks/dwf.framework")
+        self._device = dwfpy.AnalogDiscovery2(configuration=self._configuration, serial_number=self._serial)
         self._device.open()
         api = _api()
         h = self.handle
@@ -337,6 +347,7 @@ class AD2:
             api.dwf_digital_in_trigger_source_set(
                 h, api.TRIGSRC_ANALOG_IN if analog_trigger else api.TRIGSRC_PC)
             api.dwf_digital_in_trigger_position_set(h, 0)  # record until stopped
+            api.dwf_digital_in_buffer_size_set(h, api.dwf_digital_in_buffer_size_info(h))
             api.dwf_digital_in_configure(h, 1, 0)
             self._dig = {"rate": hz / div, "compress": compress}
         if analog_channels:
@@ -350,6 +361,7 @@ class AD2:
             api.dwf_analog_in_acquisition_mode_set(h, api.ACQMODE_RECORD)
             api.dwf_analog_in_frequency_set(h, analog_rate)
             api.dwf_analog_in_record_length_set(h, 0.0)  # record until stopped
+            api.dwf_analog_in_buffer_size_set(h, api.dwf_analog_in_buffer_size_info(h)[1])
             if analog_trigger:
                 ch, level = analog_trigger
                 api.dwf_analog_in_trigger_source_set(h, api.TRIGSRC_DETECTOR_ANALOG_IN)

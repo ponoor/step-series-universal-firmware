@@ -122,7 +122,10 @@ class SerialDiag:
     def reboot(self, timeout: float = 15.0) -> str:
         """'R': reboots the board, waits for the USB port to come back and returns what
         was printed in the first second (the boot messages may be gone already)."""
-        self.command("R", until=r"Rebooting")
+        try:
+            self.command("R", until=r"Rebooting")
+        except (serial.SerialException, OSError, DiagError):
+            pass  # the port can disappear before the reply is read
         self.close()
         deadline = time.monotonic() + timeout
         time.sleep(0.5)

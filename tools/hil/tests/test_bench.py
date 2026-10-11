@@ -258,3 +258,24 @@ def test_load_dwfpy_redirect():
         pytest.skip("WaveForms is not installed")
     dwfpy = ad2.load_dwfpy()
     assert dwfpy.Application().get_version().count(".") >= 2
+
+
+def test_scope_offset_from_p0():
+    cfg = default_cfg()
+    rng = np.random.default_rng(7)
+    # P0 toggles with a jittered loop period; the Scope started 150 us before Digital In.
+    t_edges = np.cumsum(rng.uniform(40e-6, 70e-6, 4000))
+    n = int(0.2 * DIG_RATE)
+    level = np.zeros(n, np.uint32)
+    idx = (t_edges * DIG_RATE).astype(int)
+    idx = idx[idx < n]
+    toggles = np.zeros(n, np.int64)
+    toggles[idx] = 1
+    level |= ((np.cumsum(toggles) % 2).astype(np.uint32) << cfg.probe_dio[0])
+    t_a = np.arange(int(0.2 * ANA_RATE)) / ANA_RATE
+    p0_a = (np.searchsorted(t_edges, t_a - 150e-6) % 2) * 3.3
+    cap = Capture(digital=analyze.segments_from_samples(level, DIG_RATE), analog_rate=ANA_RATE,
+                  analog={1: np.zeros(t_a.size), 2: p0_a.astype(float)})
+    shift, info = commands.scope_offset(cfg, cap)
+    assert info["method"] == "p0_ref"
+    assert shift == pytest.approx(-150e-6, abs=10e-6)

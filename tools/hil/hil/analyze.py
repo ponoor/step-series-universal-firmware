@@ -142,7 +142,7 @@ def stats(values: np.ndarray, scale: float = 1.0) -> dict:
 
 
 def find_selftest(pulses: dict[int, tuple[np.ndarray, np.ndarray]], n_probes: int = 7,
-                  width: tuple[float, float] = (5e-6, 16e-6), cluster_gap: float = 0.5e-3,
+                  width: tuple[float, float] = (5e-6, 40e-6), cluster_gap: float = 0.5e-3,
                   group_gap: tuple[float, float] = (0.8e-3, 1.6e-3)) -> dict[int, int] | None:
     """Finds the 'P' self-test pattern: groups of 1, 2, ..., n_probes pulses of about
     10 us, about 1 ms apart, each group on one line. pulses maps a DIO number to
@@ -340,9 +340,20 @@ def comparator_edges(volts: np.ndarray, rate: float, level: float, hysteresis: f
     return change / rate
 
 
+def window_medians(volts: np.ndarray, rate: float, window: float) -> np.ndarray:
+    v = np.asarray(volts, dtype=float)
+    per = max(1, int(round(window * rate)))
+    n_win = max(1, int(np.ceil(v.size / per)))
+    padded = np.full(n_win * per, np.nan)
+    padded[:v.size] = v
+    return np.nanmedian(padded.reshape(n_win, per), axis=1)
+
+
 def excitation(volts: np.ndarray, rate: float, level: float, hysteresis: float, window: float,
-               min_edges: int) -> tuple[Step, np.ndarray, np.ndarray]:
-    """Excited where a window has at least min_edges comparator transitions (PWM).
+               min_edges: int, clamp_v: float | None = None) -> tuple[Step, np.ndarray, np.ndarray]:
+    """Excited where a window has at least min_edges comparator transitions (PWM), or,
+    with clamp_v, where the window median is below clamp_v (the L6470 holds the
+    non-switching side of a bridge low, while a HiZ output floats higher).
     Returns (step signal, window start times, edges per window)."""
     n = len(volts)
     duration = n / rate
@@ -350,7 +361,10 @@ def excitation(volts: np.ndarray, rate: float, level: float, hysteresis: float, 
     n_win = max(1, int(np.ceil(duration / window)))
     counts = np.bincount(np.minimum((edges / window).astype(np.int64), n_win - 1), minlength=n_win)
     t_win = np.arange(n_win) * window
-    return Step.from_windows(t_win, counts >= min_edges, duration), t_win, counts
+    flags = counts >= min_edges
+    if clamp_v is not None:
+        flags |= window_medians(volts, rate, window)[:n_win] < clamp_v
+    return Step.from_windows(t_win, flags, duration), t_win, counts
 
 
 # --------------------------------------------------------------------------------------

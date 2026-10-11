@@ -127,12 +127,16 @@ class OscLink:
                     return None
                 self._cond.wait(remaining)
 
-    def request(self, address: str, *args, reply: str, timeout: float = 1.0, predicate=None) -> LogEntry:
-        sent = self.send(address, *args)
-        e = self.wait_for(reply, timeout, sent.t_ns, predicate)
-        if e is None:
-            raise OscError(f"no {reply} reply to {address} {list(args)} within {timeout} s")
-        return e
+    def request(self, address: str, *args, reply: str, timeout: float = 1.0, predicate=None,
+                attempts: int = 3) -> LogEntry:
+        """Sends a query and waits for its reply, resending up to `attempts` times
+        (a reply is occasionally lost). Use only for queries without side effects."""
+        for _ in range(attempts):
+            sent = self.send(address, *args)
+            e = self.wait_for(reply, timeout, sent.t_ns, predicate)
+            if e is not None:
+                return e
+        raise OscError(f"no {reply} reply to {address} {list(args)} after {attempts} attempts of {timeout} s")
 
     def entries(self, direction: str | None = None, t_from_ns: int = 0, t_to_ns: int | None = None) -> list[LogEntry]:
         with self._log_lock:
@@ -155,7 +159,7 @@ class OscLink:
             raise OscError(f"this Mac reaches {self.board_ip} from {local}, outside {net}. "
                            "Give the Mac an address in the board's subnet.")
         try:
-            reply = self.request("/setDestIp", reply="/destIp", timeout=timeout)
+            reply = self.request("/setDestIp", reply="/destIp", timeout=timeout, attempts=1)
         except OscError:
             raise OscError(f"no /destIp reply from {self.board_ip}:{self.board_in_port} on port "
                            f"{self.listen_port}. Check board.id / ip / ports in bench.toml, the "

@@ -154,15 +154,19 @@ SCENARIOS: tuple[Scenario, ...] = (
         notes="Known defect: bBrakeDecWaiting stays set, so the brake engages when the motor stops after /free.",
     ),
     Scenario(
-        "B4", "softHiZ while running, then a move command before the stop (STATUS 5.3)", "FAIL",
+        "B4", "softHiZ while running, then a motion command before the stop (STATUS 5.3)", "FAIL",
         steps=_ACTIVATE + (
             osc("/run", AXIS, MAX_SPEED, label="run"), wait(1.0),
             osc("/softHiZ", AXIS, label="softHiZ"), wait(0.05),
-            osc("/move", AXIS, MOVE, label="move"), wait(2.0),
+            # /run is accepted by the L6470 while decelerating (/move is not: BUSY).
+            osc("/run", AXIS, MAX_SPEED, label="run2"), wait(1.0),
+            osc("/softStop", AXIS, label="softStop"), wait(1.0),
         ),
-        checks=(Check("RELEASED-AFTER-MOVE", "brake", True, "move", None, LATENCY),),
-        expected_failures=frozenset({"RELEASED-AFTER-MOVE"}),
-        notes="Known defect: the brake engages unintentionally when the move ends (bBrakeDecWaiting).",
+        checks=(Check("RELEASED-AFTER-RUN2", "brake", True, "run2", None, LATENCY),),
+        expected_failures=frozenset({"RELEASED-AFTER-RUN2"}),
+        notes="Known defect: bBrakeDecWaiting stays set after the new motion command, so the brake "
+              "engages when the motor stops after /softStop. A /move sent while decelerating is "
+              "rejected by the L6470 (CommandIgnored), so /run is used.",
     ),
     Scenario(
         "B5", "/activate 1 within 10 ms after /hardHiZ (STATUS 5.3)", "RECORD",

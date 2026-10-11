@@ -146,6 +146,10 @@ def host_s(cap: Capture, t_ns: int) -> float:
     return (t_ns - cap.host_trigger_ns) / 1e9
 
 
+class ScopeGapError(RuntimeError):
+    pass
+
+
 def scope_offset(cfg: Config, cap: Capture) -> tuple[float, dict]:
     """Scope start minus Digital In start for this capture, from the P0 edges seen by
     both instruments (ad2.scope.p0_ref); the configured constant without a reference."""
@@ -156,10 +160,23 @@ def scope_offset(cfg: Config, cap: Capture) -> tuple[float, dict]:
         tol = max(3 / cap.analog_rate, 1.5 / cap.digital.rate)
         d, n = analyze.estimate_offset(t_ana, t_dig, tolerance=tol, max_offset=5e-3)
         fraction = n / max(1, min(len(t_ana), len(t_dig)))
-        if fraction < 0.95:
-            raise RuntimeError(f"Scope / Digital In alignment failed: {n} of {min(len(t_ana), len(t_dig))} P0 edges matched")
+        # The Scope can drop a whole buffer without reporting it (Task 5: 8192 samples), which
+        # shifts the rest of the recording. Every window must have the same offset.
+        # Only where both recordings have data (the Scope runs a little past Digital In).
+        both = (t_ana - d >= 0.0) & (t_ana - d <= cap.digital.duration - 1e-3)
+        t_both = t_ana[both]
+        windows = []
+        for t0 in np.arange(0.0, t_both.max(initial=0.0), 0.2):
+            sel = (t_both >= t0) & (t_both < t0 + 0.2)
+            if sel.sum() >= 20:
+                windows.append((float(t0), analyze.match_fraction(t_both[sel], t_dig, d, tol)))
+        bad = [w for w in windows if w[1] < 0.9]
+        if fraction < 0.95 or bad:
+            where = f", from {bad[0][0]:.1f} s" if bad else ""
+            raise ScopeGapError(f"Scope / Digital In alignment failed: {n} of {min(len(t_ana), len(t_dig))} "
+                                f"P0 edges matched{where}; the Scope probably dropped samples without reporting it")
         return -d, {"method": "p0_ref", "scope_minus_digital_us": -d * 1e6, "matched_edges": n,
-                    "matched_fraction": fraction}
+                    "matched_fraction": fraction, "windows": len(windows)}
     value = float(cfg.section("sync")["scope_minus_digital_s"])
     return value, {"method": "config", "scope_minus_digital_us": value * 1e6}
 
@@ -242,7 +259,7 @@ def _selftest_brake_map(cfg, ad2, diag, link, out, boot) -> dict:
     """'b' x 8: which DIO 0-7 goes high for each motor, and the delay against P4."""
     p4 = cfg.probe_dio[4]
     brake_dios = list(range(8))
-    rec = ad2.start_recording(None, digital_rate=1e5, sensible_mask=mask_of(brake_dios + [p4]))
+    rec = ad2.start_recording(None, digital_rate=1e6, sensible_mask=mask_of(brake_dios + [p4]))
     time.sleep(0.3)
     log = []
     for _ in range(NUM_MOTORS):
@@ -623,7 +640,7 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     res: dict = {"id": scenario.id, "title": scenario.title, "expect": scenario.expect,
                  "expected_failures": scenario.expected_failures}
     if not cap.ok:
-        res.update(outcome="ERROR", error="; ".join(cap.problems()) + ". Lower the sample rate.")
+        res.update(outcome="ERROR", error="; ".join(cap.problems()) + ". Lower the sample rate.", retryable=True)
         return res
     seg = cap.digital
     probe = cfg.probe_dio
@@ -634,14 +651,24 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     except analyze.MatchError as ex:
         res.update(outcome="ERROR", error=str(ex))
         return res
-    res["clock_fit"] = {"slope": fit.slope, "offset_s": fit.offset, "residual_max_ms": fit.residual_max * 1e3}
+    res["clock_fit"] = {"slope": fit.slope, "offset_s": fit.offset, "residual_max_ms": fit.residual_max * 1e3,
+                        "residual_std_ms": fit.residual_std * 1e3,
+                        "note": "host -> board network delay; used only to find the DIO15 edge of press/release"}
     tx_index = {id(e): i for i, e in enumerate(tx)}
 
     # AD2 time of each logged step.
     label_t: dict[str, float] = {}
     commands = []
+    dio15 = analyze.bit_edges(seg, 15)
     for st, t_ns, entry in log:
-        t = float(p1[tx_index[id(entry)]]) if entry is not None else float(fit.to_ad2(host_s(cap, t_ns)))
+        if entry is not None:
+            t = float(p1[tx_index[id(entry)]])
+        else:
+            # press / release: the DIO15 edge nearest to the host time.
+            t = float(fit.to_ad2(host_s(cap, t_ns)))
+            edges = dio15.fall if st.kind == "press" else dio15.rise
+            if edges.size:
+                t = float(edges[np.argmin(np.abs(edges - t))])
         if st.label:
             label_t[st.label] = t
         commands.append((t, st.label or st.address or st.kind, st))
@@ -650,15 +677,17 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     released = analyze.Step.from_edges(analyze.bit_edges(seg, cfg.brake_dio))
     try:
         shift, res["scope_alignment"] = scope_offset(cfg, cap)
-    except RuntimeError as ex:
-        res.update(outcome="ERROR", error=str(ex))
+    except ScopeGapError as ex:
+        res.update(outcome="ERROR", error=str(ex), retryable=True)
         return res
     excited, _, _ = excitation_step(cfg, cap, shift)
     axis = cfg.test_axis
-    rx = [e for e in link.entries("rx", cap.host_trigger_ns, cap.host_stop_ns)
-          if e.address == "/position" and int(e.args[0]) == axis]
-    pos_t = np.array([float(fit.to_ad2(host_s(cap, e.t_ns))) for e in rx])
-    pos = np.array([int(e.args[1]) for e in rx])
+    # A position is read when the board processes the request: time it at the request's
+    # P1 rise (the network delay, up to about 80 ms over Wi-Fi, does not matter then).
+    req_idx, replies = match_replies(cfg, cap, tx, link, "/getPosition", "/position")
+    answered = [(i, r) for i, r in zip(req_idx, replies) if r is not None]
+    pos_t = np.array([float(p1[i]) for i, _ in answered])
+    pos = np.array([int(r.args[1]) for _, r in answered])
 
     exempt: dict[str, list] = {}
     for ex in scenario.exempt:
@@ -694,7 +723,7 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
                        "brake_change_ms": (nxt - t) * 1e3 if nxt is not None and nxt - t < 1.0 else None,
                        "first_p6_ms": (p6_after[0] - t) * 1e3 if p6_after.size else None})
     overlaps = analyze.intersect(released.intervals(False), excited.intervals(True))
-    res["reply_loss"] = reply_loss(cfg, cap, tx, p1, link, "/getPosition", "/position")
+    res["reply_loss"] = reply_loss(cfg, cap, tx, p1, req_idx, replies, "/getPosition")
     res["delays"] = delays
     res["overlaps_ms"] = [[round(a, 4), round((b - a) * 1e3, 2)] for a, b in overlaps]
 
@@ -709,27 +738,47 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     return res
 
 
-def reply_loss(cfg: Config, cap: Capture, tx: list, p1: np.ndarray, link, request: str, reply: str) -> dict:
-    """Requests of the test axis without a reply before the next request. For each, whether
-    the board sent anything (P5 pulse) between this request's P1 rise and the next one."""
+def match_replies(cfg: Config, cap: Capture, tx: list, link, request: str, reply: str,
+                  timeout_ns: int = 10**9) -> tuple[list[int], list]:
+    """Pairs each request of the test axis with the first unused reply received after it
+    (UDP keeps the order on this link). Returns (indexes into tx of the requests, the reply
+    entry or None for each)."""
     axis = cfg.test_axis
-    p5 = analyze.pulse_widths(analyze.bit_edges(cap.digital, cfg.probe_dio[5]))
-    rx = sorted(e.t_ns for e in link.entries("rx", cap.host_trigger_ns, cap.host_stop_ns + 10**9)
-                if e.address == reply and int(e.args[0]) == axis)
-    rx = np.array(rx, dtype=np.int64)
+    rx = sorted((e for e in link.entries("rx", cap.host_trigger_ns, cap.host_stop_ns + timeout_ns)
+                 if e.address == reply and int(e.args[0]) == axis), key=lambda e: e.t_ns)
     idx = [i for i, e in enumerate(tx) if e.address == request and e.args and int(e.args[0]) == axis]
-    events = []
-    for k, i in enumerate(idx):
-        t_from = tx[i].t_ns
-        t_to = tx[idx[k + 1]].t_ns if k + 1 < len(idx) else cap.host_stop_ns + 10**9
-        if np.any((rx >= t_from) & (rx < t_to)):
-            continue
+    replies: list = []
+    j = 0
+    for i in idx:
+        while j < len(rx) and rx[j].t_ns < tx[i].t_ns:
+            j += 1
+        if j < len(rx) and rx[j].t_ns - tx[i].t_ns <= timeout_ns:
+            replies.append(rx[j])
+            j += 1
+        else:
+            replies.append(None)
+    return idx, replies
+
+
+def reply_loss(cfg: Config, cap: Capture, tx: list, p1: np.ndarray, idx: list[int], replies: list,
+               request: str) -> dict:
+    """Missing replies = requests - replies received. The board side is exact: a request
+    with no P5 (UDP send) pulse between its P1 rise and the next P1 rise was not answered
+    by the board (listed with its time). The rest were sent by the board and lost on the
+    way (only their number is known: over Wi-Fi, replies cannot be tied to requests by
+    host time)."""
+    p5_rise = analyze.bit_edges(cap.digital, cfg.probe_dio[5]).rise
+    no_reply = []
+    for i in idx:
         a_from = float(p1[i])
         a_to = float(p1[i + 1]) if i + 1 < len(p1) else cap.digital.duration
-        sel = (p5[0] >= a_from) & (p5[0] < a_to)
-        events.append({"t_s": a_from, "p5_pulses": int(sel.sum()),
-                       "p5_width_us": [round(w * 1e6, 1) for w in p5[1][sel]]})
-    return {"request": request, "requests": len(idx), "missing": len(events), "events": events}
+        if not np.any((p5_rise >= a_from) & (p5_rise < a_to)):
+            no_reply.append({"t_s": a_from})
+    missing = sum(r is None for r in replies)
+    return {"request": request, "requests": len(idx), "missing": missing,
+            "board_no_reply": len(no_reply), "lost_in_transit": max(0, missing - len(no_reply)),
+            "board_no_reply_events": no_reply,
+            "positions_may_be_misaligned": missing > 0}
 
 
 def cmd_brake(cfg: Config, args) -> int:
@@ -746,7 +795,13 @@ def cmd_brake(cfg: Config, args) -> int:
         link = stack.enter_context(open_link(cfg))
         for scenario in chosen:
             print(f"running {scenario.id}: {scenario.title}")
-            results.append(run_scenario(cfg, scenario, ad2, diag, link, out))
+            for attempt in range(3):
+                res = run_scenario(cfg, scenario, ad2, diag, link, out)
+                if not res.get("retryable"):
+                    break
+                print(f"  {scenario.id}: {res['error']} Running again.")
+            res["retries_for_capture"] = attempt
+            results.append(res)
         diag.reboot()
     link.save_log(out / "osc_log.jsonl")
     write_json(out / "summary.json", {"axis": cfg.test_axis, "motor_connected": motor_connected,
@@ -778,7 +833,7 @@ def cmd_powerup(cfg: Config, args) -> int:
     with open_ad2(cfg) as ad2:
         prompt(f"Scope {v33}+ must be on 3.3 V (J3-2), not on P0. Press Enter when it is: ")
         for i in range(args.repeat):
-            rec = ad2.start_recording(args.duration, digital_rate=1e5, sensible_mask=mask_of(brake_dios + [p4]),
+            rec = ad2.start_recording(args.duration, digital_rate=1e6, sensible_mask=mask_of(brake_dios + [p4]),
                                       analog_channels=(v33,), analog_rate=1e5, analog_trigger=(v33, 1.65))
             print(f"[{i + 1}/{args.repeat}] Armed. Turn off the STEP800 power supply and unplug its USB "
                   "cable (USB can power the 3.3 V rail), then turn the power supply on again.", flush=True)
@@ -798,14 +853,23 @@ def cmd_powerup(cfg: Config, args) -> int:
 
 
 def _analyze_powerup(run: int, cap: Capture, brake_dios: list[int], p4: int) -> dict:
+    """t = 0 is the 3.3 V rise (1.65 V). The 74HC595 output register is not cleared at
+    power-up (only the shift register is, by SHIFTOUT_ENABLE / R3) and G is tied to GND,
+    so the outputs show the power-up state until the first RCK edge (the latch line,
+    also driven high by initDipSw() before the first getMyId())."""
     if not cap.ok:
         return {"run": run, "error": "; ".join(cap.problems())}
     seg = cap.digital
     p4_rise = analyze.bit_edges(seg, p4).rise
     t_p4 = float(p4_rise[0]) if p4_rise.size else seg.duration
-    released = []
+    released, outputs = [], {}
     for motor, d in enumerate(brake_dios, start=1):
-        step = analyze.Step.from_edges(analyze.bit_edges(seg, d))
-        if analyze.intersect([(0.0, t_p4)], step.intervals(True)):
+        e = analyze.bit_edges(seg, d)
+        step = analyze.Step.from_edges(e)
+        high = analyze.intersect([(0.0, t_p4)], step.intervals(True))
+        if high:
             released.append(motor)
-    return {"run": run, "first_p4_ms": t_p4 * 1e3 if p4_rise.size else None, "released_before_p4": released}
+        outputs[motor] = {"initial": e.initial, "high_before_p4_ms": [[round(a * 1e3, 3), round(b * 1e3, 3)] for a, b in high],
+                          "edges_ms": sorted([round(t * 1e3, 3) for t in e.all if t <= t_p4 + 0.05])}
+    return {"run": run, "first_p4_ms": t_p4 * 1e3 if p4_rise.size else None, "released_before_p4": released,
+            "outputs": outputs}

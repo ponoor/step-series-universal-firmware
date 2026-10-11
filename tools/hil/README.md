@@ -113,8 +113,8 @@ The console shows a summary table and the result directory only.
 | `selftest` | Reboots the board. `probes`: records DIO 8-14 while the `P` serial command pulses each probe ch + 1 times, and checks the probe-to-DIO map and the firmware's pin map. `brake_map`: sends `b` 8 times and records which DIO 0-7 rises for each motor, and its delay against P4. `home_sw`: presses / releases DIO15 and checks `/homeSw` reports and `/getHomeSw`. `excitation`: records OUT1A energized at EL_POS 0 (`/hardStop`), energized 64 microsteps further (`/move`) and HiZ (`/hardHiZ`), KVAL from `[brake] kval`, and checks the classification. `sync` (with `--sync`): 5 recordings of P0 on Scope 2 and DIO 8, checks the per-recording alignment. |
 | `timing` | Reboots the board, applies the load (servo mode on all motors, `/setTargetPositionList` at 100 Hz, position reports), records the probes at 1 MHz for the duration, reads `p` before and after. Reports min / p50 / p99 / p99.9 / max / mean of the loop period, each handler, the servo and status poll intervals, and compares them with `perfStats`. |
 | `compare` | Table of p50 / p99 / p99.9 / max of two `timing` results and overlaid histograms. |
-| `brake` | For each scenario of `hil/scenarios.py`: reboot, common setup, record (digital 100 kHz, OUT1A and P0 at 500 kS/s) while running the steps and polling `/getPosition` every 20 ms, then judge INV-1 to INV-3 and the scenario's checks. Saves a timing diagram per scenario. |
-| `powerup` | Needs Scope 2+ moved to 3.3 V. Arms a recording triggered by the 3.3 V rise on Scope 2, asks for a power cycle, and reports any brake output that is HIGH (released) before the first P4 rise. |
+| `brake` | For each scenario of `hil/scenarios.py`: reboot, common setup, record (digital 1 MHz, OUT1A and P0 at 200 kS/s) while running the steps and polling `/getPosition` every 20 ms, then judge INV-1 to INV-3 and the scenario's checks. Saves a timing diagram per scenario. |
+| `powerup` | Needs Scope 2+ moved to 3.3 V and the STEP800 USB cable unplugged: USB VBUS is connected to the board's 5 V net without a diode (schematic sheet 1), so USB alone powers the 3.3 V rail and the 74HC595. Reports, per run, the initial level and every edge of each brake output until the first P4 rise. The 74HC595 output register is not cleared at power-up (SHIFTOUT_ENABLE / R3 clear only the shift register, G is tied to GND), so the outputs keep their power-up state until the first RCK edge. Afterwards, move Scope 2+ back to P0. Arms a recording triggered by the 3.3 V rise on Scope 2, asks for a power cycle, and reports any brake output that is HIGH (released) before the first P4 rise. |
 
 ## How it works
 
@@ -140,8 +140,10 @@ The console shows a summary table and the result directory only.
   at 0 V while the B bridge switches. HiZ floats at about 1.8 V. A 1 ms window counts as
   excited if it has at least `min_edges` comparator transitions or its median is below
   `clamp_v`. A HiZ motor that is still turning can swing below `clamp_v` (back-EMF) and
-  read as excited. The pulses need the Scope at 500 kS/s (1 MS/s loses samples together
-  with Digital In). The firmware's default KVAL_HOLD is 0; the bench sends `/setKval`
+  read as excited. The brake tests record the Scope at 200 kS/s: at 500 kS/s (two
+  channels, Digital In at 1 MHz) it lost samples in 4 of 10 recordings, 2 of them as a
+  silent drop of a whole buffer (8192 samples) that only the P0 alignment detects. A
+  recording with a reported or detected loss is run again (up to 3 attempts). The firmware's default KVAL_HOLD is 0; the bench sends `/setKval`
   with `[brake] kval`.
 - dwfpy has no wrapper for the compressed record or the PC-triggered start of both
   instruments, so `hil/ad2.py` calls those WaveForms functions through `dwfpy.bindings`
@@ -159,10 +161,12 @@ Before the steps of each scenario (brake engaged, motor HiZ after the common set
 median of OUT1A must be in `[excitation] hiz_median_v` (the floating level, about 1.8 V).
 Otherwise the scenario is reported as ABORTED (wiring problem) and not judged.
 
-For every `/getPosition` without a `/position` reply before the next request,
-`summary.json` records the time and the P5 (UDP send) pulses between that request and the
-next one, so a reply that the board never sent can be told from one lost on the way
-(`reply_loss`).
+Missing `/position` replies are recorded in `summary.json` (`reply_loss`): `missing`
+(requests minus replies), `board_no_reply` (requests with no P5 pulse between their P1
+rise and the next one: the board did not answer; listed with their times) and
+`lost_in_transit` (sent by the board, not received). Positions are time-stamped at the
+P1 rise of their request, and the home switch steps at the DIO15 edges, so the network
+delay does not enter the judgement (over Wi-Fi it varied from 3 to 86 ms).
 
 Scenarios can exempt an invariant over a range (e.g. INV-1 after `/free`, which releases
 the brake with the motor HiZ on purpose) and add checks that a signal keeps a value.

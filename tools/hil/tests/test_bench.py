@@ -29,7 +29,7 @@ class FakeLink:
                 and e.t_ns >= t_from_ns and (t_to_ns is None or e.t_ns <= t_to_ns)]
 
 
-def make_capture(cfg, duration, p1_times, brake_high, excited, host_trigger_ns=10**12):
+def make_capture(cfg, duration, p1_times, brake_high, excited, host_trigger_ns=10**12, p5_times=()):
     """Digital: P1 pulses (200 us) and the brake output of the test axis.
     Analog: 15.6 kHz PWM on OUT1A while excited, 5 V otherwise."""
     n = int(duration * DIG_RATE)
@@ -38,6 +38,9 @@ def make_capture(cfg, duration, p1_times, brake_high, excited, host_trigger_ns=1
     for t in p1_times:
         i = int(round(t * DIG_RATE))
         s[i:i + 20] |= np.uint32(1 << p1_bit)
+    for t in p5_times:
+        i = int(round(t * DIG_RATE))
+        s[i:i + 25] |= np.uint32(1 << cfg.probe_dio[5])
     for lo, hi in brake_high:
         s[int(lo * DIG_RATE):int(hi * DIG_RATE)] |= np.uint32(1 << cfg.brake_dio)
     t = np.arange(int(duration * ANA_RATE)) / ANA_RATE
@@ -52,7 +55,7 @@ def make_capture(cfg, duration, p1_times, brake_high, excited, host_trigger_ns=1
     return cap
 
 
-def run_b8b(tmp_path, excited_until, drop_reply_at=None):
+def run_b8b(tmp_path, excited_until, drop_reply_at=None, board_skip=None):
     """B8b: /activate 1 at 0.3 s, /hardHiZ at 0.8 s (AD2 time = host time + 2 ms)."""
     cfg = default_cfg()
     scenario = sc.get("B8b")
@@ -75,7 +78,11 @@ def run_b8b(tmp_path, excited_until, drop_reply_at=None):
     entries.sort(key=lambda e: e.t_ns)
     p1 = [(e.t_ns - t0) / 1e9 + delay for e in entries if e.direction == "tx"]
     a_t, h_t = 0.3 + delay, 0.8 + delay
-    cap = make_capture(cfg, 1.5, p1, brake_high=[(a_t + 0.11, h_t + 0.012)], excited=[(a_t, excited_until)])
+    # The board answers each /getPosition (P5 1 ms after its P1), except a dropped one.
+    polls = [(e.t_ns - t0) / 1e9 + delay for e in entries if e.address == "/getPosition"]
+    p5 = [t + 0.001 for k, t in enumerate(polls) if k != board_skip]
+    cap = make_capture(cfg, 1.5, p1, brake_high=[(a_t + 0.11, h_t + 0.012)], excited=[(a_t, excited_until)],
+                       p5_times=p5)
     return commands.analyze_scenario(cfg, scenario, cap, FakeLink(entries), log, 0.1, 0.03, tmp_path)
 
 
@@ -284,12 +291,15 @@ def test_scope_offset_from_p0():
 
 def test_reply_loss(tmp_path):
     res = run_b8b(tmp_path, excited_until=0.8 + 0.002 + 0.1)
-    assert res["reply_loss"]["requests"] == 70 and res["reply_loss"]["missing"] == 0
-    res = run_b8b(tmp_path, excited_until=0.8 + 0.002 + 0.1, drop_reply_at=10)
     loss = res["reply_loss"]
-    assert loss["missing"] == 1
-    assert loss["events"][0]["t_s"] == pytest.approx(0.05 + 0.02 * 10 + 0.002, abs=1e-4)
-    assert loss["events"][0]["p5_pulses"] == 0  # the synthetic capture has no P5 pulses
+    assert loss["requests"] == 70 and loss["missing"] == 0 and loss["board_no_reply"] == 0
+    # Lost on the way: the board sent it (P5), the host did not receive it.
+    loss = run_b8b(tmp_path, excited_until=0.902, drop_reply_at=10)["reply_loss"]
+    assert loss["missing"] == 1 and loss["board_no_reply"] == 0 and loss["lost_in_transit"] == 1
+    # Not answered by the board (no P5): located at the request's P1 time.
+    loss = run_b8b(tmp_path, excited_until=0.902, drop_reply_at=10, board_skip=10)["reply_loss"]
+    assert loss["missing"] == 1 and loss["board_no_reply"] == 1 and loss["lost_in_transit"] == 0
+    assert loss["board_no_reply_events"][0]["t_s"] == pytest.approx(0.05 + 0.02 * 10 + 0.002, abs=1e-4)
 
 
 class FakeAD2:
@@ -305,3 +315,24 @@ def test_hiz_precheck():
     assert commands.hiz_precheck(cfg, FakeAD2(1.82))["ok"]
     bad = commands.hiz_precheck(cfg, FakeAD2(-0.02))  # e.g. Scope 1- on OUT1B, or energized
     assert not bad["ok"] and "aborted" in bad["detail"]
+
+
+def test_scope_offset_detects_silent_gap():
+    cfg = default_cfg()
+    rng = np.random.default_rng(8)
+    t_edges = np.cumsum(rng.uniform(40e-6, 70e-6, 40000))
+    dur = 2.0
+    n = int(dur * DIG_RATE)
+    toggles = np.zeros(n, np.int64)
+    idx = (t_edges * DIG_RATE).astype(int)
+    toggles[idx[idx < n]] = 1
+    level = ((np.cumsum(toggles) % 2).astype(np.uint32) << cfg.probe_dio[0])
+    t_a = np.arange(int(dur * ANA_RATE)) / ANA_RATE
+    p0_a = (np.searchsorted(t_edges, t_a) % 2) * 3.3
+    # The Scope drops 8192 samples at 1.8 s without reporting it (90 % of the edges still match).
+    cut = int(1.8 * ANA_RATE)
+    p0_a = np.concatenate((p0_a[:cut], p0_a[cut + 8192:]))
+    cap = Capture(digital=analyze.segments_from_samples(level, DIG_RATE), analog_rate=ANA_RATE,
+                  analog={1: np.zeros(p0_a.size), 2: p0_a.astype(float)})
+    with pytest.raises(commands.ScopeGapError):
+        commands.scope_offset(cfg, cap)

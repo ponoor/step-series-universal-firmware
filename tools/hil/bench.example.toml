@@ -78,10 +78,14 @@ sine_period = 2.0       # seconds
 position_report_ms = 20
 
 [brake]
-# Brake scenarios (hil.py brake).
-digital_rate = 1e5
-# 1 MS/s loses samples together with Digital In; 500 kS/s is clean (Task 3).
-analog_rate = 5e5
+# Brake scenarios (hil.py brake). 1 MHz: P4 pulses are about 10 us and are missed at
+# 100 kHz.
+digital_rate = 1e6
+# Two Scope channels (OUT1A, P0). At 500 kS/s with Digital In at 1 MHz, the Scope lost
+# samples in 4 of 10 recordings of 6 s (2 reported, 2 silent buffer drops); at 200 kS/s
+# none in 10 (Task 5). The excitation is then judged mostly by clamp_v: the PWM pulses
+# (under 3 us at KVAL 16) are only partly sampled.
+analog_rate = 2e5
 transition_ms = 100
 # Allowed brake output delay added to transition_ms for INV-2.
 latency_allowance_ms = 30

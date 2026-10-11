@@ -170,6 +170,18 @@ def find_selftest(pulses: dict[int, tuple[np.ndarray, np.ndarray]], n_probes: in
     return None
 
 
+def match_fraction(t_a: np.ndarray, t_b: np.ndarray, d: float, tolerance: float) -> float:
+    """Fraction of the edges t_a - d that have an edge of t_b within tolerance."""
+    t_a = np.asarray(t_a, float)
+    t_b = np.sort(np.asarray(t_b, float))
+    if t_a.size == 0 or t_b.size < 2:
+        return 0.0
+    shifted = t_a - d
+    idx = np.clip(np.searchsorted(t_b, shifted), 1, t_b.size - 1)
+    nearest = np.minimum(np.abs(t_b[idx] - shifted), np.abs(t_b[idx - 1] - shifted))
+    return float(np.mean(nearest <= tolerance))
+
+
 def estimate_offset(t_a: np.ndarray, t_b: np.ndarray, tolerance: float, max_offset: float) -> tuple[float, int]:
     """Offset d such that the edges t_a - d line up with the edges t_b (same signal seen
     by two instruments). Returns (d, number of matched edges)."""

@@ -382,7 +382,7 @@ class AD2:
             api.dwf_digital_in_configure(h, 0, 1)
         if self._ana is not None:
             api.dwf_analog_in_configure(h, 0, 1)
-        self._wait_armed(api, h)
+        self._wait_armed(api, h, already_triggered_ok=analog_trigger is not None)
 
         rec = Recording(self, duration)
         if analog_trigger is None:
@@ -399,11 +399,16 @@ class AD2:
     def record(self, duration: float, **kwargs) -> Capture:
         return self.start_recording(duration, **kwargs).wait()
 
-    def _wait_armed(self, api, h, timeout: float = 2.0) -> None:
+    def _wait_armed(self, api, h, timeout: float = 2.0, already_triggered_ok: bool = False) -> None:
+        """Waits until the instruments wait for their trigger. With a signal trigger the
+        trigger may already have come (the PC trigger never comes by itself)."""
+        ok_states = {api.STATE_ARMED}
+        if already_triggered_ok:
+            ok_states |= {api.STATE_TRIGGERED, api.STATE_DONE}
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            dig_ok = self._dig is None or api.dwf_digital_in_status(h, 0) == api.STATE_ARMED
-            ana_ok = self._ana is None or api.dwf_analog_in_status(h, 0) == api.STATE_ARMED
+            dig_ok = self._dig is None or api.dwf_digital_in_status(h, 0) in ok_states
+            ana_ok = self._ana is None or api.dwf_analog_in_status(h, 0) in ok_states
             if dig_ok and ana_ok:
                 return
             time.sleep(0.005)

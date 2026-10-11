@@ -54,6 +54,8 @@ These changes are visible to OSC clients.
 ### Added
 
 - USB serial command `p`: prints timing statistics (loop, OSC receive, servo update, status check, servo interval, OSC messages dispatched by pattern matching or not matched) and resets them.
+- STEP800: timing probes on spare pins, enabled with the `HIL_PROBE` build flag (no effect on normal builds).
+- `tools/hil/`: a hardware-in-the-loop test bench using Digilent Analog Discovery 2.
 
 ### Fixed
 

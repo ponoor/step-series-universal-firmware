@@ -26,6 +26,11 @@ port = ""
 [motor]
 # Motor (1-8) connected to the test axis.
 test_axis = 1
+# The bench assumes that no motor (and no brake) is connected: only OUT1A of the test
+# axis goes to Scope 1. The excitation detection ([excitation]) relies on this: a
+# turning motor would add back-EMF to the floating OUT1A and could read as excited.
+# If a motor is connected, review the excitation detection before trusting INV-1/2.
+motor_connected = false
 
 [ad2]
 # Path of the WaveForms runtime. Empty: /Library/Frameworks/dwf.framework/dwf, then
@@ -96,6 +101,10 @@ hysteresis_v = 1.0
 window_ms = 1.0
 min_edges = 10
 clamp_v = 0.9
+# Before each brake scenario (brake engaged, motor HiZ) the median of OUT1A must be in
+# this range, or the scenario is aborted as a wiring problem. Task 3 measured HiZ medians
+# of 1.81-1.83 V (p1-p99 within 0.01 V).
+hiz_median_v = [1.5, 2.1]
 
 [sync]
 # Scope start minus Digital In start, in seconds, used only when ad2.scope.p0_ref = 0.

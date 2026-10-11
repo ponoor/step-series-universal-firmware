@@ -560,6 +560,12 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
     _run_steps(sc.COMMON_SETUP + scenario.extra_setup, values, link, ad2, None)
     time.sleep(0.3)
 
+    pre = hiz_precheck(cfg, ad2)
+    if not pre["ok"]:
+        return {"id": scenario.id, "title": scenario.title, "expect": scenario.expect,
+                "expected_failures": scenario.expected_failures, "outcome": "ABORTED",
+                "precheck": pre, "error": pre["detail"]}
+
     probe = cfg.probe_dio
     brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
     out1a = int(cfg.ad2["scope"]["out1a"])
@@ -593,7 +599,23 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
         time.sleep(0.1)
         cap = rec.stop()
     cap.save(out / f"{scenario.id}_capture.npz")
-    return analyze_scenario(cfg, scenario, cap, link, log, transition, latency, out)
+    res = analyze_scenario(cfg, scenario, cap, link, log, transition, latency, out)
+    res["precheck"] = pre
+    return res
+
+
+def hiz_precheck(cfg: Config, ad2: AD2) -> dict:
+    """The test axis is HiZ with the brake engaged at the start of a scenario: the median
+    of OUT1A must be the floating level ([excitation] hiz_median_v), else the wiring is
+    suspect and the scenario must not be judged."""
+    lo, hi = (float(v) for v in cfg.section("excitation")["hiz_median_v"])
+    ch = int(cfg.ad2["scope"]["out1a"])
+    cap = ad2.record(0.2, analog_channels=(ch,), analog_rate=float(cfg.section("brake")["analog_rate"]))
+    median = float(np.median(cap.analog[ch])) if cap.analog[ch].size else float("nan")
+    ok = cap.ok and lo <= median <= hi
+    detail = (f"OUT1A median {median:.3f} V at the start (HiZ, brake engaged), expected {lo}-{hi} V"
+              + ("" if ok else ": check the Scope 1 wiring; scenario aborted"))
+    return {"ok": ok, "median_v": median, "range_v": [lo, hi], "detail": detail}
 
 
 def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: OscLink, log: list,
@@ -672,6 +694,7 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
                        "brake_change_ms": (nxt - t) * 1e3 if nxt is not None and nxt - t < 1.0 else None,
                        "first_p6_ms": (p6_after[0] - t) * 1e3 if p6_after.size else None})
     overlaps = analyze.intersect(released.intervals(False), excited.intervals(True))
+    res["reply_loss"] = reply_loss(cfg, cap, tx, p1, link, "/getPosition", "/position")
     res["delays"] = delays
     res["overlaps_ms"] = [[round(a, 4), round((b - a) * 1e3, 2)] for a, b in overlaps]
 
@@ -686,9 +709,36 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     return res
 
 
+def reply_loss(cfg: Config, cap: Capture, tx: list, p1: np.ndarray, link, request: str, reply: str) -> dict:
+    """Requests of the test axis without a reply before the next request. For each, whether
+    the board sent anything (P5 pulse) between this request's P1 rise and the next one."""
+    axis = cfg.test_axis
+    p5 = analyze.pulse_widths(analyze.bit_edges(cap.digital, cfg.probe_dio[5]))
+    rx = sorted(e.t_ns for e in link.entries("rx", cap.host_trigger_ns, cap.host_stop_ns + 10**9)
+                if e.address == reply and int(e.args[0]) == axis)
+    rx = np.array(rx, dtype=np.int64)
+    idx = [i for i, e in enumerate(tx) if e.address == request and e.args and int(e.args[0]) == axis]
+    events = []
+    for k, i in enumerate(idx):
+        t_from = tx[i].t_ns
+        t_to = tx[idx[k + 1]].t_ns if k + 1 < len(idx) else cap.host_stop_ns + 10**9
+        if np.any((rx >= t_from) & (rx < t_to)):
+            continue
+        a_from = float(p1[i])
+        a_to = float(p1[i + 1]) if i + 1 < len(p1) else cap.digital.duration
+        sel = (p5[0] >= a_from) & (p5[0] < a_to)
+        events.append({"t_s": a_from, "p5_pulses": int(sel.sum()),
+                       "p5_width_us": [round(w * 1e6, 1) for w in p5[1][sel]]})
+    return {"request": request, "requests": len(idx), "missing": len(events), "events": events}
+
+
 def cmd_brake(cfg: Config, args) -> int:
     chosen = [sc.get(args.scenario)] if args.scenario else list(sc.SCENARIOS)
     out = new_result_dir("brake" if not args.scenario else f"brake_{chosen[0].id}")
+    motor_connected = bool(cfg.raw["motor"].get("motor_connected", False))
+    if motor_connected:
+        print("WARNING: motor.motor_connected = true. The excitation detection was set up without a "
+              "motor; review [excitation] before trusting INV-1 / INV-2.")
     results = []
     with ExitStack() as stack:
         ad2 = stack.enter_context(open_ad2(cfg))
@@ -699,15 +749,19 @@ def cmd_brake(cfg: Config, args) -> int:
             results.append(run_scenario(cfg, scenario, ad2, diag, link, out))
         diag.reboot()
     link.save_log(out / "osc_log.jsonl")
-    write_json(out / "summary.json", {"axis": cfg.test_axis, "brake": cfg.section("brake"), "scenarios": results})
+    write_json(out / "summary.json", {"axis": cfg.test_axis, "motor_connected": motor_connected,
+                                      "brake": cfg.section("brake"), "excitation": cfg.section("excitation"),
+                                      "scenarios": results})
     rows = []
     for r in results:
         exp = "-" if r.get("as_expected") is None else ("yes" if r["as_expected"] else "NO")
         detail = r.get("error") or ", ".join(sorted(r.get("failed", []))) or "all checks passed"
+        if r.get("reply_loss", {}).get("missing"):
+            detail += f" ({r['reply_loss']['missing']} replies missing)"
         rows.append([r["id"], r["expect"], r["outcome"], exp, detail])
     print_table(["scenario", "expect", "outcome", "as expected", "failed checks"], rows)
     print(f"results: {out}")
-    return 0 if all(r.get("as_expected") is not False and r["outcome"] != "ERROR" for r in results) else 1
+    return 0 if all(r.get("as_expected") is not False and r["outcome"] not in ("ERROR", "ABORTED") for r in results) else 1
 
 
 # --------------------------------------------------------------------------------------

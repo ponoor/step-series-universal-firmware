@@ -52,7 +52,7 @@ def make_capture(cfg, duration, p1_times, brake_high, excited, host_trigger_ns=1
     return cap
 
 
-def run_b8b(tmp_path, excited_until):
+def run_b8b(tmp_path, excited_until, drop_reply_at=None):
     """B8b: /activate 1 at 0.3 s, /hardHiZ at 0.8 s (AD2 time = host time + 2 ms)."""
     cfg = default_cfg()
     scenario = sc.get("B8b")
@@ -70,7 +70,8 @@ def run_b8b(tmp_path, excited_until):
     for k in range(70):
         h = 0.05 + 0.02 * k
         entries.append(LogEntry(t0 + int(h * 1e9), "tx", "/getPosition", (1,)))
-        entries.append(LogEntry(t0 + int((h + 0.001) * 1e9), "rx", "/position", (1, 1234)))
+        if k != drop_reply_at:
+            entries.append(LogEntry(t0 + int((h + 0.001) * 1e9), "rx", "/position", (1, 1234)))
     entries.sort(key=lambda e: e.t_ns)
     p1 = [(e.t_ns - t0) / 1e9 + delay for e in entries if e.direction == "tx"]
     a_t, h_t = 0.3 + delay, 0.8 + delay
@@ -279,3 +280,28 @@ def test_scope_offset_from_p0():
     shift, info = commands.scope_offset(cfg, cap)
     assert info["method"] == "p0_ref"
     assert shift == pytest.approx(-150e-6, abs=10e-6)
+
+
+def test_reply_loss(tmp_path):
+    res = run_b8b(tmp_path, excited_until=0.8 + 0.002 + 0.1)
+    assert res["reply_loss"]["requests"] == 70 and res["reply_loss"]["missing"] == 0
+    res = run_b8b(tmp_path, excited_until=0.8 + 0.002 + 0.1, drop_reply_at=10)
+    loss = res["reply_loss"]
+    assert loss["missing"] == 1
+    assert loss["events"][0]["t_s"] == pytest.approx(0.05 + 0.02 * 10 + 0.002, abs=1e-4)
+    assert loss["events"][0]["p5_pulses"] == 0  # the synthetic capture has no P5 pulses
+
+
+class FakeAD2:
+    def __init__(self, volts):
+        self.volts = volts
+
+    def record(self, duration, analog_channels=(), analog_rate=None, **kw):
+        return Capture(analog_rate=analog_rate, analog={analog_channels[0]: np.full(100, self.volts)})
+
+
+def test_hiz_precheck():
+    cfg = default_cfg()
+    assert commands.hiz_precheck(cfg, FakeAD2(1.82))["ok"]
+    bad = commands.hiz_precheck(cfg, FakeAD2(-0.02))  # e.g. Scope 1- on OUT1B, or energized
+    assert not bad["ok"] and "aborted" in bad["detail"]

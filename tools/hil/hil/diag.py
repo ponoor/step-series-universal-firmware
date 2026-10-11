@@ -102,7 +102,9 @@ class SerialDiag:
     # --- commands ---
     def perf(self) -> tuple[dict, str]:
         """'p': prints and resets the timing statistics."""
-        text = self.command("p", until=r"oscNotMatched\s+\d+")
+        # The counters after servoInterval exist only in the phase 1 firmware.
+        text = self.command("p", until=r"servoInterval\s+max.*n \d+")
+        text += self.read_available(idle=0.2, timeout=1.0)
         return parse_perf(text), text
 
     def probe_selftest(self) -> tuple[dict[int, str] | None, str]:

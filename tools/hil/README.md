@@ -75,6 +75,10 @@ STEP800_R1 (schematic: `ponoor/STEP800`, `hardware/step800_r1_0_0_schematics.pdf
 | 3.3 V (J3-2) / GND | J3 | - | - | Scope 2+ / 2- | power-up test only (move Scope 2+ here) |
 | GND | J3-1 / J2-10 | - | - | GND | |
 
+- **No motor and no brake are connected** (`motor.motor_connected = false`): only OUT1A
+  of the test axis goes to Scope 1. The excitation detection was set up for this; a
+  turning motor adds back-EMF to the floating OUT1A and could read as excited. If you
+  connect a motor, review `[excitation]` (and the HiZ pre-check range) first.
 - Brake output polarity: HIGH = released, LOW = engaged.
 - Home switch connector: 1 = GND, 2 = SW, 3 = +5 V. **Leave pin 3 unconnected.**
 - J2 pin n is the brake output of motor n (measured with `selftest`).
@@ -150,6 +154,15 @@ The console shows a summary table and the result directory only.
 | INV-1 | The brake is never released while the motor is not excited | none (resolution: one excitation window) |
 | INV-2 | Brake engaged + motor excited only around a brake transition | `transition_ms` + `latency_allowance_ms` per transition |
 | INV-3 | The position does not change while the brake is engaged | none |
+
+Before the steps of each scenario (brake engaged, motor HiZ after the common setup), the
+median of OUT1A must be in `[excitation] hiz_median_v` (the floating level, about 1.8 V).
+Otherwise the scenario is reported as ABORTED (wiring problem) and not judged.
+
+For every `/getPosition` without a `/position` reply before the next request,
+`summary.json` records the time and the P5 (UDP send) pulses between that request and the
+next one, so a reply that the board never sent can be told from one lost on the way
+(`reply_loss`).
 
 Scenarios can exempt an invariant over a range (e.g. INV-1 after `/free`, which releases
 the brake with the motor HiZ on purpose) and add checks that a signal keeps a value.

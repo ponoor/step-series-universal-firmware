@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("powerup", help="record the brake outputs at power-up (needs a human)")
     s.add_argument("--repeat", type=int, default=5)
-    s.add_argument("--duration", type=float, default=3.0, help="seconds after the 3.3 V rise")
+    s.add_argument("--duration", type=float, default=10.0, help="seconds after the 3.3 V rise")
 
     s = sub.add_parser("compare", help="compare two timing results")
     s.add_argument("result_dirs", nargs=2)

@@ -9,6 +9,7 @@
 #include "oscRouter.h"
 #include "perfStats.h"
 #include "resetCause.h"
+#include "hilProbe.h"
 
 // Receive buffer with guard bytes for oscRouteMatches(), see oscRouter.h
 static uint8_t oscRxStorage[OSC_RX_GUARD_BEFORE + OSC_RX_BUFFER_SIZE + OSC_RX_GUARD_AFTER];
@@ -36,6 +37,7 @@ bool OSCMsgReceive()
     int size;
     if ((size = Udp.parsePacket()) > 0)
     {
+        PROBE_HIGH(1);
         if (size > OSC_RX_BUFFER_SIZE)
         {
             // Too large: the rest of the packet is discarded by the next parsePacket().
@@ -69,6 +71,7 @@ bool OSCMsgReceive()
         {
             sendOneDatum("/error/osc", "OscSyntaxError");
         }
+        PROBE_LOW(1);
         return true;
     }
     return false;
@@ -2883,6 +2886,7 @@ void activate(uint8_t motorId, bool state)
 #endif
             stepper[motorId].hardStop();
             brakeStatus[motorId] = BRAKE_DISENGAGE_WAITING;
+            PROBE_PULSE(6);
             brakeTransitionTrigTime[motorId] = millis();
         }
         else if ((brakeStatus[motorId] == BRAKE_DISENGAGED) || (brakeStatus[motorId] == BRAKE_DISENGAGE_WAITING))
@@ -2895,6 +2899,7 @@ void activate(uint8_t motorId, bool state)
             {
                 setBrake(motorId, LOW);
                 brakeStatus[motorId] = BRAKE_MOTORHIZ_WAITING;
+                PROBE_PULSE(6);
                 isServoMode[motorId] = false;
                 clearHomingStatus(motorId);
                 brakeTransitionTrigTime[motorId] = millis();
@@ -2930,6 +2935,7 @@ void free(uint8_t motorId)
         setBrake(motorId, HIGH);
         stepper[motorId].hardHiZ();
         brakeStatus[motorId] = BRAKE_DISENGAGED;
+        PROBE_PULSE(6);
         isServoMode[motorId] = false;
         clearHomingStatus(motorId);
     }

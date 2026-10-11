@@ -7,6 +7,7 @@
 #include <strings.h>
 #include "perfStats.h"
 #include "resetCause.h"
+#include "hilProbe.h"
 
 String configVersionCompareString[5] = {
 	F("CONFIG_VERSION_UNDEFINED"),
@@ -57,6 +58,11 @@ void diagnosisCommand(uint8_t inByte) {
 	case 'p':
 		perfStatsPrint();
 		break;
+#ifdef HIL_PROBE
+	case 'P':
+		hilProbeSelfTest();
+		break;
+#endif
 	default:
 		break;
 	}
@@ -76,6 +82,9 @@ void printMenu() {
 	dbgPrint("F<filename>: set save filename\n");
 	dbgPrint("R: reboot board\n");
 	dbgPrint("p: print timing stats [us] and reset them\n");
+#ifdef HIL_PROBE
+	dbgPrint("P: HIL probe self-test (ch + 1 pulses on P0-P6)\n");
+#endif
 }
 
 void testMotion() {

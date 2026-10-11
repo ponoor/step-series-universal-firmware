@@ -4,6 +4,7 @@
 
 #include "utils.h"
 #include "oscListeners.h"
+#include "hilProbe.h"
 #include <stdarg.h>
 #include <utility/w5100.h>
 
@@ -262,11 +263,13 @@ void updateBrake(uint32_t _currentTimeMillis) {
                 if ((uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i]) {
                     setBrake(i, HIGH);
                     brakeStatus[i] = BRAKE_DISENGAGED;
+                    PROBE_PULSE(6);
                 }
             } else if (brakeStatus[i] == BRAKE_MOTORHIZ_WAITING) {
                 if ((uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i]) {
                     stepper[i].hardHiZ();
                     brakeStatus[i] = BRAKE_ENGAGED;
+                    PROBE_PULSE(6);
                 }
             }
         }
@@ -327,9 +330,11 @@ void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
         }
         return;
     }
+    PROBE_HIGH(5);
     Udp.beginPacket(ip, port);
     Udp.write(oscTxBuffer, len);
     Udp.endPacket();
+    PROBE_LOW(5);
     turnOnTXL();
 }
 

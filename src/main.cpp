@@ -21,6 +21,7 @@
 #include "perfStats.h"
 #include "packedTransfer.h"
 #include "resetCause.h"
+#include "hilProbe.h"
 
 const String productName = PRODUCT_NAME;
 const char *firmwareName = FIRMWARE_NAME;
@@ -43,6 +44,7 @@ void setup()
 {
     resetCause = readResetCause(&resetCauseRaw); // before any other initialization
     SerialUSB.begin(9600);
+    HIL_PROBE_INIT();
     // while (!SerialUSB); // DEBUG
 
     pinMode(ledPin, OUTPUT);
@@ -403,6 +405,7 @@ bool updateServo(uint32_t currentTimeMillis)
     static uint32_t lastServoUpdateMicros = 0;
     if ((uint32_t)(currentTimeMillis - lastServoUpdateTime) < servoPollPeriod)
         return false;
+    PROBE_HIGH(2);
 
     const uint32_t nowMicros = micros();
     if (lastServoUpdateMicros != 0)
@@ -437,11 +440,13 @@ bool updateServo(uint32_t currentTimeMillis)
         }
     }
     lastServoUpdateTime = currentTimeMillis;
+    PROBE_LOW(2);
     return true;
 }
 
 void loop()
 {
+    PROBE_TOGGLE(0);
     static uint32_t lastLoopStartMicros = 0;
     const uint32_t loopStartMicros = micros();
     if (lastLoopStartMicros != 0)
@@ -464,7 +469,9 @@ void loop()
         if (reportPositionList)
             updatePositionReportList(currentTimeMillis);
         uint32_t t0 = micros();
+        PROBE_HIGH(3);
         checkStatus();
+        PROBE_LOW(3);
         perfAdd(perfStats.checkStatus, micros() - t0);
         updateRxTxLed(currentTimeMillis);
         uint8_t t = getMyId();

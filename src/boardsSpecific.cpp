@@ -1,5 +1,6 @@
 #include "boardsSpecific.h"
 #include "packedTransfer.h"
+#include "hilProbe.h"
 #include "wiring_private.h" // pinPeripheral() function
 
 #if defined(STEP400_R1) || defined(STEP400_PROTO_R4) || defined(STEP400_PROTO_R3)
@@ -114,10 +115,12 @@ uint8_t getMyId()
         _id |= (!digitalRead(dipSwPin[i])) << i;
     }
 #elif defined(STEP800_R1)
+    PROBE_HIGH(4);
     digitalWrite(PIN_DIPSW_LATCH, LOW);
     digitalWrite(PIN_DIPSW_LATCH, HIGH);
     shiftRegisterSPI.transfer(brakeOut);
     _id = shiftRegisterSPI.transfer(0);
+    PROBE_LOW(4);
     _id = ~_id;
 #elif defined(STEP800_PROTO_R3)
     byte shiftInByte[3];

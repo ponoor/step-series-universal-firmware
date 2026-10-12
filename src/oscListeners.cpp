@@ -165,18 +165,28 @@ void getConfigRegister(OscMessage &msg)
 }
 
 // reset the motor driver chip and setup it
+// Not while the brake is released or in transition: the driver would go HiZ.
+static void resetMotorDriverChecked(uint8_t motorId)
+{
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId] && !brakeCommand(motorId, BRAKE_CMD_RESET_DRIVER).execute)
+        return; // CommandIgnored
+#endif
+    cancelPendingMotion(motorId);
+    resetMotorDriver(motorId + MOTOR_ID_FIRST);
+}
 void resetMotorDriver(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        resetMotorDriver(motorID);
+        resetMotorDriverChecked(motorID - MOTOR_ID_FIRST);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            resetMotorDriver(i + MOTOR_ID_FIRST);
+            resetMotorDriverChecked(i);
         }
     }
 }
@@ -2215,6 +2225,7 @@ void run(uint8_t motorID, float absSpeed, bool dir)
         motorID -= MOTOR_ID_FIRST;
         if (checkMotionStartConditions(motorID, dir))
         {
+            commitMotionStart(motorID);
             stepper[motorID].run(dir, absSpeed);
         }
     }
@@ -2224,6 +2235,7 @@ void run(uint8_t motorID, float absSpeed, bool dir)
         {
             if (checkMotionStartConditions(i, dir))
             {
+                commitMotionStart(i);
                 stepper[i].run(dir, absSpeed);
             }
         }
@@ -2256,6 +2268,7 @@ void runRaw(uint8_t motorID, bool dir, int32_t speed)
         motorID -= MOTOR_ID_FIRST;
         if (checkMotionStartConditions(motorID, dir))
         {
+            commitMotionStart(motorID);
             stepper[motorID].runRaw(dir, speed);
         }
     }
@@ -2265,6 +2278,7 @@ void runRaw(uint8_t motorID, bool dir, int32_t speed)
         {
             if (checkMotionStartConditions(i, dir))
             {
+                commitMotionStart(i);
                 stepper[i].runRaw(dir, speed);
             }
         }
@@ -2299,6 +2313,7 @@ void move(uint8_t motorID, bool newDir, int32_t steps)
         motorID -= MOTOR_ID_FIRST;
         if (checkMotionStartConditions(motorID, newDir, false))
         {
+            commitMotionStart(motorID);
             stepper[motorID].move(newDir, steps);
         }
     }
@@ -2308,6 +2323,7 @@ void move(uint8_t motorID, bool newDir, int32_t steps)
         {
             if (checkMotionStartConditions(i, newDir, false))
             {
+                commitMotionStart(i);
                 stepper[i].move(newDir, steps);
             }
         }
@@ -2358,6 +2374,7 @@ void goTo(uint8_t motorID, int32_t pos)
         newDir = checkGoToDirection(motorId, pos);
         if (checkMotionStartConditions(motorId, newDir))
         {
+            commitMotionStart(motorId);
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goTo(pos);
@@ -2374,6 +2391,7 @@ void goTo(uint8_t motorID, int32_t pos)
             newDir = checkGoToDirection(i, pos);
             if (checkMotionStartConditions(i, newDir))
             {
+                commitMotionStart(i);
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goTo(pos);
@@ -2406,6 +2424,7 @@ void goToDir(uint8_t motorID, bool dir, int32_t pos)
         uint8_t motorId = motorID - MOTOR_ID_FIRST;
         if (checkMotionStartConditions(motorId, dir, false))
         {
+            commitMotionStart(motorId);
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goToDir(dir, pos);
@@ -2422,6 +2441,7 @@ void goToDir(uint8_t motorID, bool dir, int32_t pos)
         {
             if (checkMotionStartConditions(i, dir, false))
             {
+                commitMotionStart(i);
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goToDir(dir, pos);
@@ -2461,18 +2481,17 @@ void homing(uint8_t motorId)
     }
     else
     {
-        bHoming[motorId] = true;
+        // goUntil() / releaseSw() set homingStatus when the command is sent.
+        bool started;
         if (homeSwState[motorId])
-        {
-            releaseSw(motorId, 0, !homingDirection[motorId]);
-            homingStatus[motorId] = HOMING_RELEASESW;
-        }
+            started = releaseSw(motorId, 0, !homingDirection[motorId]);
         else
+            started = goUntil(motorId, 0, homingDirection[motorId], homingSpeed[motorId]);
+        if (started)
         {
-            goUntil(motorId, 0, homingDirection[motorId], homingSpeed[motorId]);
-            homingStatus[motorId] = HOMING_GOUNTIL;
+            bHoming[motorId] = true;
+            sendTwoData("/homingStatus", motorId + MOTOR_ID_FIRST, homingStatus[motorId]);
         }
-        sendTwoData("/homingStatus", motorId + MOTOR_ID_FIRST, homingStatus[motorId]);
     }
 }
 void homing(OscMessage &msg)
@@ -2492,16 +2511,24 @@ void homing(OscMessage &msg)
     }
 }
 
-void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec) {
-    if (isBrakeDisEngaged(motorId)) {
-        if (homeSwState[motorId]) {
-            sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
-        } else {
-            stepper[motorId].goUntil(action, dir, stepsPerSec);
-            homingStatus[motorId] = HOMING_GOUNTIL;
-            homingStartTime[motorId] = millis();
-        }
+// Start conditions of /goUntil and /goUntilRaw. Commits the start when they are met.
+static bool goUntilStartConditions(uint8_t motorId) {
+    if (!brakeAllowsMotion(motorId))
+        return false;
+    if (homeSwState[motorId]) {
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
+        return false;
     }
+    commitMotionStart(motorId);
+    return true;
+}
+bool goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec) {
+    if (!goUntilStartConditions(motorId))
+        return false;
+    stepper[motorId].goUntil(action, dir, stepsPerSec);
+    homingStatus[motorId] = HOMING_GOUNTIL;
+    homingStartTime[motorId] = millis();
+    return true;
 }
 void goUntil(OscMessage &msg)
 {
@@ -2531,37 +2558,31 @@ void goUntilRaw(OscMessage& msg) {
     speed = abs(speed);
     if(isCorrectMotorId(motorID)) {
         motorID -= MOTOR_ID_FIRST;
-        if (isBrakeDisEngaged(motorID)) {
-            if (homeSwState[motorID]) {
-                sendCommandError(motorID + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
-            } else {
-                stepper[motorID].goUntilRaw(action, dir, speed);
-                homingStatus[motorID] = HOMING_GOUNTIL;
-                homingStartTime[motorID] = millis();
-            }
+        if (goUntilStartConditions(motorID)) {
+            stepper[motorID].goUntilRaw(action, dir, speed);
+            homingStatus[motorID] = HOMING_GOUNTIL;
+            homingStartTime[motorID] = millis();
         }
     }
     else if (motorID == MOTOR_ID_ALL) {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
-            if (isBrakeDisEngaged(i)) {
-                if (homeSwState[i]) {
-                    sendCommandError(i + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
-                } else {
-                    stepper[i].goUntilRaw(action, dir, speed);
-                    homingStatus[i] = HOMING_GOUNTIL;
-                    homingStartTime[i] = millis();
-                }
+            if (goUntilStartConditions(i)) {
+                stepper[i].goUntilRaw(action, dir, speed);
+                homingStatus[i] = HOMING_GOUNTIL;
+                homingStartTime[i] = millis();
             }
         }
     }
 }
 
-void releaseSw(uint8_t motorId, bool action, bool dir) {
-    if (isBrakeDisEngaged(motorId)) {
-        stepper[motorId].releaseSw(action, dir);
-        homingStatus[motorId] = HOMING_RELEASESW;
-        homingStartTime[motorId] = millis();
-    }
+bool releaseSw(uint8_t motorId, bool action, bool dir) {
+    if (!brakeAllowsMotion(motorId))
+        return false;
+    commitMotionStart(motorId);
+    stepper[motorId].releaseSw(action, dir);
+    homingStatus[motorId] = HOMING_RELEASESW;
+    homingStartTime[motorId] = millis();
+    return true;
 }
 void releaseSw(OscMessage& msg) {
     uint8_t motorID = getInt(msg, 0);
@@ -2588,6 +2609,7 @@ void goHome(OscMessage &msg)
         dir = checkGoToDirection(motorId, 0);
         if (checkMotionStartConditions(motorId, dir, false))
         {
+            commitMotionStart(motorId);
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goHome();
@@ -2603,6 +2625,7 @@ void goHome(OscMessage &msg)
             dir = checkGoToDirection(i, 0);
             if (checkMotionStartConditions(i, dir, false))
             {
+                commitMotionStart(i);
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goHome();
@@ -2623,6 +2646,7 @@ void goMark(OscMessage &msg)
         dir = checkGoToDirection(motorId, stepper[motorId].getMark());
         if (checkMotionStartConditions(motorId, dir, false))
         {
+            commitMotionStart(motorId);
             if (clearBusyForGoTo(motorId))
             {
                 stepper[motorId].goMark();
@@ -2638,6 +2662,7 @@ void goMark(OscMessage &msg)
             dir = checkGoToDirection(i, stepper[i].getMark());
             if (checkMotionStartConditions(i, dir, false))
             {
+                commitMotionStart(i);
                 if (clearBusyForGoTo(i))
                 {
                     stepper[i].goMark();
@@ -2695,22 +2720,23 @@ void resetPos(OscMessage &msg)
         }
     }
 }
+void executeSoftStop(uint8_t motorId)
+{
+    cancelPendingMotion(motorId);
+    if (brakeAllowsStop(motorId))
+        stepper[motorId].softStop();
+}
 void softStop(uint8_t motorID)
 {
     if (isCorrectMotorId(motorID))
     {
-        uint8_t motorId = motorID - MOTOR_ID_FIRST;
-        isServoMode[motorId] = false;
-        clearHomingStatus(motorId);
-        stepper[motorId].softStop();
+        executeSoftStop(motorID - MOTOR_ID_FIRST);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            isServoMode[i] = false;
-            clearHomingStatus(i);
-            stepper[i].softStop();
+            executeSoftStop(i);
         }
     }
 }
@@ -2725,22 +2751,23 @@ void combinedSoftStop(OscMessage &msg)
     softStop(motorID[0]);
     softStop(motorID[1]);
 }
+void executeHardStop(uint8_t motorId)
+{
+    cancelPendingMotion(motorId);
+    if (brakeAllowsStop(motorId))
+        stepper[motorId].hardStop();
+}
 void hardStop(uint8_t motorID)
 {
     if (isCorrectMotorId(motorID))
     {
-        uint8_t motorId = motorID - MOTOR_ID_FIRST;
-        isServoMode[motorId] = false;
-        clearHomingStatus(motorId);
-        stepper[motorId].hardStop();
+        executeHardStop(motorID - MOTOR_ID_FIRST);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            isServoMode[i] = false;
-            clearHomingStatus(i);
-            stepper[i].hardStop();
+            executeHardStop(i);
         }
     }
 }
@@ -2758,20 +2785,12 @@ void combinedHardStop(OscMessage &msg)
 }
 void executeSoftHiZ(uint8_t motorId)
 {
-    isServoMode[motorId] = false;
-    clearHomingStatus(motorId);
+    cancelPendingMotion(motorId);
 #ifdef HAVE_BRAKE
     if (electromagnetBrakeEnable[motorId])
     {
-        if (motorStatus[motorId] == 0)
-        { // motor stopped
-            activate(motorId, false);
-        }
-        else
-        {
-            stepper[motorId].softStop();
-            bBrakeDecWaiting[motorId] = true;
-        }
+        // Decelerates (SoftStop) and engages the brake once the poll reads the stop.
+        brakeCommand(motorId, BRAKE_CMD_SOFT_HIZ);
     }
     else
 #endif
@@ -2808,19 +2827,13 @@ void combinedSoftHiZ(OscMessage &msg)
 }
 void executeHardHiZ(uint8_t motorId)
 {
-    isServoMode[motorId] = false;
-    clearHomingStatus(motorId);
+    cancelPendingMotion(motorId);
 #ifdef HAVE_BRAKE
     if (electromagnetBrakeEnable[motorId])
     {
-        // Stop the motor (keeping it energized) before engaging the brake, so it does not
-        // keep running during brakeTransitionDuration. Not while the brake is engaged or
-        // engaging: the motor is already HiZ or going HiZ, and hardStop() would energize it.
-        if ((brakeStatus[motorId] == BRAKE_DISENGAGED) || (brakeStatus[motorId] == BRAKE_DISENGAGE_WAITING))
-        {
-            stepper[motorId].hardStop();
-        }
-        activate(motorId, false);
+        // Stops the motor (keeping it energized) before engaging the brake, so it does not
+        // keep running during brakeTransitionDuration. Never sent to a HiZ motor.
+        brakeCommand(motorId, BRAKE_CMD_HARD_HIZ);
     }
     else
 #endif
@@ -2859,51 +2872,40 @@ void activate(uint8_t motorId, bool state)
 {
     if (electromagnetBrakeEnable[motorId])
     {
-        if (((brakeStatus[motorId] == BRAKE_ENGAGED) || (brakeStatus[motorId] == BRAKE_MOTORHIZ_WAITING)) && state)
+        if (state)
         {
-#ifdef DRIVER_POWERSTEP01
-            if (!isCurrentMode[motorId])
-#endif
+            if ((brakeStatus[motorId] == BRAKE_ENGAGED) || (brakeStatus[motorId] == BRAKE_ENGAGING))
             {
-                digitalWrite(ledPin, !digitalRead(ledPin));
-                uint8_t t = kvalRun[motorId] >> 1;
-                if (kvalHold[motorId] < t)
-                {
-                    stepper[motorId].setHoldKVAL(t);
-                    kvalHold[motorId] = t;
-                }
-            }
+                // The holding current must be able to hold the load once the brake is released.
 #ifdef DRIVER_POWERSTEP01
-            else
-            {
-                uint8_t t = tvalRun[motorId] >> 1;
-                if (tvalHold[motorId] < t)
-                {
-                    stepper[motorId].setHoldTVAL(t);
-                    tvalHold[motorId] = t;
-                }
-            }
+                if (!isCurrentMode[motorId])
 #endif
-            stepper[motorId].hardStop();
-            brakeStatus[motorId] = BRAKE_DISENGAGE_WAITING;
-            PROBE_PULSE(6);
-            brakeTransitionTrigTime[motorId] = millis();
+                {
+                    uint8_t t = kvalRun[motorId] >> 1;
+                    if (kvalHold[motorId] < t)
+                    {
+                        stepper[motorId].setHoldKVAL(t);
+                        kvalHold[motorId] = t;
+                    }
+                }
+#ifdef DRIVER_POWERSTEP01
+                else
+                {
+                    uint8_t t = tvalRun[motorId] >> 1;
+                    if (tvalHold[motorId] < t)
+                    {
+                        stepper[motorId].setHoldTVAL(t);
+                        tvalHold[motorId] = t;
+                    }
+                }
+#endif
+            }
+            brakeCommand(motorId, BRAKE_CMD_ACTIVATE);
         }
-        else if ((brakeStatus[motorId] == BRAKE_DISENGAGED) || (brakeStatus[motorId] == BRAKE_DISENGAGE_WAITING))
+        else
         {
-            if (state)
-            {                                // from /free state
-                stepper[motorId].hardStop(); // to activate the motor current
-            }
-            else
-            {
-                setBrake(motorId, LOW);
-                brakeStatus[motorId] = BRAKE_MOTORHIZ_WAITING;
-                PROBE_PULSE(6);
-                isServoMode[motorId] = false;
-                clearHomingStatus(motorId);
-                brakeTransitionTrigTime[motorId] = millis();
-            }
+            cancelPendingMotion(motorId);
+            brakeCommand(motorId, BRAKE_CMD_DEACTIVATE);
         }
     }
     else
@@ -2932,12 +2934,8 @@ void free(uint8_t motorId)
 {
     if (electromagnetBrakeEnable[motorId])
     {
-        setBrake(motorId, HIGH);
-        stepper[motorId].hardHiZ();
-        brakeStatus[motorId] = BRAKE_DISENGAGED;
-        PROBE_PULSE(6);
-        isServoMode[motorId] = false;
-        clearHomingStatus(motorId);
+        cancelPendingMotion(motorId);
+        brakeCommand(motorId, BRAKE_CMD_FREE);
     }
     else
     {
@@ -2995,19 +2993,24 @@ void enableServoMode(uint8_t motorId, bool enable)
 {
     if (enable)
     {
+        if (!brakeAllowsMotion(motorId))
+            return;
+        cancelPendingMotion(motorId);
+        commitMotionStart(motorId);
         targetPosition[motorId] = stepper[motorId].getPos();
         reportBUSY[motorId] = false;
         reportMotorStatus[motorId] = false;
         reportDir[motorId] = false;
         stepper[motorId].hardStop();
-        clearHomingStatus(motorId);
         resetServoState(motorId);
+        isServoMode[motorId] = true;
     }
     else
     {
-        stepper[motorId].softStop();
+        cancelPendingMotion(motorId);
+        if (brakeAllowsStop(motorId))
+            stepper[motorId].softStop();
     }
-    isServoMode[motorId] = enable;
 }
 void enableServoMode(OscMessage &msg)
 {

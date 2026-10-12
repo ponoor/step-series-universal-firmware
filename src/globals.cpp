@@ -35,7 +35,9 @@ const char *const commandErrorText[] = {
 #endif
     "GoUntilTimeout",
     "ReleaseSwTimeout",
-    "InServoMode"
+    "InServoMode",
+    "BrakeReleaseFailed",
+    "BrakeEngagedOnHiZ"
 };
 static_assert(sizeof(commandErrorText) / sizeof(commandErrorText[0]) == ERROR_COUNT,
               "commandErrorText must have one entry per error code");
@@ -64,9 +66,10 @@ boolean
 boolean isWaitingSendBootMsg = false;
 #ifdef HAVE_BRAKE
 uint8_t brakeOut = 0;
-uint8_t brakeStatus[NUM_OF_MOTOR]; 
+BrakeState brakeStatus[NUM_OF_MOTOR];
 uint32_t brakeTransitionTrigTime[NUM_OF_MOTOR];
-bool bBrakeDecWaiting[NUM_OF_MOTOR];
+bool brakeStatusFresh[NUM_OF_MOTOR];
+bool homingAtStartupPending[NUM_OF_MOTOR];
 #endif
 
 // Homing

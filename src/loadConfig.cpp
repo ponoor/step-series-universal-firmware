@@ -227,8 +227,9 @@ void loadConfig() {
         slewRate[i] = slewRateVal[slewRateNum[i]];
 #ifdef HAVE_BRAKE
         electromagnetBrakeEnable[i] = driverSettings_electromagnetBrakeEnable[i] | false;
-        brakeStatus[i] = 0;
-        bBrakeDecWaiting[i] = false;
+        brakeStatus[i] = BRAKE_ENGAGED;
+        brakeStatusFresh[i] = false;
+        homingAtStartupPending[i] = false;
         brakeTransitionDuration[i] = driverSettings_brakeTransitionDuration[i] | 100;
 #endif
     }

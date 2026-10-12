@@ -184,7 +184,8 @@ void checkLimitSw()
         if (limitSwState[i] != t)
         {
             limitSwState[i] = !limitSwState[i];
-            if (limitSwState[i] && (limitSwMode[i] == SW_HARD_STOP))
+            // Not to a HiZ motor: HardStop would energize it.
+            if (limitSwState[i] && (limitSwMode[i] == SW_HARD_STOP) && !HiZ[i])
             {
                 stepper[i].hardStop();
             }

@@ -105,6 +105,16 @@ void setup()
     {
         if (bHomingAtStartup[i])
         {
+#ifdef HAVE_BRAKE
+            // Release the brake as /activate 1 does; updateBrake() starts the homing
+            // once the brake is released.
+            if (electromagnetBrakeEnable[i])
+            {
+                activate(i, true);
+                homingAtStartupPending[i] = true;
+                continue;
+            }
+#endif
             homing(i);
         }
     }
@@ -115,6 +125,11 @@ void checkStatus()
     uint32_t t;
     uint16_t statusList[NUM_OF_MOTOR];
     readAllStatus(statusList);
+#ifdef HAVE_BRAKE
+    // Read after every brake action so far; an action below makes it stale again.
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        brakeStatusFresh[i] = true;
+#endif
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         const uint16_t status = statusList[i];
@@ -136,6 +151,11 @@ void checkStatus()
 
             if (!busy[i])
             {
+                // Defensive: a stop or HiZ command cancels the pending command.
+                if ((busyClearWaitStatus[i] != NONE) && (HiZ[i] || !brakeReleasedOrDisabled(i)))
+                {
+                    busyClearWaitStatus[i] = NONE;
+                }
                 if (busyClearWaitStatus[i] != NONE)
                 {
                     switch (busyClearWaitStatus[i])
@@ -186,7 +206,8 @@ void checkStatus()
             homeSwState[i] = t;
             if (reportHomeSwStatus[i])
                 getHomeSw(i);
-            if (bProhibitMotionOnHomeSw[i] && homeSwState[i] && (dir[i] == homingDirection[i]))
+            // Not to a HiZ motor: HardStop would energize it.
+            if (bProhibitMotionOnHomeSw[i] && homeSwState[i] && (dir[i] == homingDirection[i]) && !HiZ[i])
             {
                 stepper[i].hardStop();
             }
@@ -196,16 +217,17 @@ void checkStatus()
         if (t)
         {
             // This action is also done in the driver chip but required for the servo mode.
-            if (isServoMode[i] && (!homeSwMode[i]))
+            if (isServoMode[i] && (!homeSwMode[i]) && !HiZ[i])
                 stepper[i].hardStop();
             // Trigger the next sequence of the homing.
             if (homingStatus[i] == HOMING_GOUNTIL)
             {
                 if (bHoming[i])
                 {
-                    releaseSw(i, 0, !homingDirection[i]);
-                    homingStatus[i] = HOMING_RELEASESW;
-                    sendTwoData("/homingStatus", i + MOTOR_ID_FIRST, homingStatus[i]);
+                    if (releaseSw(i, 0, !homingDirection[i]))
+                        sendTwoData("/homingStatus", i + MOTOR_ID_FIRST, homingStatus[i]);
+                    else
+                        clearHomingStatus(i);
                 }
                 else
                 {
@@ -223,13 +245,6 @@ void checkStatus()
             motorStatus[i] = t;
             if (reportMotorStatus[i])
                 sendTwoData("/motorStatus", i + MOTOR_ID_FIRST, motorStatus[i]);
-#ifdef HAVE_BRAKE
-            if (bBrakeDecWaiting[i] && (motorStatus[i] == 0)) // motor stopped
-            {
-                activate(i, false);
-                bBrakeDecWaiting[i] = false;
-            }
-#endif
         }
         // CMD_ERROR, active high, latched
 #ifdef DRIVER_L6470
@@ -284,7 +299,8 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
         {
             if ((uint32_t)(_currentTimeMillis - homingStartTime[i]) >= goUntilTimeout[i])
             {
-                stepper[i].hardStop();
+                if (!HiZ[i]) // HardStop would energize a HiZ motor
+                    stepper[i].hardStop();
                 sendCommandError(i + MOTOR_ID_FIRST, ERROR_GOUNTIL_TIMEOUT);
                 homingStatus[i] = HOMING_TIMEOUT;
                 if (bHoming[i])
@@ -298,7 +314,8 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
         {
             if ((uint32_t)(_currentTimeMillis - homingStartTime[i]) >= releaseSwTimeout[i])
             {
-                stepper[i].hardStop();
+                if (!HiZ[i]) // HardStop would energize a HiZ motor
+                    stepper[i].hardStop();
                 sendCommandError(i + MOTOR_ID_FIRST, ERROR_RELEASESW_TIMEOUT);
                 homingStatus[i] = HOMING_TIMEOUT;
                 if (bHoming[i])
@@ -412,9 +429,14 @@ bool updateServo(uint32_t currentTimeMillis)
         perfAdd(perfStats.servoInterval, nowMicros - lastServoUpdateMicros);
     lastServoUpdateMicros = nowMicros;
 
+    bool servoActive[NUM_OF_MOTOR];
     bool anyServo = false;
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        anyServo |= isServoMode[i];
+    {
+        // Defensive: the servo mode is cancelled when the brake engages.
+        servoActive[i] = isServoMode[i] && brakeReleasedOrDisabled(i);
+        anyServo |= servoActive[i];
+    }
     if (anyServo)
     {
         int32_t pos[NUM_OF_MOTOR];
@@ -424,7 +446,7 @@ bool updateServo(uint32_t currentTimeMillis)
         // Motors not in the servo mode stay unprepared and receive NOP.
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            if (isServoMode[i])
+            if (servoActive[i])
             {
                 computeServoSpeed(i, pos[i], runDir[i], absSpd[i]);
                 stepper[i].prepareRun(runDir[i], absSpd[i]);
@@ -434,7 +456,7 @@ bool updateServo(uint32_t currentTimeMillis)
         {
             for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
             {
-                if (isServoMode[i])
+                if (servoActive[i])
                     stepper[i].run(runDir[i], absSpd[i]);
             }
         }
@@ -458,21 +480,23 @@ void loop()
 
     if ((uint32_t)(currentTimeMillis - lastPollTime) >= STATUS_POLL_PERIOD)
     {
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-        checkLimitSw();
-#endif
-#ifdef HAVE_BRAKE
-        updateBrake(currentTimeMillis);
-#endif
-        checkHomingTimeout(currentTimeMillis);
-        updatePositionReport(currentTimeMillis);
-        if (reportPositionList)
-            updatePositionReportList(currentTimeMillis);
+        // checkStatus() first: the brake poll, the limit switches and the homing timeout
+        // use the HiZ flags read in this poll.
         uint32_t t0 = micros();
         PROBE_HIGH(3);
         checkStatus();
         PROBE_LOW(3);
         perfAdd(perfStats.checkStatus, micros() - t0);
+#ifdef HAVE_BRAKE
+        updateBrake(currentTimeMillis);
+#endif
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+        checkLimitSw();
+#endif
+        checkHomingTimeout(currentTimeMillis);
+        updatePositionReport(currentTimeMillis);
+        if (reportPositionList)
+            updatePositionReportList(currentTimeMillis);
         updateRxTxLed(currentTimeMillis);
         uint8_t t = getMyId();
         if (myId != t)

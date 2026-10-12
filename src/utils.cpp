@@ -243,42 +243,145 @@ void sendBootMsg(uint32_t _currentTime) {
     sendOscMessage(newMes, broadcastIp, outPort);
     isWaitingSendBootMsg = false;
 }
-bool isBrakeDisEngaged(uint8_t motorId) {
 #ifdef HAVE_BRAKE
-    bool state = electromagnetBrakeEnable[motorId] && (brakeStatus[motorId] != BRAKE_DISENGAGED);
-    if (state) {
-        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_ENGAGED);
+void applyBrakeAction(uint8_t motorId, const BrakeAction &action) {
+    const BrakeState current = brakeStatus[motorId];
+    const bool wasReleased = brakeOutputReleased(current);
+    const bool willRelease = brakeOutputReleased(action.next);
+    // Release the brake before the driver goes HiZ (/free), and stop the motor before
+    // the brake engages (/hardHiZ).
+    if (willRelease && !wasReleased)
+        setBrake(motorId, HIGH);
+    switch (action.driver) {
+    case BRAKE_DRIVER_HARD_STOP:
+        stepper[motorId].hardStop();
+        break;
+    case BRAKE_DRIVER_SOFT_STOP:
+        stepper[motorId].softStop();
+        break;
+    case BRAKE_DRIVER_HARD_HIZ:
+        stepper[motorId].hardHiZ();
+        break;
+    default:
+        break;
     }
-    return !state;
-#else
-    return true;
-#endif
+    if (!willRelease && wasReleased)
+        setBrake(motorId, LOW);
+    if (action.startTimer)
+        brakeTransitionTrigTime[motorId] = millis();
+    if ((action.driver != BRAKE_DRIVER_NONE) || (action.next != current))
+        brakeStatusFresh[motorId] = false;
+    if (action.next != current) {
+        brakeStatus[motorId] = action.next;
+        PROBE_PULSE(6);
+    }
+    if (action.cancelPending)
+        cancelPendingMotion(motorId);
+    switch (action.error) {
+    case BRAKE_ERROR_ENGAGED:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_ENGAGED);
+        break;
+    case BRAKE_ERROR_IGNORED:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
+        break;
+    case BRAKE_ERROR_RELEASE_FAILED:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_RELEASE_FAILED);
+        break;
+    case BRAKE_ERROR_ENGAGED_ON_HIZ:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_ENGAGED_ON_HIZ);
+        break;
+    default:
+        break;
+    }
 }
-#ifdef HAVE_BRAKE
+
+BrakeAction brakeCommand(uint8_t motorId, BrakeCommand command) {
+    const BrakeAction action = brakeOnCommand(brakeStatus[motorId], command);
+    applyBrakeAction(motorId, action);
+    return action;
+}
+
 void updateBrake(uint32_t _currentTimeMillis) {
+    static bool warned[NUM_OF_MOTOR] = {false};
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        if (electromagnetBrakeEnable[i]) {
-            if (brakeStatus[i] == BRAKE_DISENGAGE_WAITING) {
-                if ((uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i]) {
-                    setBrake(i, HIGH);
-                    brakeStatus[i] = BRAKE_DISENGAGED;
-                    PROBE_PULSE(6);
-                }
-            } else if (brakeStatus[i] == BRAKE_MOTORHIZ_WAITING) {
-                if ((uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i]) {
-                    stepper[i].hardHiZ();
-                    brakeStatus[i] = BRAKE_ENGAGED;
-                    PROBE_PULSE(6);
-                }
+        if (!electromagnetBrakeEnable[i])
+            continue;
+        BrakePollInput in;
+        in.hiz = HiZ[i];
+        in.stopped = (motorStatus[i] == 0);
+        in.statusFresh = brakeStatusFresh[i];
+        in.elapsed = (uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i];
+        const BrakeAction action = brakeOnPoll(brakeStatus[i], in);
+        if (action.warn && !warned[i]) {
+            warned[i] = true;
+            dbgPrint("Warning: motor %d is %s while the brake state is %d\n", i + MOTOR_ID_FIRST,
+                     in.hiz ? "HiZ" : "energized", brakeStatus[i]);
+        }
+        applyBrakeAction(i, action);
+        if (homingAtStartupPending[i]) {
+            if (brakeStatus[i] == BRAKE_RELEASED) {
+                homingAtStartupPending[i] = false;
+                homing(i);
+            } else if (brakeStatus[i] == BRAKE_ENGAGED) {
+                // The release failed (BrakeReleaseFailed has been sent).
+                homingAtStartupPending[i] = false;
             }
         }
     }
 }
 #endif
 
-// When the stop commands are sent during a homing process, 
+bool brakeReleasedOrDisabled(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    return !electromagnetBrakeEnable[motorId] || (brakeStatus[motorId] == BRAKE_RELEASED);
+#else
+    return true;
+#endif
+}
+
+bool brakeAllowsMotion(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId]) {
+        const BrakeAction action = brakeOnCommand(brakeStatus[motorId], BRAKE_CMD_MOTION);
+        if (!action.execute) {
+            applyBrakeAction(motorId, action); // BrakeEngaged
+            return false;
+        }
+    }
+#endif
+    return true;
+}
+
+void commitMotionStart(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId])
+        brakeCommand(motorId, BRAKE_CMD_MOTION);
+#endif
+    // A goTo waiting for BUSY must not overwrite this command later.
+    busyClearWaitStatus[motorId] = NONE;
+}
+
+bool brakeAllowsStop(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId])
+        return brakeCommand(motorId, BRAKE_CMD_STOP).execute;
+#endif
+    return true;
+}
+
+void cancelPendingMotion(uint8_t motorId) {
+    busyClearWaitStatus[motorId] = NONE;
+    clearHomingStatus(motorId);
+    isServoMode[motorId] = false;
+#ifdef HAVE_BRAKE
+    homingAtStartupPending[motorId] = false;
+#endif
+}
+
+// When the stop commands are sent during a homing process,
 // clear the homing status as HOMING_UNDEFINED.
+// A /goUntil or /releaseSw sent directly (not /homing) is cleared without a report.
 void clearHomingStatus(uint8_t motorId)
 {
     if (bHoming[motorId])
@@ -287,18 +390,19 @@ void clearHomingStatus(uint8_t motorId)
         bHoming[motorId] = false;
         sendTwoData("/homingStatus", motorId + MOTOR_ID_FIRST, homingStatus[motorId]);
     }
+    else if ((homingStatus[motorId] == HOMING_GOUNTIL) || (homingStatus[motorId] == HOMING_RELEASESW))
+    {
+        homingStatus[motorId] = HOMING_UNDEFINED;
+    }
 }
 
 bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatus) {
     if (checkHomingStatus)
         clearHomingStatus(motorId);
-#ifdef HAVE_BRAKE
-    if (!isBrakeDisEngaged(motorId)) {
+    if (!brakeAllowsMotion(motorId)) {
         return false;
     }
-    else 
-#endif
-    if ( isServoMode[motorId] ) {
+    else if ( isServoMode[motorId] ) {
         sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_IN_SERVO_MODE);
         return false;
     }

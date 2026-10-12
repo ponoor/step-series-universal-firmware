@@ -43,12 +43,29 @@ int getInt(OscMessage &msg, uint8_t offset);
 float getFloat(OscMessage &msg, uint8_t offset);
 bool getBool(OscMessage &msg, uint8_t offset);
 
-bool isBrakeDisEngaged(uint8_t motorId);
 #ifdef HAVE_BRAKE
+// Carries out a brake action: brake output, driver command, state, timer, error.
+void applyBrakeAction(uint8_t motorId, const BrakeAction &action);
+// brakeOnCommand() + applyBrakeAction(). Only for a motor with the brake enabled.
+BrakeAction brakeCommand(uint8_t motorId, BrakeCommand command);
+// Status poll of the brakes, after checkStatus(). Also starts the homing at startup.
 void updateBrake(uint32_t _currentTimeMillis);
 #endif
+// true when the brake is disabled or released (the driver may be run).
+bool brakeReleasedOrDisabled(uint8_t motorId);
+// Motion commands: brakeAllowsMotion() checks (sends BrakeEngaged), then after all the
+// other start conditions, commitMotionStart() just before the command is sent.
+bool brakeAllowsMotion(uint8_t motorId);
+void commitMotionStart(uint8_t motorId);
+// Stop commands (/softStop, /hardStop, /enableServoMode 0): false if the stop command
+// must not be sent (brake engaged or free: the driver is HiZ).
+bool brakeAllowsStop(uint8_t motorId);
+// Cancels the pending motion: goTo waiting for BUSY, homing, servo mode, homing at startup.
+void cancelPendingMotion(uint8_t motorId);
 
 void clearHomingStatus(uint8_t motorId);
+// Start conditions of a motion command, including the brake. Does not change any state
+// on success (except the homing status with checkHomingStatus); call commitMotionStart().
 bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatus = true);
 void sendCommandError(uint8_t motorID, uint8_t errorNum);
 void resetMotorDriver(uint8_t deviceID);

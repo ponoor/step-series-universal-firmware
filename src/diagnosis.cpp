@@ -90,6 +90,7 @@ void printMenu() {
 void testMotion() {
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
 		if (checkMotionStartConditions(i, dir)) {
+			commitMotionStart(i);
 			stepper[i].move(FWD, 25600);
 		}
 	}
@@ -351,9 +352,9 @@ void printCurrentState() {
 #ifdef HAVE_BRAKE
 	printAllBools(F("Electromagnetic Brake Enable"),electromagnetBrakeEnable);
 	dbgPrint("Brake status :\n");
-	String bsText[4] = {"BRAKE_ENGAGED","BRAKE_DISENGAGE_WAITING","BRAKE_DISENGAGED","BRAKE_MOTORHIZ_WAITING"};
+	const char *const bsText[BRAKE_STATE_COUNT] = {"ENGAGED","RELEASING","RELEASED","STOPPING","ENGAGING","FREE"};
 	for (uint8_t i=0; i<NUM_OF_MOTOR; i++) {
-		dbgPrint("#%d : %s\n",i + MOTOR_ID_FIRST,bsText[brakeStatus[i]].c_str());
+		dbgPrint("#%d : %d %s\n",i + MOTOR_ID_FIRST,brakeStatus[i],bsText[brakeStatus[i]]);
 	}
 #endif
 	printAllData(F("Homing status"), homingStatus);

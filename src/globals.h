@@ -11,6 +11,7 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include "boardsDef.h"
+#include "brakeControl.h"
 #ifdef DRIVER_POWERSTEP01
 #include <Ponoor_PowerSTEP01Library.h>
 #elif defined(DRIVER_L6470)
@@ -94,15 +95,12 @@ extern bool
 // Brake
 #ifdef HAVE_BRAKE
 extern uint8_t brakeOut;
-extern uint8_t brakeStatus[NUM_OF_MOTOR];
-enum {
-    BRAKE_ENGAGED = 0,
-    BRAKE_DISENGAGE_WAITING, // motor excited
-    BRAKE_DISENGAGED,
-    BRAKE_MOTORHIZ_WAITING // brake closed
-};
+extern BrakeState brakeStatus[NUM_OF_MOTOR]; // brakeControl.h
 extern uint32_t brakeTransitionTrigTime[NUM_OF_MOTOR];
-extern bool bBrakeDecWaiting[NUM_OF_MOTOR]; // Waiting deceleration for the brake engaging procedure
+// false from a brake action (state change or driver command) until the next status read
+extern bool brakeStatusFresh[NUM_OF_MOTOR];
+// Homing at startup waits for the brake release (setup())
+extern bool homingAtStartupPending[NUM_OF_MOTOR];
 #endif
 
 // BUSY clear waiting for cascading GOTO, GOTO_DIR, GOHOME, and GOMARK
@@ -143,6 +141,8 @@ enum {
     ERROR_GOUNTIL_TIMEOUT,
     ERROR_RELEASESW_TIMEOUT,
     ERROR_IN_SERVO_MODE,
+    ERROR_BRAKE_RELEASE_FAILED,
+    ERROR_BRAKE_ENGAGED_ON_HIZ,
     ERROR_COUNT // number of error codes, keep last
 };
 extern const char *const commandErrorText[]; // globals.cpp, ERROR_COUNT entries

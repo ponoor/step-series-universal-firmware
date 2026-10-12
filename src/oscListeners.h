@@ -169,10 +169,10 @@ void goTo(OscMessage& msg);
 void goToDir(OscMessage& msg);
 void homing(uint8_t motorId);
 void homing(OscMessage& msg);
-void goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec);
+bool goUntil(uint8_t motorId, bool action, bool dir, float stepsPerSec); // true if sent
 void goUntil(OscMessage& msg);
 void goUntilRaw(OscMessage& msg);
-void releaseSw(uint8_t motorId, bool action, bool dir);
+bool releaseSw(uint8_t motorId, bool action, bool dir); // true if sent
 void releaseSw(OscMessage& msg);
 void goHome(OscMessage& msg);
 void goMark(OscMessage& msg);

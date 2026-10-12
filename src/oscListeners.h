@@ -93,7 +93,7 @@ void getDecayModeParam(OscMessage& msg);
 void getDecayModeParam(uint8_t motorId);
 #endif
 #ifdef HAVE_BRAKE
-void enableElectromagnetBrake(uint8_t motorId, bool bEnable);
+bool enableElectromagnetBrake(uint8_t motorId, bool bEnable); // false: not changed (CommandIgnored)
 void enableElectromagnetBrake(OscMessage& msg);
 void setBrakeTransitionDuration(OscMessage& msg);
 void getBrakeTransitionDuration(OscMessage& msg);

@@ -8,6 +8,7 @@
 #include "perfStats.h"
 #include "resetCause.h"
 #include "hilProbe.h"
+#include "oscListeners.h"
 
 String configVersionCompareString[5] = {
 	F("CONFIG_VERSION_UNDEFINED"),
@@ -1050,7 +1051,9 @@ void receiveConfigJson() {
 #endif
 			slewRate[i] = slewRateVal[slewRateNum[i]];
 #ifdef HAVE_BRAKE
-			electromagnetBrakeEnable[i] = ds_electromagnetBrakeEnable[i] | electromagnetBrakeEnable[i];
+			const bool brakeEnable = ds_electromagnetBrakeEnable[i] | electromagnetBrakeEnable[i];
+			if (!enableElectromagnetBrake(i, brakeEnable))
+				dbgPrint("Warning: electromagnetBrakeEnable of motor %d not changed (driver not HiZ, or brake not engaged)\n", i + MOTOR_ID_FIRST);
 			brakeTransitionDuration[i] = ds_brakeTransitionDuration[i] | brakeTransitionDuration[i];
 #endif
 		}

@@ -225,6 +225,28 @@ void getAdcVal(OscMessage &msg)
 
 void resetDevice(OscMessage &msg)
 {
+#ifdef HAVE_BRAKE
+    // Engage the brakes and wait for them before the reset: the drivers go HiZ when
+    // setup() resets them.
+    uint16_t waitMs = 0;
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (electromagnetBrakeEnable[i] && (brakeStatus[i] != BRAKE_ENGAGED))
+        {
+            // GetParam does not clear the latched flags (GetStatus does).
+            const uint16_t status = stepper[i].getParam(REG_STATUS);
+            if (!(status & STATUS_HIZ) && (status & STATUS_MOT_STATUS))
+                stepper[i].hardStop();
+            setBrake(i, LOW);
+            const uint16_t t = min(brakeTransitionDuration[i], (uint16_t)1000);
+            if (t > waitMs)
+                waitMs = t;
+        }
+    }
+    const uint32_t start = millis();
+    while ((uint32_t)(millis() - start) < waitMs)
+        Watchdog.reset();
+#endif
     systemReset();
 }
 
@@ -1130,17 +1152,23 @@ void getDecayModeParam(uint8_t motorId)
 #endif
 
 #ifdef HAVE_BRAKE
-void enableElectromagnetBrake(uint8_t motorId, bool bEnable)
+// Changes only while the driver is HiZ, and disables only while the brake is engaged or
+// free. Either way the brake output is engaged and the state is BRAKE_ENGAGED.
+bool enableElectromagnetBrake(uint8_t motorId, bool bEnable)
 {
+    if (electromagnetBrakeEnable[motorId] == bEnable)
+        return true;
+    // GetParam does not clear the latched flags (GetStatus does).
+    if (!(stepper[motorId].getParam(REG_STATUS) & STATUS_HIZ))
+        return false;
+    if (!bEnable && (brakeStatus[motorId] != BRAKE_ENGAGED) && (brakeStatus[motorId] != BRAKE_FREE))
+        return false;
+    setBrake(motorId, LOW);
+    brakeStatus[motorId] = BRAKE_ENGAGED;
+    PROBE_PULSE(6);
+    brakeStatusFresh[motorId] = false;
     electromagnetBrakeEnable[motorId] = bEnable;
-    if (bEnable)
-    {
-        // pinMode(brakePin[motorId], OUTPUT);
-    }
-    else
-    {
-        setBrake(motorId, false);
-    }
+    return true;
 }
 void enableElectromagnetBrake(OscMessage &msg)
 {
@@ -1149,13 +1177,15 @@ void enableElectromagnetBrake(OscMessage &msg)
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
-        enableElectromagnetBrake(motorID, bEnable);
+        if (!enableElectromagnetBrake(motorID, bEnable))
+            sendCommandError(motorID + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
-            enableElectromagnetBrake(i, bEnable);
+            if (!enableElectromagnetBrake(i, bEnable))
+                sendCommandError(i + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
         }
     }
 }

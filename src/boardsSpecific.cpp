@@ -74,20 +74,56 @@ void initDipSw()
 #endif
 }
 
+#if defined(STEP800_R1)
+// Shift register chain: MOSI -> 74HC165 (DIP switch) -> 74HC595 (brake outputs) -> MISO.
+// The latch (PIN_DIPSW_LATCH) is the SH/LD of the 74HC165 and the RCK of the 74HC595.
+// The first latch loads the DIP switch; after the two bytes, brakeOut is in the shift
+// register of the 74HC595 and the second latch puts it on the outputs.
+static uint8_t exchangeShiftRegisters()
+{
+    PROBE_HIGH(4);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+    shiftRegisterSPI.transfer(brakeOut);
+    const uint8_t dipSw = shiftRegisterSPI.transfer(0);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+    PROBE_LOW(4);
+    return dipSw;
+}
+#endif
+
 #ifdef HAVE_BRAKE
-void initBrake()
+// First thing in setup(): engages every brake output before the drivers are reset.
+void initBrakeOutputsEngaged()
 {
 #ifdef STEP400_R1
+    // The pins float (Brake Board pull-down: engaged) until here.
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        pinMode(brakePin[i], OUTPUT);    
+        digitalWrite(brakePin[i], LOW);
+        pinMode(brakePin[i], OUTPUT);
     }
 #elif defined(STEP800_R1)
+    // The output register of the 74HC595 is undefined at power-up (G is tied to GND).
+    // Keep the shift register cleared (SHIFTOUT_ENABLE low, also pulled down by R3) and
+    // latch it: all outputs low. initBrake() enables the shift register afterwards.
+    digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, LOW);
     pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    pinMode(PIN_DIPSW_LATCH, OUTPUT);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+#endif
+}
+
+void initBrake()
+{
+#if defined(STEP800_R1)
     digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, HIGH);
 #endif
 }
 
+// HIGH: released, LOW: engaged. The output changes at once.
 void setBrake(uint8_t motorId, bool state)
 {
 #ifdef STEP400_R1
@@ -101,6 +137,7 @@ void setBrake(uint8_t motorId, bool state)
     {
         bitClear(brakeOut, motorId);
     }
+    exchangeShiftRegisters();
 #endif
 }
 
@@ -115,13 +152,7 @@ uint8_t getMyId()
         _id |= (!digitalRead(dipSwPin[i])) << i;
     }
 #elif defined(STEP800_R1)
-    PROBE_HIGH(4);
-    digitalWrite(PIN_DIPSW_LATCH, LOW);
-    digitalWrite(PIN_DIPSW_LATCH, HIGH);
-    shiftRegisterSPI.transfer(brakeOut);
-    _id = shiftRegisterSPI.transfer(0);
-    PROBE_LOW(4);
-    _id = ~_id;
+    _id = ~exchangeShiftRegisters();
 #elif defined(STEP800_PROTO_R3)
     byte shiftInByte[3];
     digitalWrite(PIN_DIPSW_LATCH, LOW);

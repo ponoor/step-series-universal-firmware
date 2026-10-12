@@ -30,7 +30,11 @@ extern int8_t loadedConfigVersion[2];
 extern const uint8_t applicableConfigVersion[2]; // defined in boardsDef.h
 extern uint8_t resetCause;    // ResetCause (resetCause.h), sent with /booted
 extern uint8_t resetCauseRaw; // raw MCU register value, diagnosis output only
-#define STATUS_POLL_PERIOD   10 // [ms]
+// loop() runs its periodic tasks in slots scheduled on micros(). Every slot: status read,
+// brake, limit switches, homing timeouts, servo update. Every HOUSEKEEPING_SLOTS slots
+// (10 ms): position reports, Tx/Rx LEDs, DIP switch, boot message, watchdog reset.
+#define SLOT_PERIOD_US       5000 // [us]
+#define HOUSEKEEPING_SLOTS   2
 // Watchdog timeout. A UDP send blocks until ARP is resolved (W5500 retries every 200 ms),
 // which can exceed 100 ms.
 #define WATCHDOG_TIMEOUT_MS  2000 // [ms] early warning (brakes engaged, then reset); watchdog.h
@@ -226,7 +230,7 @@ extern float
     fullStepSpeed[NUM_OF_MOTOR];
 
 // Servo mode
-constexpr uint32_t servoPollPeriod = 10; // [ms]
+constexpr uint32_t servoPollPeriod = 5; // [ms], the slot period (loop())
 extern int32_t targetPosition[NUM_OF_MOTOR];
 extern float kP[NUM_OF_MOTOR], kI[NUM_OF_MOTOR], kD[NUM_OF_MOTOR];
 extern boolean isServoMode[NUM_OF_MOTOR];

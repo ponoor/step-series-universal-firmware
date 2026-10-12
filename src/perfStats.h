@@ -30,6 +30,7 @@ struct PerfStats
     PerfStat servoInterval; // actual interval between servo updates
     uint32_t oscSlowPathCount;   // messages dispatched by pattern matching (no exact address match)
     uint32_t oscNotMatchedCount; // messages answered with MessageNotMatch
+    uint32_t slotLateCount;      // slots started a whole slot period or more late (rescheduled)
 };
 
 extern PerfStats perfStats;

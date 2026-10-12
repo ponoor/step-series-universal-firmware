@@ -29,4 +29,5 @@ void perfStatsPrint()
     printStat("servoInterval", s.servoInterval);
     dbgPrint("oscSlowPath    %lu\n", (unsigned long)s.oscSlowPathCount);
     dbgPrint("oscNotMatched  %lu\n", (unsigned long)s.oscNotMatchedCount);
+    dbgPrint("slotLate       %lu\n", (unsigned long)s.slotLateCount);
 }

@@ -381,7 +381,9 @@ void updatePositionReportList(uint32_t _currentTimeMillis)
 }
 #define INTEGRAL_LIMIT 1500.0f
 // Gains are tuned for a 10 ms period. Scaling the I and D terms by the period keeps
-// the same kP/kI/kD usable when servoPollPeriod changes (identity at 10 ms).
+// the same kP/kI/kD usable when servoPollPeriod changes (identity at 10 ms). At the 5 ms
+// slot it is 0.5: each update adds half as much to the integral, and the difference of
+// the error is divided by 0.5, so the continuous-time response stays about the same.
 constexpr float servoDtRatio = servoPollPeriod / 10.0f;
 
 // PID state of the servo mode, reset by resetServoState() when the servo mode is enabled.
@@ -432,13 +434,13 @@ static void computeServoSpeed(uint8_t i, int32_t currentPos, bool &dir, float &a
 #endif
 }
 
-// The servo update runs once per status poll (see loop()), so its period is the poll period.
-static_assert(servoPollPeriod == STATUS_POLL_PERIOD,
-              "updateServo() runs in the status poll: a servo period other than STATUS_POLL_PERIOD "
-              "needs a servo schedule separate from the status poll");
+// The servo update runs once per slot (see loop()), so its period is the slot period.
+static_assert(servoPollPeriod * 1000 == SLOT_PERIOD_US,
+              "updateServo() runs in every slot: a servo period other than SLOT_PERIOD_US "
+              "needs a servo schedule separate from the slots");
 
-// One servo update. Called once per status poll; the P2 pulse and the timing statistics
-// are produced on every call, also when no motor is in the servo mode.
+// One servo update. Called once per slot; the P2 pulse and the timing statistics are
+// produced on every call, also when no motor is in the servo mode.
 void updateServo()
 {
     static uint32_t lastServoUpdateMicros = 0;
@@ -493,13 +495,33 @@ void loop()
         perfAdd(perfStats.loop, loopStartMicros - lastLoopStartMicros);
     lastLoopStartMicros = loopStartMicros;
 
-    uint32_t currentTimeMillis = millis();
-    static uint32_t lastPollTime = 0;
-
-    if ((uint32_t)(currentTimeMillis - lastPollTime) >= STATUS_POLL_PERIOD)
+    // Slots every SLOT_PERIOD_US on micros() (the 1 ms steps of millis() would be 20 % of
+    // a slot). The first slot runs in the first pass. The next slot is due one period
+    // after the previous due time, so a slot that starts late is followed by a shorter
+    // interval; if it starts a whole period or more late, the schedule restarts from now
+    // (counted in perfStats). The differences are taken as int32_t, so the wrap of
+    // micros() (about 71 min) does not matter: the due time stays within one period of now.
+    static bool slotScheduled = false;
+    static uint32_t nextSlotMicros;
+    static uint8_t housekeepingSlot = 0;
+    if (!slotScheduled)
     {
-        // checkStatus() first: the brake poll, the limit switches and the homing timeout
-        // use the HiZ flags read in this poll.
+        nextSlotMicros = loopStartMicros;
+        slotScheduled = true;
+    }
+    if ((int32_t)(loopStartMicros - nextSlotMicros) >= 0)
+    {
+        nextSlotMicros += SLOT_PERIOD_US;
+        if ((int32_t)(loopStartMicros - nextSlotMicros) >= 0)
+        {
+            nextSlotMicros = loopStartMicros + SLOT_PERIOD_US;
+            perfStats.slotLateCount++;
+        }
+        // The functions that time in milliseconds get the time of the slot start.
+        const uint32_t currentTimeMillis = millis();
+
+        // checkStatus() first: the brake poll, the limit switches, the homing timeout and
+        // the servo update use the HiZ flags and the switch states read in this slot.
         uint32_t t0 = micros();
         PROBE_HIGH(3);
         checkStatus();
@@ -512,29 +534,36 @@ void loop()
         checkLimitSw();
 #endif
         checkHomingTimeout(currentTimeMillis);
-        // The servo update runs here, at a fixed point after the start of the poll: its
+        // The servo update runs here, at a fixed point after the start of the slot: its
         // start does not depend on the length of the position reports below or of the OSC
-        // packets processed in the loop, so its period stays at STATUS_POLL_PERIOD. It
-        // uses the status, the switch states and the brake state of this poll.
+        // packets processed in the loop, so its period stays at SLOT_PERIOD_US. It uses
+        // the status, the switch states and the brake state of this slot.
         t0 = micros();
         updateServo();
         perfAdd(perfStats.updateServo, micros() - t0);
-        updatePositionReport(currentTimeMillis);
-        if (reportPositionList)
-            updatePositionReportList(currentTimeMillis);
-        updateRxTxLed(currentTimeMillis);
-        uint8_t t = getMyId();
-        if (myId != t)
+
+        // Every HOUSEKEEPING_SLOTS slots (10 ms), after the servo update.
+        if (housekeepingSlot == 0)
         {
-            myId = t;
-            initEthernet();
+            updatePositionReport(currentTimeMillis);
+            if (reportPositionList)
+                updatePositionReportList(currentTimeMillis);
+            updateRxTxLed(currentTimeMillis);
+            uint8_t t = getMyId();
+            if (myId != t)
+            {
+                myId = t;
+                initEthernet();
+            }
+            if (isWaitingSendBootMsg)
+            {
+                sendBootMsg(currentTimeMillis);
+            }
+            // Not more often: reset() waits for the previous clear to synchronize (2-3 ms).
+            Watchdog.reset();
         }
-        if (isWaitingSendBootMsg)
-        {
-            sendBootMsg(currentTimeMillis);
-        }
-        Watchdog.reset();
-        lastPollTime = currentTimeMillis;
+        if (++housekeepingSlot >= HOUSEKEEPING_SLOTS)
+            housekeepingSlot = 0;
     }
 
     if (SerialUSB.available() > 0)

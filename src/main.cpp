@@ -32,7 +32,7 @@ constexpr auto position_tolerance = 0; // steps
 
 // for PlatformIO
 void checkStatus();
-bool updateServo(uint32_t currentTimeMillis);
+void updateServo();
 void checkHomingTimeout(uint32_t _currentTimeMillis);
 void updatePositionReport(uint32_t _currentTimeMillis);
 void updatePositionReportList(uint32_t _currentTimeMillis);
@@ -422,12 +422,16 @@ static void computeServoSpeed(uint8_t i, int32_t currentPos, bool &dir, float &a
 #endif
 }
 
-bool updateServo(uint32_t currentTimeMillis)
+// The servo update runs once per status poll (see loop()), so its period is the poll period.
+static_assert(servoPollPeriod == STATUS_POLL_PERIOD,
+              "updateServo() runs in the status poll: a servo period other than STATUS_POLL_PERIOD "
+              "needs a servo schedule separate from the status poll");
+
+// One servo update. Called once per status poll; the P2 pulse and the timing statistics
+// are produced on every call, also when no motor is in the servo mode.
+void updateServo()
 {
-    static uint32_t lastServoUpdateTime = 0;
     static uint32_t lastServoUpdateMicros = 0;
-    if ((uint32_t)(currentTimeMillis - lastServoUpdateTime) < servoPollPeriod)
-        return false;
     PROBE_HIGH(2);
 
     const uint32_t nowMicros = micros();
@@ -467,9 +471,7 @@ bool updateServo(uint32_t currentTimeMillis)
             }
         }
     }
-    lastServoUpdateTime = currentTimeMillis;
     PROBE_LOW(2);
-    return true;
 }
 
 void loop()
@@ -500,6 +502,13 @@ void loop()
         checkLimitSw();
 #endif
         checkHomingTimeout(currentTimeMillis);
+        // The servo update runs here, at a fixed point after the start of the poll: its
+        // start does not depend on the length of the position reports below or of the OSC
+        // packets processed in the loop, so its period stays at STATUS_POLL_PERIOD. It
+        // uses the status, the switch states and the brake state of this poll.
+        t0 = micros();
+        updateServo();
+        perfAdd(perfStats.updateServo, micros() - t0);
         updatePositionReport(currentTimeMillis);
         if (reportPositionList)
             updatePositionReportList(currentTimeMillis);
@@ -525,7 +534,4 @@ void loop()
     uint32_t t0 = micros();
     if (OSCMsgReceive())
         perfAdd(perfStats.oscReceive, micros() - t0);
-    t0 = micros();
-    if (updateServo(currentTimeMillis))
-        perfAdd(perfStats.updateServo, micros() - t0);
 }

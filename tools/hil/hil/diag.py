@@ -13,7 +13,10 @@ import time
 import serial
 
 PERF_LINE = re.compile(r"^(\w+)\s+max\s+(\d+) us\s+avg\s+(\d+) us\s+n (\d+)\s*$")
-PERF_COUNTER = re.compile(r"^(oscSlowPath|oscNotMatched)\s+(\d+)\s*$")
+# Counter lines ("name  value"): oscSlowPath, oscNotMatched, and slotLate (5 ms slot
+# firmware). Any other "name value" line added later is kept under its name.
+PERF_COUNTER = re.compile(r"^(\w+)\s+(\d+)\s*$")
+SLOT_LATE_COUNTER = "slotLate"
 BRAKE_LINE = re.compile(r"Turn off #(\d+), Turn on #(\d+)")
 PROBE_MAP = re.compile(r"HIL probe:((?: P\d=\w+\(P[AB]\d+\))+)")
 
@@ -104,7 +107,8 @@ class SerialDiag:
     # --- commands ---
     def perf(self) -> tuple[dict, str]:
         """'p': prints and resets the timing statistics."""
-        # The counters after servoInterval exist only in the phase 1 firmware.
+        # The counters after servoInterval exist only in the phase 1 firmware and later
+        # (slotLate: 5 ms slot firmware); they are read until the output pauses.
         text = self.command("p", until=r"servoInterval\s+max.*n \d+")
         text += self.read_available(idle=0.2, timeout=1.0)
         return parse_perf(text), text

@@ -32,6 +32,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-reboot", action="store_true", help="do not reboot the board first")
     s.add_argument("--position-report-ms", type=int,
                    help="position report interval, 0: no reports (default: [timing] position_report_ms)")
+    s.add_argument("--position-list-report-ms", type=int,
+                   help="report the positions of all motors in one message (/setPositionListReportInterval) "
+                        "instead of /position per motor; not with --position-report-ms")
+    s.add_argument("--burst-hz", type=float, default=0.0,
+                   help="also send /getPosition 255 (8 replies) at this rate, 0: none (default)")
+    s.add_argument("--target-rate-hz", type=float,
+                   help="/setTargetPositionList rate (default: [timing] target_rate_hz)")
 
     s = sub.add_parser("brake", help="run the brake scenarios")
     s.add_argument("--scenario", choices=[sc.id for sc in SCENARIOS], help="one scenario (default: all)")

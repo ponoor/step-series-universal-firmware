@@ -25,6 +25,8 @@ ALL = 255
 
 # Microsteps of a short move: 100 full steps at the default 1/128 step mode.
 MOVE = 12800
+# A servo target far enough that the motor still runs at MAX_SPEED 0.3 s later.
+FAR = 4 * MOVE
 
 # Delay symbols for checks, resolved from bench.toml [brake]:
 #   "latency":    brake output delay allowance (latency_allowance_ms)
@@ -187,8 +189,41 @@ COMMON_SETUP: tuple[Step, ...] = (
 _ACTIVATE = (osc("/activate", AXIS, 1, label="activate"), wait(0.5))
 
 
-def _brake_error(check_id: str, label: str, error: str, present: bool = True) -> Reply:
-    return Reply(check_id, label, "/error/command", (error, AXIS), present)
+def _brake_error(check_id: str, label: str, error: str, present: bool = True, window_s: float = 0.3) -> Reply:
+    return Reply(check_id, label, "/error/command", (error, AXIS), present, window_s)
+
+
+SERVO_CANCELLED = "ServoModeCancelledOnHiZ"
+
+# Servo mode, a far target, then 'Z' (HardHiZ to every driver, bypassing the firmware's
+# state) while the servo runs the motor. The servo mode must be cancelled by the HiZ
+# status: no excitation and no motion after 'Z', and ServoModeCancelledOnHiZ. A second
+# /enableServoMode 1 must work again (excites, follows a new target).
+_SERVO_TO_Z = (
+    osc("/enableServoMode", AXIS, 1, label="servo1"), wait(0.3),
+    osc("/setTargetPosition", AXIS, MOVE, label="target"), wait(0.2),
+    serial("Z", label="Z"), wait(1.0),
+)
+_SERVO_AGAIN = (
+    osc("/enableServoMode", AXIS, 1, label="servo2"), wait(0.1),
+    osc("/setTargetPosition", AXIS, 0, label="target2"), wait(0.2),
+    osc("/enableServoMode", AXIS, 0, label="servoOff"), wait(0.3),
+)
+
+
+def _servo_hiz_checks(resume_label: str) -> tuple:
+    """Checks of S1 / S2. resume_label: the first step after the observation of 'Z'."""
+    checks = (
+        Check("NOT-EXCITED-AFTER-Z", "excited", False, "Z", resume_label),
+        # /enableServoMode 1 sends a hard stop, which energizes the motor at once.
+        Check("EXCITED-AFTER-SERVO2", "excited", True, "servo2", "servoOff", LATENCY),
+    )
+    motion = (
+        # The Z time is the excitation-off edge (1 ms windows): skip the first readings.
+        Motion("POSITION-UNCHANGED-AFTER-Z", False, "Z", resume_label, delay=0.005),
+        Motion("MOVES-AFTER-SERVO2", True, "target2", "servoOff", delay=POLL),
+    )
+    return checks, motion
 
 
 SCENARIOS: tuple[Scenario, ...] = (
@@ -441,6 +476,90 @@ SCENARIOS: tuple[Scenario, ...] = (
         checks=(Check("RELEASED", "brake", True, "disable", None),),
         replies=(_brake_error("IGNORED-REPLY", "disable", "CommandIgnored"),),
         motion=(Motion("KEEPS-RUNNING", True, "disable", "softStop"),),
+    ),
+    Scenario(
+        "S1", "Driver HiZ by itself (serial Z) in the servo mode, brake disabled", "PASS",
+        extra_setup=(osc("/enableElectromagnetBrake", AXIS, 0),),
+        steps=_SERVO_TO_Z + _SERVO_AGAIN,
+        # The brake output stays low (engaged) while the brake is disabled.
+        invariants=(),
+        checks=_servo_hiz_checks("servo2")[0],
+        motion=_servo_hiz_checks("servo2")[1],
+        replies=(_brake_error("CANCELLED-REPLY", "Z", SERVO_CANCELLED),),
+        notes="Before the fix the servo update sent Run to the HiZ driver at the next update "
+              "(energized again, moving to the target) and no error was sent. Needs a HIL_PROBE build.",
+    ),
+    Scenario(
+        "S2", "Driver HiZ by itself (serial Z) in the servo mode, brake enabled and released", "PASS",
+        steps=_ACTIVATE + _SERVO_TO_Z + (osc("/activate", AXIS, 1, label="activate2"), wait(0.5)) + _SERVO_AGAIN,
+        # The brake engages at the next status poll.
+        exempt=(Exempt("INV-1", "Z", span=POLL),),
+        checks=_servo_hiz_checks("activate2")[0] + (
+            Check("ENGAGED-AFTER-Z", "brake", False, "Z", "activate2", POLL),
+            Check("RELEASED-AFTER-ACTIVATE2", "brake", True, "activate2", "servoOff", TRANSITION),
+        ),
+        motion=_servo_hiz_checks("activate2")[1],
+        replies=(
+            _brake_error("CANCELLED-REPLY", "Z", SERVO_CANCELLED),
+            _brake_error("ENGAGED-ON-HIZ-REPLY", "Z", "BrakeEngagedOnHiZ"),
+        ),
+        notes="Before the fix the brake engage on HiZ (B15) already cancelled the servo mode; only "
+              "the ServoModeCancelledOnHiZ reply is new.",
+    ),
+    Scenario(
+        "S3", "Commands that make the driver HiZ in the servo mode: no ServoModeCancelledOnHiZ", "PASS",
+        extra_setup=(osc("/enableElectromagnetBrake", AXIS, 0),),
+        steps=(
+            # Brake disabled
+            osc("/enableServoMode", AXIS, 1, label="servoA"), wait(0.2),
+            osc("/hardHiZ", AXIS, label="hardHiZ"), wait(0.3),
+            osc("/enableServoMode", AXIS, 1, label="servoB"), wait(0.1),
+            osc("/setTargetPosition", AXIS, FAR, label="targetB"), wait(0.3),
+            osc("/softHiZ", AXIS, label="softHiZ"), wait(0.5),
+            # Brake enabled (allowed while the driver is HiZ; the brake is then engaged)
+            osc("/enableElectromagnetBrake", AXIS, 1, label="enableBrake"), wait(0.2),
+            osc("/activate", AXIS, 1, label="activate1"), wait(0.5),
+            osc("/enableServoMode", AXIS, 1, label="servoC"), wait(0.1),
+            osc("/setTargetPosition", AXIS, -FAR, label="targetC"), wait(0.3),
+            osc("/activate", AXIS, 0, label="activate0"), wait(0.8),
+            osc("/activate", AXIS, 1, label="activate1b"), wait(0.5),
+            osc("/enableServoMode", AXIS, 1, label="servoD"), wait(0.1),
+            osc("/setTargetPosition", AXIS, FAR, label="targetD"), wait(0.3),
+            osc("/free", AXIS, label="free"), wait(0.5),
+        ),
+        # Brake disabled up to enableBrake: the output stays low while the motor is excited
+        # and moving. /free releases the brake with the motor HiZ on purpose.
+        exempt=(
+            Exempt("INV-2", "servoA", "enableBrake"),
+            Exempt("INV-3", "servoA", "enableBrake"),
+            Exempt("INV-1", "free"),
+        ),
+        checks=(
+            Check("HIZ-AFTER-HARDHIZ", "excited", False, "hardHiZ", "servoB", LATENCY),
+            # Decelerates from MAX_SPEED in about 0.2 s, then HiZ; no Run from the servo update.
+            Check("HIZ-AFTER-SOFTHIZ", "excited", False, "softHiZ", "enableBrake", 0.4),
+            Check("ENGAGED-AFTER-ACTIVATE0", "brake", False, "activate0", "activate1b", 0.5),
+            Check("HIZ-AFTER-ACTIVATE0", "excited", False, "activate0", "activate1b", 0.7),
+            Check("RELEASED-AFTER-FREE", "brake", True, "free", None, LATENCY),
+            Check("HIZ-AFTER-FREE", "excited", False, "free", None, LATENCY),
+        ),
+        motion=(
+            Motion("RUNS-BEFORE-SOFTHIZ", True, "targetB", "softHiZ", delay=0.1),
+            Motion("RUNS-BEFORE-ACTIVATE0", True, "targetC", "activate0", delay=0.1),
+            Motion("RUNS-BEFORE-FREE", True, "targetD", "free", delay=0.1),
+        ),
+        replies=(
+            _brake_error("HARDHIZ-NO-CANCEL", "hardHiZ", SERVO_CANCELLED, present=False),
+            _brake_error("SOFTHIZ-NO-CANCEL", "softHiZ", SERVO_CANCELLED, present=False, window_s=0.5),
+            _brake_error("ENABLE-BRAKE-ACCEPTED", "enableBrake", "CommandIgnored", present=False, window_s=0.2),
+            _brake_error("ACTIVATE0-NO-CANCEL", "activate0", SERVO_CANCELLED, present=False, window_s=0.8),
+            _brake_error("FREE-NO-CANCEL", "free", SERVO_CANCELLED, present=False, window_s=0.5),
+        ),
+        notes="These commands cancel the servo mode before the driver goes HiZ, so the HiZ status "
+              "must not be reported as ServoModeCancelledOnHiZ. /softHiZ and /activate 0 are sent "
+              "while the servo runs the motor to a far target, so they decelerate first. The "
+              "windows of the absent replies cover the HiZ (after the deceleration, and the "
+              "transition for /activate 0).",
     ),
     Scenario(
         "B18", "/resetDevice while released and running", "RECORD",

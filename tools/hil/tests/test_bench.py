@@ -146,9 +146,10 @@ def test_servo_delays():
 
 def test_servo_delays_excludes():
     p3 = np.array([0.010, 0.020, 0.100])
-    # before the first P3; 5 ms after; 14.9 ms after (kept); 15.1 ms after (left out); 2 ms after
-    p2 = np.array([0.005, 0.025, 0.0349, 0.0351, 0.102])
-    assert np.allclose(commands.servo_delays(p3, p2), [0.005, 0.0149, 0.002])
+    # before the first P3; 3.9 ms after (kept); 4.1 ms and 5 ms after (left out: a 5 ms
+    # slot whose P3 is missing must not be paired with the P3 of the slot before); 2 ms after
+    p2 = np.array([0.005, 0.0239, 0.0241, 0.025, 0.102])
+    assert np.allclose(commands.servo_delays(p3, p2), [0.0039, 0.002])
     assert commands.servo_delays(np.array([]), p2).size == 0
     assert commands.servo_delays(p3, np.array([])).size == 0
 
@@ -168,6 +169,73 @@ def test_timing_series_servo_delay():
     assert np.allclose(series["servoDelay"], [1000.0 if k % 2 == 0 else 3500.0 for k in range(9)])
     assert np.allclose(series["servoInterval"], [12500.0 if k % 2 == 0 else 7500.0 for k in range(8)])
     assert np.allclose(series["checkStatus"], 230.0)
+
+
+def test_timing_series_slot_interval():
+    cfg = default_cfg()
+    n = 100000
+    s = np.zeros(n, np.uint32)
+    d = cfg.probe_dio
+    # 5 ms slots: P3 and P2 in every slot, P4 (getMyId) in every other slot.
+    for k in range(19):
+        t3 = 1000 + 5000 * k
+        s[t3:t3 + 230] |= np.uint32(1 << d[3])
+        s[t3 + 240:t3 + 860] |= np.uint32(1 << d[2])
+        if k % 2 == 0:
+            s[t3 + 2000:t3 + 2013] |= np.uint32(1 << d[4])
+    series = commands.timing_series(cfg, analyze.segments_from_samples(s, 1e6))
+    assert np.allclose(series["slotInterval"], 5000.0)
+    assert np.allclose(series["servoInterval"], 5000.0)
+    assert np.allclose(series["pollInterval"], 10000.0)
+    assert np.allclose(series["servoDelay"], 240.0) and series["servoDelay"].size == 19
+
+
+def test_cpu_usage():
+    # 90 idle loops of 50 us and 10 loops of 550 us: 10 x 500 us busy of 9500 us.
+    loop = np.array([50.0] * 90 + [550.0] * 10)
+    cpu = commands.cpu_usage(loop)
+    assert cpu["base_loop_us"] == pytest.approx(50.0)
+    assert cpu["busy_fraction"] == pytest.approx(5000.0 / 10000.0)
+    # Stage 1 figure: (mean - min) / mean of the loop periods.
+    loop = np.array([52.0] * 99 + [2100.0])
+    assert commands.cpu_usage(loop)["busy_fraction"] == pytest.approx((loop.mean() - 52.0) / loop.mean())
+    assert commands.cpu_usage(np.array([]))["busy_fraction"] is None
+
+
+class TimingArgs:
+    def __init__(self, **kw):
+        self.position_report_ms = kw.get("position_report_ms")
+        self.position_list_report_ms = kw.get("position_list_report_ms")
+        self.burst_hz = kw.get("burst_hz", 0.0)
+        self.target_rate_hz = kw.get("target_rate_hz")
+
+
+def test_timing_load():
+    t = default_cfg().section("timing")
+    load = commands.timing_load(t, TimingArgs())
+    assert load["position_report_ms"] == int(t["position_report_ms"]) and load["position_list_report_ms"] == 0
+    assert load["target_rate_hz"] == float(t["target_rate_hz"]) and load["burst_hz"] == 0.0
+    assert load["burst"] is None
+    load = commands.timing_load(t, TimingArgs(position_list_report_ms=20, burst_hz=10, target_rate_hz=200))
+    assert load["position_report_ms"] == 0 and load["position_list_report_ms"] == 20
+    assert load["burst_hz"] == 10.0 and load["burst"] == "/getPosition 255" and load["target_rate_hz"] == 200.0
+    assert commands.timing_load(t, TimingArgs(position_report_ms=0))["position_report_ms"] == 0
+    with pytest.raises(commands.TimingArgsError):
+        commands.timing_load(t, TimingArgs(position_report_ms=20, position_list_report_ms=20))
+    with pytest.raises(commands.TimingArgsError):
+        commands.timing_load(t, TimingArgs(target_rate_hz=0))
+
+
+def test_timing_cli_options():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("hil_cli", Path(__file__).parent.parent / "hil.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    a = mod.build_parser().parse_args(["timing", "--label", "x", "--position-list-report-ms", "20",
+                                       "--burst-hz", "10", "--target-rate-hz", "200"])
+    assert a.position_list_report_ms == 20 and a.burst_hz == 10.0 and a.target_rate_hz == 200.0
+    assert a.position_report_ms is None
 
 
 # --- scenarios --------------------------------------------------------------------------
@@ -286,6 +354,75 @@ def test_serial_step_late_engage_fails(tmp_path):
     assert res["failed"] == {"INV-1", "ENGAGED-AFTER-Z"}
 
 
+def run_s1(tmp_path, fixed: bool):
+    """S1 (brake disabled), host times between the 20 ms polls: /enableServoMode 1 at 0.305 s,
+    target at 0.605 s, serial Z at 0.8 s (the driver goes HiZ at AD2 0.83 s), /enableServoMode 1
+    at 1.835 s, target 0 at 1.935 s, /enableServoMode 0 at 2.135 s; AD2 = host + 2 ms.
+    fixed: the firmware cancels the servo mode on HiZ. Otherwise the servo update energizes
+    the motor again 10 ms after Z, the motor keeps moving and no error is sent."""
+    cfg = default_cfg()
+    scenario = sc.get("S1")
+    t0 = 10**12
+    d = 0.002
+    t_hiz = 0.83
+    osc_steps = [st for st in scenario.steps if st.kind == "osc"]
+    host = dict(zip([st.label for st in osc_steps], [0.305, 0.605, 1.835, 1.935, 2.135]))
+    entries, log = [], []
+    for st in scenario.steps:
+        if st.kind == "osc":
+            e = LogEntry(t0 + int(host[st.label] * 1e9), "tx", st.address, (1, 1))
+            entries.append(e)
+            log.append((st, e.t_ns, e))
+        elif st.kind == "serial":
+            log.append((st, t0 + int(0.8e9), None))
+    t_target2 = host["target2"] + d
+
+    def position(t):
+        if t < 0.6 + d:
+            return 0
+        if t < t_hiz or (not fixed and t < t_target2):
+            return int((t - 0.6) * 10000)
+        if t < t_target2:
+            return int((t_hiz - 0.6) * 10000)
+        return 5000 - int((t - t_target2) * 10000)
+
+    for k in range(122):
+        h = 0.05 + 0.02 * k
+        q = LogEntry(t0 + int(h * 1e9), "tx", "/getPosition", (1,))
+        entries.append(q)
+        entries.append(LogEntry(q.t_ns + 10**6, "rx", "/position", (1, position(h + d))))
+    if fixed:
+        entries.append(LogEntry(t0 + int(0.85e9), "rx", "/error/command", (sc.SERVO_CANCELLED, 1)))
+    entries.sort(key=lambda x: x.t_ns)
+    p1 = [(x.t_ns - t0) / 1e9 + d for x in entries if x.direction == "tx"]
+    excited = [(0.302, t_hiz), (host["servo2"] + d, 2.6)] if fixed else [(0.302, t_hiz), (t_hiz + 0.01, 2.6)]
+    cap = make_capture(cfg, 2.6, p1, brake_high=[], excited=excited)
+    return commands.analyze_scenario(cfg, scenario, cap, FakeLink(entries), log, 0.1, 0.02, tmp_path)
+
+
+def test_s1_fixed_passes(tmp_path):
+    res = run_s1(tmp_path, fixed=True)
+    assert res["outcome"] == "PASS", res
+    z = next(d for d in res["delays"] if d["step"] == "Z")
+    assert z["t_s"] == pytest.approx(0.83, abs=0.002)
+
+
+def test_s1_before_fix_fails(tmp_path):
+    res = run_s1(tmp_path, fixed=False)
+    assert res["outcome"] == "FAIL"
+    assert res["failed"] == {"NOT-EXCITED-AFTER-Z", "POSITION-UNCHANGED-AFTER-Z", "CANCELLED-REPLY"}
+
+
+def test_s3_absent_reply_windows():
+    # The absent ServoModeCancelledOnHiZ replies cover the HiZ that follows each command.
+    s3 = sc.get("S3")
+    windows = {r.from_label: r.window_s for r in s3.replies if r.address == "/error/command"
+               and r.args[0] == sc.SERVO_CANCELLED}
+    assert set(windows) == {"hardHiZ", "softHiZ", "activate0", "free"}
+    assert all(not r.present for r in s3.replies)
+    assert windows["softHiZ"] >= 0.4 and windows["activate0"] >= 0.7
+
+
 # --- config -----------------------------------------------------------------------------
 
 
@@ -336,6 +473,10 @@ def test_parse_perf():
     assert p["loop"] == {"max_us": 1234, "avg_us": 45, "n": 1300000}
     assert p["servoInterval"]["avg_us"] == 10000
     assert p["oscSlowPath"] == 0 and p["oscNotMatched"] == 2
+    assert diag.SLOT_LATE_COUNTER not in p
+    # The 5 ms slot firmware adds a counter line; the other lines read as before.
+    p = diag.parse_perf(PERF_TEXT + "slotLate       3\n")
+    assert p[diag.SLOT_LATE_COUNTER] == 3 and p["loop"]["n"] == 1300000 and p["oscNotMatched"] == 2
 
 
 def test_parse_probe_map():
@@ -385,6 +526,7 @@ def test_compare(tmp_path: Path, capsys):
     out = capsys.readouterr().out
     assert "loop" in out and "-10.0" in out  # p50 of the loop: 50 -> 40 us
     assert "servoDelay" in out and "-20.0" in out  # servoDelay: 100 -> 80 us
+    assert "slotInterval" in out and "cpu" in out
     assert (Path(dirs[1]) / "compare_baseline" / "compare.csv").exists()
 
 

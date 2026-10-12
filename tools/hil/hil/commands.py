@@ -19,7 +19,7 @@ from . import analyze, plots
 from . import scenarios as sc
 from .ad2 import AD2, Capture
 from .config import HIL_DIR, NUM_MOTORS, Config
-from .diag import SerialDiag, parse_probe_map
+from .diag import SLOT_LATE_COUNTER, SerialDiag, parse_probe_map
 from .osc import OscError, OscLink
 
 RESULTS_DIR = HIL_DIR / "results"
@@ -414,12 +414,31 @@ def timing_series(cfg: Config, seg: analyze.Segments) -> dict[str, np.ndarray]:
         "getMyId": widths[4],
         "udpSend": widths[5],
         "servoInterval": analyze.intervals(e[2].rise) * 1e6,
+        "slotInterval": analyze.intervals(e[3].rise) * 1e6,
         "pollInterval": analyze.intervals(e[4].rise) * 1e6,
         "servoDelay": servo_delays(e[3].rise, e[2].rise) * 1e6,
     }
 
 
-SERVO_DELAY_MAX_S = 0.015
+# Below the 5 ms slot period, so that a P2 rise is never paired with the P3 rise of the
+# slot before (it was 15 ms with the 10 ms status poll).
+SERVO_DELAY_MAX_S = 0.004
+CPU_BASE_PERCENTILE = 1.0
+
+
+def cpu_usage(loop_us: np.ndarray, base_percentile: float = CPU_BASE_PERCENTILE) -> dict:
+    """Share of the time the loop spends beyond its shortest pass: the sum over all loop
+    passes of (pass - base) for passes longer than the base, divided by the sum of all
+    passes (the time from the first to the last P0 edge). base is the p1 of the loop
+    periods (the idle loop: OSC poll, serial poll, slot check)."""
+    v = np.asarray(loop_us, float)
+    if v.size == 0:
+        return {"base_loop_us": None, "busy_fraction": None, "recorded_us": 0.0}
+    base = float(np.percentile(v, base_percentile))
+    busy = float(np.sum(np.clip(v - base, 0.0, None)))
+    total = float(np.sum(v))
+    return {"base_loop_us": base, "base_percentile": base_percentile, "busy_us": busy,
+            "recorded_us": total, "busy_fraction": busy / total if total else None}
 
 
 def servo_delays(p3_rise: np.ndarray, p2_rise: np.ndarray, max_delay: float = SERVO_DELAY_MAX_S) -> np.ndarray:
@@ -455,8 +474,40 @@ def servo_settle(link: OscLink, axis: int, pos0: int) -> dict:
     return {"target": pos0, "wait_s": SERVO_SETTLE_S, "position": pos, "error": pos - pos0}
 
 
+class TimingArgsError(ValueError):
+    pass
+
+
+def timing_load(t: dict, args) -> dict:
+    """Load of a timing run from [timing] and the command line options."""
+    report_ms = getattr(args, "position_report_ms", None)
+    list_ms = getattr(args, "position_list_report_ms", None)
+    if report_ms is not None and list_ms is not None:
+        raise TimingArgsError("--position-report-ms and --position-list-report-ms cannot be used together")
+    if list_ms is not None:
+        report_ms = 0
+    elif report_ms is None:
+        report_ms = int(t["position_report_ms"])
+    rate_hz = getattr(args, "target_rate_hz", None)
+    burst_hz = float(getattr(args, "burst_hz", None) or 0.0)
+    for name, v in (("--position-report-ms", report_ms), ("--position-list-report-ms", list_ms or 0)):
+        if v < 0:
+            raise TimingArgsError(f"{name} must be 0 or more")
+    if (rate_hz is not None and rate_hz <= 0) or burst_hz < 0:
+        raise TimingArgsError("--target-rate-hz must be more than 0 and --burst-hz 0 or more")
+    return {"servo": "all", "target_rate_hz": float(rate_hz if rate_hz is not None else t["target_rate_hz"]),
+            "sine_amplitude": t["sine_amplitude"], "sine_period_s": t["sine_period"],
+            "position_report_ms": int(report_ms), "position_list_report_ms": int(list_ms or 0),
+            "burst_hz": burst_hz, "burst": "/getPosition 255" if burst_hz else None}
+
+
 def cmd_timing(cfg: Config, args) -> int:
     t = cfg.section("timing")
+    try:
+        load = timing_load(t, args)
+    except TimingArgsError as e:
+        print(f"error: {e}")
+        return 2
     duration = float(args.duration if args.duration else t["duration"])
     rate = float(args.rate if args.rate else t["digital_rate"])
     out = new_result_dir(args.label)
@@ -472,23 +523,24 @@ def cmd_timing(cfg: Config, args) -> int:
         summary["local_ip"] = connect_board(link)
         summary["firmware"] = firmware_version(link)
 
-        # Load (STATUS 7): servo mode on all motors, target list at 100 Hz, position reports.
-        report_ms = int(args.position_report_ms if args.position_report_ms is not None
-                        else t["position_report_ms"])
+        # Load (STATUS 7): servo mode on all motors, target list at target_rate_hz, position reports
+        # (one message per motor, or the list of all motors), optionally /getPosition 255 bursts.
         link.send("/setKval", axis, kval, kval, kval, kval)
         pos0 = int(link.request("/getPosition", axis, reply="/position",
                                 predicate=lambda a: int(a[0]) == axis).args[1])
         link.send("/enableServoMode", 255, 1)
-        link.send("/setPositionReportInterval", 255, report_ms)
-        summary["load"] = {"servo": "all", "target_rate_hz": t["target_rate_hz"],
-                           "sine_amplitude": t["sine_amplitude"], "sine_period_s": t["sine_period"],
-                           "position_report_ms": report_ms, "kval": kval}
+        if load["position_list_report_ms"]:
+            link.send("/setPositionReportInterval", 255, 0)
+            link.send("/setPositionListReportInterval", load["position_list_report_ms"])
+        else:
+            link.send("/setPositionReportInterval", 255, load["position_report_ms"])
+        summary["load"] = dict(load, kval=kval)
         time.sleep(0.5)
 
         stop = threading.Event()
 
         def send_targets():
-            period = 1.0 / float(t["target_rate_hz"])
+            period = 1.0 / load["target_rate_hz"]
             amp, sine_t = float(t["sine_amplitude"]), float(t["sine_period"])
             start = next_t = time.monotonic()
             while not stop.is_set():
@@ -498,16 +550,33 @@ def cmd_timing(cfg: Config, args) -> int:
                 next_t += period
                 time.sleep(max(0.0, next_t - time.monotonic()))
 
-        sender = threading.Thread(target=send_targets, daemon=True)
-        sender.start()
+        def send_bursts():
+            # A handler that sends several messages (8 x /position); the replies are not used.
+            period = 1.0 / load["burst_hz"]
+            next_t = time.monotonic() + period / 2  # not in step with the targets
+            while not stop.is_set():
+                time.sleep(max(0.0, next_t - time.monotonic()))
+                if stop.is_set():
+                    break
+                link.send("/getPosition", 255)
+                next_t += period
+
+        threads = [threading.Thread(target=send_targets, daemon=True)]
+        if load["burst_hz"]:
+            threads.append(threading.Thread(target=send_bursts, daemon=True))
+        for th in threads:
+            th.start()
         time.sleep(0.5)
         perf_before, text_before = diag.perf()  # resets the statistics
         rec = ad2.start_recording(duration, digital_rate=rate, sensible_mask=mask_of(cfg.probe_dio))
         cap = rec.wait()
         perf_after, text_after = diag.perf()
         stop.set()
-        sender.join(1.0)
+        for th in threads:
+            th.join(1.0)
         link.send("/setPositionReportInterval", 255, 0)
+        link.send("/setPositionListReportInterval", 0)
+        time.sleep(0.2)  # replies of the last bursts
         summary["servo_settle"] = servo_settle(link, axis, pos0)
         link.send("/enableServoMode", 255, 0)
         link.send("/softHiZ", axis)
@@ -528,6 +597,9 @@ def cmd_timing(cfg: Config, args) -> int:
     p1 = analyze.bit_edges(cap.digital, cfg.probe_dio[1]).rise
     summary["p1_vs_sent"] = {"sent": len(tx), "p1_pulses": int(p1.size)}
     summary["stats_us"] = {k: analyze.stats(v) for k, v in series.items()}
+    summary["cpu"] = cpu_usage(series["loop"])
+    # Slots run late by a whole period or more (5 ms slot firmware only; None before).
+    summary["slot_late"] = perf_after.get(SLOT_LATE_COUNTER)
     summary["perf_before"] = perf_before
     summary["perf_after"] = perf_after
     summary["perf_vs_probe"] = {
@@ -545,6 +617,10 @@ def cmd_timing(cfg: Config, args) -> int:
     print_table(["perf vs probe", "perf max", "probe max", "perf avg", "probe mean"],
                 [[k, v["perf_max_us"], v["probe_max_us"], v["perf_avg_us"], v["probe_mean_us"]]
                  for k, v in summary["perf_vs_probe"].items()])
+    cpu = summary["cpu"]
+    if cpu["busy_fraction"] is not None:
+        print(f"cpu: {cpu['busy_fraction'] * 100:.1f} % beyond the base loop of {cpu['base_loop_us']:.0f} us")
+    print(f"slot late (p): {'-' if summary['slot_late'] is None else summary['slot_late']}")
     settle = summary["servo_settle"]
     print(f"servo_settle: position {settle.get('position')} - target {settle['target']} = {settle['error']}"
           f" after {settle['wait_s']} s" + (f" ({settle['problem']})" if "problem" in settle else ""))
@@ -558,21 +634,27 @@ def cmd_compare(cfg: Config, args) -> int:
     dirs = [Path(d) for d in args.result_dirs]
     sums = [json.loads((d / "summary.json").read_text()) for d in dirs]
     labels = tuple(s.get("label", d.name) for s, d in zip(sums, dirs))
+    # From the captures, so that results recorded before a metric was added (slotInterval)
+    # or changed (servoDelay window) are compared with the same definitions.
+    series = [timing_series(cfg, Capture.load(d / "capture.npz").digital) for d in dirs]
+    stats_ab = [{k: analyze.stats(v) for k, v in s.items()} for s in series]
     rows = []
-    for metric in sums[0]["stats_us"]:
-        a, b = sums[0]["stats_us"][metric], sums[1]["stats_us"].get(metric)
+    for metric in stats_ab[0]:
+        a, b = stats_ab[0][metric], stats_ab[1].get(metric)
         if not b:
             continue
-        for key in ("p50", "p99", "p99_9", "max"):
+        for key in ("min", "p50", "p99", "p99_9", "max", "mean"):
             va, vb = a[key], b[key]
             delta = (vb - va) if va is not None and vb is not None else None
             rel = (delta / va * 100) if delta is not None and va else None
             rows.append([metric, key, va, vb, delta, rel])
+    cpu = [cpu_usage(s["loop"])["busy_fraction"] for s in series]
+    if None not in cpu:
+        rows.append(["cpu", "busy [%]", cpu[0] * 100, cpu[1] * 100, (cpu[1] - cpu[0]) * 100, None])
     out = dirs[1] / f"compare_{dirs[0].name}"
     out.mkdir(exist_ok=True)
     headers = ["metric", "stat", f"{labels[0]} [us]", f"{labels[1]} [us]", "delta [us]", "delta [%]"]
     write_csv(out / "compare.csv", headers, rows)
-    series = [timing_series(cfg, Capture.load(d / "capture.npz").digital) for d in dirs]
     plots.compare_histograms(series[0], series[1], labels, out / "compare_histograms.png")
     print_table(headers, rows)
     print(f"results: {out}")

@@ -100,6 +100,8 @@ cd tools/hil
 .venv/bin/python hil.py selftest --sync     # also the Scope / Digital In start offset
 .venv/bin/python hil.py timing --label head --duration 60
 .venv/bin/python hil.py timing --label head-r10 --position-report-ms 10
+.venv/bin/python hil.py timing --label head-l20 --position-list-report-ms 20
+.venv/bin/python hil.py timing --label head-burst --position-report-ms 20 --burst-hz 10
 .venv/bin/python hil.py compare results/<baseline dir> results/<head dir>
 .venv/bin/python hil.py brake               # all scenarios, or --scenario B3
 .venv/bin/python hil.py powerup --repeat 5  # interactive: power cycles the board
@@ -113,11 +115,22 @@ The console shows a summary table and the result directory only.
 | Command | What it does |
 |---|---|
 | `selftest` | Reboots the board. `probes`: records DIO 8-14 while the `P` serial command pulses each probe ch + 1 times, and checks the probe-to-DIO map and the firmware's pin map. `brake_map`: sends `b` 8 times and records which DIO 0-7 rises for each motor, and its delay against P4. `home_sw`: presses / releases DIO15 and checks `/homeSw` reports and `/getHomeSw`. `excitation`: records OUT1A energized at EL_POS 0 (`/hardStop`), energized 64 microsteps further (`/move`) and HiZ (`/hardHiZ`), KVAL from `[brake] kval`, and checks the classification. `sync` (with `--sync`): 5 recordings of P0 on Scope 2 and DIO 8, checks the per-recording alignment. |
-| `timing` | Reboots the board, applies the load (servo mode on all motors, `/setTargetPositionList` at 100 Hz, position reports every `[timing] position_report_ms`, or `--position-report-ms`; `0`: no reports), records the probes at 1 MHz for the duration, reads `p` before and after. Reports min / p50 / p99 / p99.9 / max / mean of the loop period, each handler, the servo and status poll intervals and `servoDelay`, and compares them with `perfStats`. Then records `servo_settle` (no pass / fail): stops the targets, sets the test axis target back to its start position, waits 1 s and reads the position. |
-| `compare` | Table of p50 / p99 / p99.9 / max of two `timing` results (every metric, `servoDelay` included) and overlaid histograms. |
+| `timing` | Reboots the board, applies the load (servo mode on all motors, `/setTargetPositionList` at `[timing] target_rate_hz` or `--target-rate-hz`, position reports, optional bursts; see below), records the probes at 1 MHz for the duration, reads `p` before and after. Reports min / p50 / p99 / p99.9 / max / mean of the loop period, each handler, the slot, servo and status poll intervals and `servoDelay`, the CPU usage, the `slotLate` counter of `p`, and compares them with `perfStats`. Then records `servo_settle` (no pass / fail): stops the targets, sets the test axis target back to its start position, waits 1 s and reads the position. |
+| `compare` | Table of min / p50 / p99 / p99.9 / max / mean of two `timing` results (every metric, and the CPU usage) and overlaid histograms. The statistics are computed again from both captures, so results recorded before a metric was added (`slotInterval`) or changed (the `servoDelay` window) are compared with the current definitions. |
 | `brake` | For each scenario of `hil/scenarios.py`: reboot, common setup, record (digital 1 MHz, OUT1A and P0 at 200 kS/s) while running the steps and polling `/getPosition` every 20 ms, then judge INV-1 to INV-3 and the scenario's checks. Saves a timing diagram per scenario. |
 | `reboot` | `--how R` (USB serial reboot), `resetDevice` (OSC) or `standby` (`Y`: the driver reset line floats for 300 ms while the MCU runs). With the test axis released and stopped: records the brake outputs, probes and OUT1A (10 kS/s across a restart), reports the OUT1A level segments from the driver standby entry and the driver registers read at boot (`D`). |
 | `powerup` | Needs Scope 2+ moved to 3.3 V and the STEP800 USB cable unplugged: USB VBUS is connected to the board's 5 V net without a diode (schematic sheet 1), so USB alone powers the 3.3 V rail and the 74HC595. Reports, per run, the initial level and every edge of each brake output until the first P4 rise. The 74HC595 output register is not cleared at power-up (SHIFTOUT_ENABLE / R3 clear only the shift register, G is tied to GND), so the outputs keep their power-up state until the first RCK edge. Afterwards, move Scope 2+ back to P0. Arms a recording triggered by the 3.3 V rise on Scope 2, asks for a power cycle, and reports any brake output that is HIGH (released) before the first P4 rise. |
+
+### Timing load
+
+| Option | Default | Load |
+|---|---|---|
+| `--position-report-ms <ms>` | `[timing] position_report_ms` | `/setPositionReportInterval 255 <ms>`: one `/position` per motor (8 UDP sends) every `<ms>`. `0`: no reports |
+| `--position-list-report-ms <ms>` | off | `/setPositionListReportInterval <ms>`: one `/positionList` of all motors every `<ms>`, per-motor reports off. Not with `--position-report-ms` |
+| `--burst-hz <Hz>` | 0 (none) | `/getPosition 255` at this rate besides the targets (8 `/position` replies per message, not used): the worst case of a handler that sends several messages just before a slot |
+| `--target-rate-hz <Hz>` | `[timing] target_rate_hz` | rate of `/setTargetPositionList` |
+
+The values used are stored in `summary.json` (`load`).
 
 ### Timing metrics
 
@@ -126,11 +139,21 @@ The console shows a summary table and the result directory only.
 | `loop` | P0 | time between two P0 edges (one `loop()` pass) |
 | `oscReceive`, `updateServo`, `checkStatus`, `getMyId`, `udpSend` | P1-P5 | pulse width of the handler |
 | `servoInterval` | P2 | time between two P2 rises (servo update period) |
-| `pollInterval` | P4 | time between two P4 rises (status poll period) |
-| `servoDelay` | P3, P2 | time from the last P3 rise (checkStatus, start of the status poll) at or before a P2 rise to that P2 rise: how late the servo update starts in the status poll. P2 rises with no P3 rise within 15 ms before them are left out |
+| `slotInterval` | P3 | time between two P3 rises: the period of the status read (checkStatus), which starts every slot (5 ms; 10 ms with the status poll of earlier firmware) |
+| `pollInterval` | P4 | time between two P4 rises (getMyId: every 10 ms, every other slot) |
+| `servoDelay` | P3, P2 | time from the last P3 rise (checkStatus, start of the slot) at or before a P2 rise to that P2 rise: how late the servo update starts in the slot. P2 rises with no P3 rise within 4 ms before them are left out (below the 5 ms slot, so that a P2 rise is never paired with the P3 rise of the slot before; it was 15 ms with the 10 ms poll) |
 
-`summary.json` also has `load.position_report_ms` (the interval used) and `servo_settle`
-(`target`, `position`, `error` = position - target).
+**CPU usage** (`summary.json` `cpu`, also in `compare`): every pass of `loop()` toggles
+P0, so the P0 edge intervals are the loop passes. The shortest pass (taken as the p1 of
+the intervals, `base_loop_us`, about 52 us: OSC and serial polls with nothing to do) is
+the idle loop. `busy_fraction` = sum over all passes of (pass - base) for the passes
+longer than base, divided by the sum of all passes (the recorded time). With all passes
+at the base it is 0. It equals (mean - base) / mean of the loop periods, the stage 1
+estimate (about 28 % with the 10 ms status poll).
+
+`summary.json` also has `load` (above), `slot_late` (the `slotLate` counter of `p` after
+the recording: slots that started a whole period or more late; `null` with firmware
+without it) and `servo_settle` (`target`, `position`, `error` = position - target).
 
 ## How it works
 
@@ -207,6 +230,22 @@ restart with `hil.py reboot` (the standby entry is the first 1 ms window above 3
 with `D`: CONFIG 0x2E88 (power-on default) at boot means the drivers were reset.
 HIL_PROBE builds also set P0 high just before a firmware reset; the bootloader drives
 P0 (D1, UART TX) about 30 ms after the reset.
+
+**Servo mode and driver HiZ (S1-S3).** S1 and S2 run the servo mode to a far target and
+send `Z` while the motor moves: the firmware must cancel the servo mode from the HiZ
+status (no excitation and no position change after `Z` up to the next command, and
+`/error/command ServoModeCancelledOnHiZ` within 300 ms), and a second
+`/enableServoMode 1` must work again (excited at once, follows a new target 0).
+
+| ID | Setup | Steps | Checks |
+|---|---|---|---|
+| S1 | brake disabled | `/enableServoMode 1`, target 12800, `Z` 0.2 s later, 1.0 s, `/enableServoMode 1`, target 0, `/enableServoMode 0` | not excited and position unchanged after `Z`; `ServoModeCancelledOnHiZ`; excited after the second `/enableServoMode 1`, moving after target 0 |
+| S2 | brake enabled, `/activate 1` | as S1, with `/activate 1` before the second `/enableServoMode 1` | as S1, and `BrakeEngagedOnHiZ`, brake engaged after `Z` (next status poll), released after `/activate 1` |
+| S3 | brake disabled, then enabled | servo mode, then `/hardHiZ`; servo mode with a far target, `/softHiZ` while running; `/enableElectromagnetBrake 1` (driver HiZ); `/activate 1`, servo mode with a far target, `/activate 0` while running; `/activate 1`, servo mode with a far target, `/free` | no `ServoModeCancelledOnHiZ` after any of the four commands (the windows cover the deceleration and the brake transition); HiZ after each command (and the deceleration); brake engaged after `/activate 0`, released after `/free`; the motor runs before `/softHiZ`, `/activate 0` and `/free` |
+
+In S3 the invariants INV-2 and INV-3 are not checked while the brake is disabled (the
+output stays low while the motor moves), and INV-1 not after `/free`. Before the fix of
+the servo mode on HiZ, S1 fails on all three `Z` checks and S2 only on the reply.
 
 B18-B20 restart the board: only the first P1 pulses (one per message sent)
 are matched, because the probe pins float during the restart, and the position is not

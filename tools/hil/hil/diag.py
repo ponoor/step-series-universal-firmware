@@ -1,6 +1,6 @@
 """USB serial diagnosis commands of the firmware (src/diagnosis.cpp):
 p (timing stats, then reset), P (probe self-test, HIL_PROBE builds), b (brake output
-test), s (status), R (reboot)."""
+test), s (status), R (reboot), Z (HardHiZ to all drivers, HIL_PROBE builds)."""
 
 from __future__ import annotations
 
@@ -117,6 +117,12 @@ class SerialDiag:
         text = self.command("b", until=r"Turn on #\d+")
         m = BRAKE_LINE.search(text)
         return int(m.group(1)), int(m.group(2))
+
+    def send(self, ch: str) -> None:
+        """Sends a command without waiting for its output (e.g. 'Z' during a recording)."""
+        self._ser.reset_input_buffer()
+        self._ser.write(ch.encode())
+        self._ser.flush()
 
     def status(self) -> str:
         return self.command("s", idle=0.5)

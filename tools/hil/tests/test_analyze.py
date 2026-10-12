@@ -269,3 +269,38 @@ def test_check_constant():
     assert a.check_constant(RELEASED, 1.2, 2.9, True, "X").passed
     r = a.check_constant(RELEASED, 1.2, 4.0, True, "X")
     assert not r.passed and r.violations == [(3.0, 4.0)]
+
+
+def test_first_edge_to():
+    sig = a.Step(np.array([0.0, 1.0, 2.0, 3.0]), np.array([True, False, True, False]), 4.0)
+    assert a.first_edge_to(sig, 0.5, False) == 1.0
+    assert a.first_edge_to(sig, 1.0, False) == 3.0
+    assert a.first_edge_to(sig, 0.5, True) == 2.0
+    assert a.first_edge_to(sig, 3.5, True) is None
+
+
+def test_check_motion():
+    t = np.arange(10) * 0.02
+    moving = np.arange(10) * 128
+    assert a.check_motion(t, moving, 0.0, 1.0, True, "M").passed
+    assert not a.check_motion(t, moving, 0.0, 1.0, False, "M").passed
+    still = np.full(10, 5)
+    assert a.check_motion(t, still, 0.0, 1.0, False, "M").passed
+    stops = np.array([0, 1, 2, 3, 3, 3, 3, 3, 3, 3])
+    r = a.check_motion(t, stops, 0.0, 1.0, True, "M")
+    assert not r.passed and len(r.violations) == 6
+    assert a.check_motion(t, stops, 0.07, 1.0, False, "M").passed
+    # Too few readings in the window
+    assert not a.check_motion(t, still, 0.0, 0.03, False, "M").passed
+
+
+def test_check_engage_after_stop():
+    t = np.arange(20) * 0.02
+    pos = np.concatenate((np.arange(10) * 100, np.full(10, 900)))  # last change between t[8] and t[9]
+    def brake(t_eng):
+        return a.Step(np.array([0.0, t_eng]), np.array([True, False]), 1.0)
+    assert a.check_engage_after_stop(brake(0.17), t, pos, 0.0, "E").passed
+    assert a.check_engage_after_stop(brake(0.16), t, pos, 0.0, "E").passed   # at t[8]
+    assert not a.check_engage_after_stop(brake(0.10), t, pos, 0.0, "E").passed
+    never = a.Step(np.array([0.0]), np.array([True]), 1.0)
+    assert not a.check_engage_after_stop(never, t, pos, 0.0, "E").passed

@@ -546,12 +546,25 @@ def cmd_compare(cfg: Config, args) -> int:
 # --------------------------------------------------------------------------------------
 
 
-def _run_steps(steps, values: dict, link: OscLink, ad2: AD2 | None, log: list | None) -> None:
+def scenario_values(cfg: Config) -> dict:
+    """Values of the placeholders of the scenarios (AXIS, KVAL, ...)."""
+    b = cfg.section("brake")
+    return {"axis": cfg.test_axis, "kval": int(b["kval"]), "max_speed": float(b["max_speed"]),
+            "transition_ms": int(b["transition_ms"])}
+
+
+def _run_steps(steps, values: dict, link: OscLink, ad2: AD2 | None, log: list | None,
+               diag: SerialDiag | None = None) -> None:
     for st in steps:
         if st.kind == "osc":
             entry = link.send(st.address, *sc.resolve_args(st.args, values))
             if log is not None:
                 log.append((st, entry.t_ns, entry))
+        elif st.kind == "serial":
+            t = time.monotonic_ns()
+            diag.send(st.address)
+            if log is not None:
+                log.append((st, t, None))
         elif st.kind == "wait":
             time.sleep(st.seconds)
         elif st.kind in ("press", "release"):
@@ -567,8 +580,7 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
                  out: Path) -> dict:
     b = cfg.section("brake")
     axis = cfg.test_axis
-    values = {"axis": axis, "kval": int(b["kval"]), "max_speed": float(b["max_speed"]),
-              "transition_ms": int(b["transition_ms"])}
+    values = scenario_values(cfg)
     transition = int(b["transition_ms"]) / 1e3
     latency = int(b["latency_allowance_ms"]) / 1e3
 
@@ -606,7 +618,7 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
             poller.start()
         time.sleep(0.3)
         log: list = []
-        _run_steps(scenario.steps, values, link, ad2, log)
+        _run_steps(scenario.steps, values, link, ad2, log, diag)
         time.sleep(0.3)
     finally:
         stop.set()
@@ -646,6 +658,9 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     probe = cfg.probe_dio
     tx = tx_in_window(link, cap)
     p1 = analyze.bit_edges(seg, probe[1]).rise
+    if scenario.reboots:
+        # The probe pins float while the board restarts: keep the pulses of the messages.
+        p1 = p1[:len(tx)]
     try:
         fit = analyze.match_commands(np.array([host_s(cap, e.t_ns) for e in tx]), p1)
     except analyze.MatchError as ex:
@@ -656,23 +671,6 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
                         "note": "host -> board network delay; used only to find the DIO15 edge of press/release"}
     tx_index = {id(e): i for i, e in enumerate(tx)}
 
-    # AD2 time of each logged step.
-    label_t: dict[str, float] = {}
-    commands = []
-    dio15 = analyze.bit_edges(seg, 15)
-    for st, t_ns, entry in log:
-        if entry is not None:
-            t = float(p1[tx_index[id(entry)]])
-        else:
-            # press / release: the DIO15 edge nearest to the host time.
-            t = float(fit.to_ad2(host_s(cap, t_ns)))
-            edges = dio15.fall if st.kind == "press" else dio15.rise
-            if edges.size:
-                t = float(edges[np.argmin(np.abs(edges - t))])
-        if st.label:
-            label_t[st.label] = t
-        commands.append((t, st.label or st.address or st.kind, st))
-
     end = seg.duration
     released = analyze.Step.from_edges(analyze.bit_edges(seg, cfg.brake_dio))
     try:
@@ -681,6 +679,36 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
         res.update(outcome="ERROR", error=str(ex), retryable=True)
         return res
     excited, _, _ = excitation_step(cfg, cap, shift)
+
+    # AD2 time (and host time) of each logged step.
+    label_t: dict[str, float] = {}
+    label_host_ns: dict[str, int] = {}
+    commands = []
+    timing_notes = []
+    dio15 = analyze.bit_edges(seg, 15)
+    t_prev = 0.0
+    for st, t_ns, entry in log:
+        if entry is not None:
+            t = float(p1[tx_index[id(entry)]])
+        elif st.kind == "serial":
+            # No probe pulse: the first change of the signal the command acts on.
+            t = analyze.first_edge_to(excited, t_prev, False) if st.edge == sc.EXCITATION_OFF else None
+            if t is None:
+                t = float(fit.to_ad2(host_s(cap, t_ns)))
+                timing_notes.append(f"{st.label or st.address}: no {st.edge} edge, host time used")
+        else:
+            # press / release: the DIO15 edge nearest to the host time.
+            t = float(fit.to_ad2(host_s(cap, t_ns)))
+            edges = dio15.fall if st.kind == "press" else dio15.rise
+            if edges.size:
+                t = float(edges[np.argmin(np.abs(edges - t))])
+        t_prev = t
+        if st.label:
+            label_t[st.label] = t
+            label_host_ns[st.label] = t_ns
+        commands.append((t, st.label or st.address or st.kind, st))
+    if timing_notes:
+        res["step_timing_notes"] = timing_notes
     axis = cfg.test_axis
     # A position is read when the board processes the request: time it at the request's
     # P1 rise (the network delay, up to about 80 ms over Wi-Fi, does not matter then).
@@ -691,7 +719,10 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
 
     exempt: dict[str, list] = {}
     for ex in scenario.exempt:
-        t_to = label_t[ex.to_label] + latency if ex.to_label else end
+        if ex.span is not None:
+            t_to = label_t[ex.from_label] + sc.resolve_delay(ex.span, transition, latency)
+        else:
+            t_to = label_t[ex.to_label] + latency if ex.to_label else end
         exempt.setdefault(ex.invariant, []).append((label_t[ex.from_label], t_to))
     window = float(cfg.section("excitation")["window_ms"]) / 1e3
     checks: list[analyze.CheckResult] = []
@@ -706,6 +737,17 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
         t_to = label_t[c.to_label] if c.to_label else end
         sig = released if c.signal == "brake" else excited
         checks.append(analyze.check_constant(sig, t_from, t_to, c.value, c.id))
+    for m in scenario.motion:
+        t_from = label_t[m.from_label]
+        if isinstance(m, sc.EngageAfterStop):
+            checks.append(analyze.check_engage_after_stop(released, pos_t, pos, t_from, m.id))
+            continue
+        t_from += sc.resolve_delay(m.delay, transition, latency)
+        t_to = (label_t[m.to_label] if m.to_label else end) - sc.resolve_delay(m.to_delay, transition, latency)
+        checks.append(analyze.check_motion(pos_t, pos, t_from, t_to, m.moving, m.id))
+    values = scenario_values(cfg)
+    for r in scenario.replies:
+        checks.append(check_reply(link, r, label_host_ns[r.from_label], sc.resolve_args(r.args, values)))
     failed = {c.id for c in checks if not c.passed}
     outcome, as_expected = sc.verdict(scenario, failed)
     res.update(outcome=outcome, as_expected=as_expected, failed=failed, checks=[c.to_dict() for c in checks])
@@ -715,12 +757,14 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     p6 = analyze.bit_edges(seg, probe[6]).rise
     delays = []
     for t, name, st in commands:
-        if st.kind != "osc":
+        if st.kind not in ("osc", "serial"):
             continue
         nxt = analyze.first_change_after(released, t)
+        ex_nxt = analyze.first_change_after(excited, t)
         p6_after = p6[(p6 > t) & (p6 < t + 1.0)]
         delays.append({"step": name, "t_s": t,
                        "brake_change_ms": (nxt - t) * 1e3 if nxt is not None and nxt - t < 1.0 else None,
+                       "excited_change_ms": (ex_nxt - t) * 1e3 if ex_nxt is not None and ex_nxt - t < 2.0 else None,
                        "first_p6_ms": (p6_after[0] - t) * 1e3 if p6_after.size else None})
     overlaps = analyze.intersect(released.intervals(False), excited.intervals(True))
     res["reply_loss"] = reply_loss(cfg, cap, tx, p1, req_idx, replies, "/getPosition")
@@ -736,6 +780,28 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     events += [[round(t, 6), "excited", int(v)] for t, v in zip(excited.times, excited.values)]
     write_csv(out / f"{scenario.id}_events.csv", ["t_s", "signal", "value"], sorted(events))
     return res
+
+
+def check_reply(link, reply: sc.Reply, t_ns: int, args: tuple) -> analyze.CheckResult:
+    """The board sends `reply.address` with these leading args within the window after the
+    host time t_ns of the step (present), or does not (absent)."""
+    t_to = t_ns + int(reply.window_s * 1e9)
+
+    def matches(e) -> bool:
+        if e.address != reply.address or len(e.args) < len(args):
+            return False
+        return all((a == b) if isinstance(a, str) else (isinstance(b, (int, float)) and float(a) == float(b))
+                   for a, b in zip(args, e.args))
+
+    hits = [e for e in link.entries("rx", t_ns, t_to) if matches(e)]
+    ok = bool(hits) == reply.present
+    want = f"{reply.address} {' '.join(str(a) for a in args)}".strip()
+    if hits:
+        detail = f"{want} received {(hits[0].t_ns - t_ns) / 1e6:.1f} ms after the step"
+    else:
+        detail = f"no {want} within {reply.window_s * 1e3:.0f} ms"
+    return analyze.CheckResult(reply.id, ok, [] if ok else [(0.0, 0.0)],
+                               detail + ("" if ok else f" (expected {'present' if reply.present else 'absent'})"))
 
 
 def match_replies(cfg: Config, cap: Capture, tx: list, link, request: str, reply: str,

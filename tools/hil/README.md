@@ -169,7 +169,23 @@ P1 rise of their request, and the home switch steps at the DIO15 edges, so the n
 delay does not enter the judgement (over Wi-Fi it varied from 3 to 86 ms).
 
 Scenarios can exempt an invariant over a range (e.g. INV-1 after `/free`, which releases
-the brake with the motor HiZ on purpose) and add checks that a signal keeps a value.
+the brake with the motor HiZ on purpose) and add checks:
+
+| Check | Judged on | Meaning |
+|---|---|---|
+| `Check` | AD2 | the brake output or the excitation keeps a value over a window |
+| `Motion` | `/position` readings, timed at the P1 rise of their request | the position changes between every two readings (moving), or never changes |
+| `EngageAfterStop` | AD2 + `/position` | the brake engages only after the last reading that is followed by a change |
+| `Reply` | host time | an OSC message from the board (e.g. `/error/command BrakeEngaged <axis>`) arrives, or not, within 300 ms after the step. The window is wide because it includes the network delay |
+
+Steps can also be USB serial commands (`serial("Z")`). They have no probe pulse, so their
+AD2 time is the first excitation-off edge on OUT1A after the previous step. `Z` (HIL_PROBE
+builds only) sends HardHiZ to every driver, bypassing the brake state machine, to
+simulate a driver that goes HiZ by itself (overcurrent, thermal shutdown, UVLO).
+
+B18 (`/resetDevice`) restarts the board: only the first P1 pulses (one per message sent)
+are matched, because the probe pins float during the restart, and the position is not
+polled. Run it last (`hil.py brake` does).
 
 ## Tests
 
@@ -187,7 +203,7 @@ The tests use synthetic data and run without the hardware.
 | `hil.py` | CLI |
 | `hil/ad2.py` | AD2 open/close, recording, DIO15 open-drain control |
 | `hil/osc.py` | OSC send/receive with timestamps, `/setDestIp` check |
-| `hil/diag.py` | USB serial commands (`p`, `P`, `b`, `s`, `R`) |
+| `hil/diag.py` | USB serial commands (`p`, `P`, `b`, `s`, `R`, `Z`) |
 | `hil/analyze.py` | edges, durations, statistics, command matching, excitation, invariants |
 | `hil/scenarios.py` | brake scenarios as data |
 | `hil/commands.py` | subcommands |

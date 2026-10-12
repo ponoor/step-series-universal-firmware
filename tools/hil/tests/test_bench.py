@@ -145,21 +145,105 @@ def test_scenario_definitions(scenario):
         assert c.signal in ("brake", "excited")
     for ex in scenario.exempt:
         assert ex.from_label in labels and (ex.to_label is None or ex.to_label in labels)
-    ids = set(scenario.invariants) | {c.id for c in scenario.checks}
+        assert ex.span is None or ex.to_label is None
+    for r in scenario.replies:
+        assert r.from_label in labels and r.address.startswith("/")
+    for m in scenario.motion:
+        assert m.from_label in labels
+        assert getattr(m, "to_label", None) is None or m.to_label in labels
+    if scenario.motion:
+        assert scenario.poll_position
+    ids = scenario.check_ids()
+    assert len(ids) == len(scenario.invariants) + len(scenario.checks) + len(scenario.replies) + len(scenario.motion)
     if scenario.expect == "FAIL":
         assert scenario.expected_failures and scenario.expected_failures <= ids
     values = {"axis": 1, "kval": 16, "max_speed": 200.0, "transition_ms": 100}
     for st in sc.COMMON_SETUP + scenario.extra_setup + scenario.steps:
         for arg in sc.resolve_args(st.args, values):
             assert isinstance(arg, (int, float)) and not isinstance(arg, bool)
+        if st.kind == "serial":
+            assert st.label and st.edge == sc.EXCITATION_OFF
+    if scenario.reboots:
+        assert scenario is sc.SCENARIOS[-1] and not scenario.poll_position
 
 
 def test_verdict():
-    s_fail = sc.get("B2")
+    s_fail = sc.Scenario("X", "known defect", "FAIL", steps=(), expected_failures=frozenset({"INV-2", "INV-3"}))
     assert sc.verdict(s_fail, {"INV-2", "INV-3"}) == ("FAIL", True)
     assert sc.verdict(s_fail, {"INV-2"}) == ("FAIL", False)
     assert sc.verdict(sc.get("B1"), set()) == ("PASS", True)
+    assert sc.verdict(sc.get("B2"), {"INV-2"}) == ("FAIL", False)
     assert sc.verdict(sc.get("B5"), {"INV-1"}) == ("FAIL", None)
+
+
+def test_resolve_delay():
+    assert sc.resolve_delay(sc.LATENCY, 0.1, 0.03) == pytest.approx(0.03)
+    assert sc.resolve_delay(sc.TRANSITION, 0.1, 0.03) == pytest.approx(0.13)
+    assert sc.resolve_delay(sc.POLL, 0.1, 0.03) == pytest.approx(0.04)
+    assert sc.resolve_delay(0.5, 0.1, 0.03) == 0.5
+
+
+def test_check_reply():
+    t0 = 10**12
+    entries = [LogEntry(t0 + 5 * 10**6, "rx", "/error/command", ("BrakeEngaged", 1)),
+               LogEntry(t0 + 400 * 10**6, "rx", "/error/command", ("CommandIgnored", 1))]
+    link = FakeLink(entries)
+    present = sc.Reply("R", "x", "/error/command", ("BrakeEngaged", sc.AXIS))
+    args = sc.resolve_args(present.args, {"axis": 1})
+    assert commands.check_reply(link, present, t0, args).passed
+    assert not commands.check_reply(link, present, t0, ("BrakeEngaged", 2)).passed
+    # Outside the 300 ms window
+    late = sc.Reply("R", "x", "/error/command", ("CommandIgnored", 1))
+    assert not commands.check_reply(link, late, t0, late.args).passed
+    absent = sc.Reply("R", "x", "/error/command", ("CommandIgnored", 1), present=False)
+    assert commands.check_reply(link, absent, t0, absent.args).passed
+    assert not commands.check_reply(link, sc.Reply("R", "x", "/error/command", ("BrakeEngaged", 1), False),
+                                    t0, ("BrakeEngaged", 1)).passed
+    # Numeric arguments compare by value; a string never matches a number.
+    assert commands.check_reply(FakeLink([LogEntry(t0 + 1, "rx", "/homingStatus", (1, 1))]),
+                                sc.Reply("R", "x", "/homingStatus", (1, 1)), t0, (1, 1.0)).passed
+    assert not commands.check_reply(FakeLink([LogEntry(t0 + 1, "rx", "/a", ("1",))]),
+                                    sc.Reply("R", "x", "/a", (1,)), t0, (1,)).passed
+
+
+def run_b15(tmp_path, engage_after):
+    """B15: /activate 1 at 0.3 s (AD2 = host + 2 ms), brake released at 0.41 s, serial Z at
+    host 0.9 s; the motor goes HiZ at 0.93 s (the serial latency is unknown to the host) and
+    the brake engages engage_after seconds later."""
+    cfg = default_cfg()
+    scenario = sc.get("B15")
+    t0 = 10**12
+    act, z = scenario.steps[0], scenario.steps[2]
+    e = LogEntry(t0 + int(0.3e9), "tx", "/activate", (1, 1))
+    log = [(act, e.t_ns, e), (z, t0 + int(0.9e9), None)]
+    entries = [e]
+    pos_tx = []
+    for k in range(60):
+        h = 0.05 + 0.02 * k
+        q = LogEntry(t0 + int(h * 1e9), "tx", "/getPosition", (1,))
+        entries.append(q)
+        pos_tx.append(q)
+        entries.append(LogEntry(q.t_ns + 10**6, "rx", "/position", (1, 0)))
+    entries.append(LogEntry(t0 + int(0.95e9), "rx", "/error/command", ("BrakeEngagedOnHiZ", 1)))
+    entries.sort(key=lambda x: x.t_ns)
+    p1 = [(x.t_ns - t0) / 1e9 + 0.002 for x in entries if x.direction == "tx"]
+    t_hiz = 0.93
+    cap = make_capture(cfg, 1.4, p1, brake_high=[(0.41, t_hiz + engage_after)], excited=[(0.302, t_hiz)])
+    return commands.analyze_scenario(cfg, scenario, cap, FakeLink(entries), log, 0.1, 0.03, tmp_path)
+
+
+def test_serial_step_timed_by_excitation(tmp_path):
+    res = run_b15(tmp_path, engage_after=0.012)
+    assert res["outcome"] == "PASS", res
+    z = next(d for d in res["delays"] if d["step"] == "Z")
+    assert z["t_s"] == pytest.approx(0.93, abs=0.002)
+    assert "step_timing_notes" not in res
+
+
+def test_serial_step_late_engage_fails(tmp_path):
+    res = run_b15(tmp_path, engage_after=0.08)
+    assert res["outcome"] == "FAIL"
+    assert res["failed"] == {"INV-1", "ENGAGED-AFTER-Z"}
 
 
 # --- config -----------------------------------------------------------------------------

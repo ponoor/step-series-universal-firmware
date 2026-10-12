@@ -449,3 +449,50 @@ def first_change_after(signal: Step, t: float) -> float | None:
     tr = signal.transitions()
     after = tr[tr > t]
     return float(after[0]) if after.size else None
+
+
+def first_edge_to(signal: Step, t: float, value: bool) -> float | None:
+    """Time of the first transition of the signal to `value` after t (None if none)."""
+    times, values = signal.times[1:], signal.values[1:]
+    sel = (times > t) & (values == value)
+    return float(times[sel][0]) if np.any(sel) else None
+
+
+def check_motion(pos_t: np.ndarray, pos: np.ndarray, t_from: float, t_to: float, moving: bool,
+                 check_id: str) -> CheckResult:
+    """The position readings in [t_from, t_to] change between every two consecutive readings
+    (moving) or never change (not moving). Needs at least 3 readings."""
+    pos_t = np.asarray(pos_t, float)
+    pos = np.asarray(pos)
+    sel = (pos_t >= t_from) & (pos_t <= t_to)
+    t, p = pos_t[sel], pos[sel]
+    what = "changing" if moving else "constant"
+    if p.size < 3:
+        return CheckResult(check_id, False, [(t_from, t_to)], f"only {p.size} position reading(s) from "
+                           f"{t_from:.3f} s to {t_to:.3f} s; expected {what}")
+    changed = p[1:] != p[:-1]
+    bad_k = np.flatnonzero(~changed if moving else changed)
+    bad = [(float(t[k]), float(t[k + 1])) for k in bad_k]
+    return CheckResult(check_id, not bad, bad, f"{p.size} readings from {t_from:.3f} s to {t_to:.3f} s, "
+                       f"expected {what}; {len(bad)} pair(s) not")
+
+
+def check_engage_after_stop(released: Step, pos_t: np.ndarray, pos: np.ndarray, t_from: float,
+                            check_id: str) -> CheckResult:
+    """After t_from, the brake engages only once the motor has stopped: the first engage edge
+    is not before the earlier reading of the last pair of readings that differ."""
+    t_eng = first_edge_to(released, t_from, False)
+    pos_t = np.asarray(pos_t, float)
+    pos = np.asarray(pos)
+    sel = pos_t >= t_from
+    t, p = pos_t[sel], pos[sel]
+    changed = np.flatnonzero(p[1:] != p[:-1]) if p.size >= 2 else np.array([], int)
+    t_moving = float(t[changed[-1]]) if changed.size else t_from
+    t_still = float(t[changed[-1] + 1]) if changed.size else t_from
+    if t_eng is None:
+        return CheckResult(check_id, False, [(t_from, released.t_end)], "the brake did not engage")
+    ok = t_eng >= t_moving
+    return CheckResult(check_id, ok, [] if ok else [(t_eng, t_moving)],
+                       f"engaged {(t_eng - t_from) * 1e3:.1f} ms after the step; last reading followed by a "
+                       f"change at {(t_moving - t_from) * 1e3:.1f} ms, first reading after the stop at "
+                       f"{(t_still - t_from) * 1e3:.1f} ms")

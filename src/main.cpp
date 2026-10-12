@@ -45,6 +45,9 @@ void setup()
     resetCause = readResetCause(&resetCauseRaw); // before any other initialization
     SerialUSB.begin(9600);
     HIL_PROBE_INIT();
+#ifdef HIL_PROBE
+    hilCaptureDriversAtBoot(driverSPI);
+#endif
 #ifdef HAVE_BRAKE
     initBrakeOutputsEngaged(); // before the drivers are reset
 #endif

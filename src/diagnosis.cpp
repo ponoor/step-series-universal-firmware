@@ -70,6 +70,12 @@ void diagnosisCommand(uint8_t inByte) {
 			stepper[i].hardHiZ();
 		dbgPrint("HIL: hardHiZ sent to all drivers\n");
 		break;
+	case 'D':
+		hilPrintDriversAtBoot();
+		break;
+	case 'Y':
+		hilDriverStandbyTest();
+		break;
 #endif
 	default:
 		break;
@@ -93,6 +99,8 @@ void printMenu() {
 #ifdef HIL_PROBE
 	dbgPrint("P: HIL probe self-test (ch + 1 pulses on P0-P6)\n");
 	dbgPrint("Z: HIL test, hardHiZ to all drivers (bypasses the brake)\n");
+	dbgPrint("D: HIL test, driver CONFIG / STATUS read at boot before the reset\n");
+	dbgPrint("Y: HIL test, driver reset line floating for 300 ms (standby), then setup\n");
 #endif
 }
 

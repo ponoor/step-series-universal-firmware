@@ -35,6 +35,17 @@ void hilProbeInit();     // pins to output low, prints the pin map
 void hilProbePrintMap();
 void hilProbeSelfTest(); // 'P' diagnosis command: ch + 1 pulses on each probe
 
+// Driver state across a restart (HIL tests of the brake). Called first in setup(),
+// before the drivers are reset: releases the driver reset line without a reset pulse
+// and reads CONFIG and STATUS of every driver with GetParam. 'D' prints them: CONFIG
+// at its power-on default means the drivers were reset (standby) while the MCU was.
+class SPIClassSAMD;
+void hilCaptureDriversAtBoot(SPIClassSAMD &spi);
+void hilPrintDriversAtBoot(); // 'D'
+// 'Y': floats the driver reset line (as during an MCU reset) for 300 ms, P2 high, then
+// drives it high again and sets the drivers up (resetMotorDriver()).
+void hilDriverStandbyTest();
+
 // OUTSET / OUTCLR / OUTTGL only (no read-modify-write), so the probes can be used
 // from interrupt handlers.
 #define PROBE_HIGH(ch) (PORT->Group[hilProbePort[ch]].OUTSET.reg = hilProbeMask[ch])

@@ -206,6 +206,7 @@ void safeSystemReset() {
     while ((uint32_t)(millis() - start) < waitMs)
         Watchdog.reset();
 #endif
+    PROBE_HIGH(0); // HIL: the last P0 edge marks the MCU reset (the pin floats then)
     systemReset();
 }
 

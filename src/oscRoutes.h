@@ -121,6 +121,7 @@ OSC_ROUTE("/enableLimitSwReport", enableLimitSwReport)
 OSC_ROUTE("/enableElectromagnetBrake", enableElectromagnetBrake)
 OSC_ROUTE("/setBrakeTransitionDuration", setBrakeTransitionDuration)
 OSC_ROUTE("/getBrakeTransitionDuration", getBrakeTransitionDuration)
+OSC_ROUTE("/getBrakeStatus", getBrakeStatus)
 #endif
 OSC_ROUTE("/setMicrostepMode", setMicrostepMode)
 OSC_ROUTE("/getMicrostepMode", getMicrostepMode)

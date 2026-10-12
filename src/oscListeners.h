@@ -97,6 +97,7 @@ bool enableElectromagnetBrake(uint8_t motorId, bool bEnable); // false: not chan
 void enableElectromagnetBrake(OscMessage& msg);
 void setBrakeTransitionDuration(OscMessage& msg);
 void getBrakeTransitionDuration(OscMessage& msg);
+void getBrakeStatus(OscMessage& msg);
 #endif
 void setGoUntilTimeout(OscMessage& msg);
 void getGoUntilTimeout(OscMessage& msg);

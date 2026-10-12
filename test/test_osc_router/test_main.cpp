@@ -242,6 +242,8 @@ void test_ifdef_disabled()
     TEST_ASSERT_EQUAL(OSC_DISPATCH_NOT_MATCHED, send(minimal, "/setTval"));
     TEST_ASSERT_EQUAL(OSC_DISPATCH_NOT_MATCHED, send(minimal, "/getLimitSw"));
     TEST_ASSERT_EQUAL(OSC_DISPATCH_NOT_MATCHED, send(minimal, "/enableElectromagnet*"));
+    TEST_ASSERT_EQUAL(OSC_DISPATCH_FAST, send(full, "/getBrakeStatus"));
+    TEST_ASSERT_EQUAL(OSC_DISPATCH_NOT_MATCHED, send(minimal, "/getBrakeStatus"));
     // /enable*Report without /enableLimitSwReport
     TEST_ASSERT_EQUAL(OSC_DISPATCH_SLOW, send(minimal, "/enable*Report"));
     TEST_ASSERT_EQUAL(10, (int)calls.size());

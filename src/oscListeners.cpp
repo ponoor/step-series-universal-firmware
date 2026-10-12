@@ -1193,14 +1193,25 @@ void enableElectromagnetBrake(OscMessage &msg)
 void setBrakeTransitionDuration(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint16_t duration = getInt(msg, 1);
+    int32_t duration = getInt(msg, 1);
+    const bool valid = (0 <= duration) && (duration <= 0xFFFF);
     if (isCorrectMotorId(motorID))
     {
+        if (!valid)
+        {
+            sendCommandError(motorID, ERROR_COMMAND_IGNORED);
+            return;
+        }
         motorID -= MOTOR_ID_FIRST;
         brakeTransitionDuration[motorID] = duration;
     }
     else if (motorID == MOTOR_ID_ALL)
     {
+        if (!valid)
+        {
+            sendCommandError(motorID, ERROR_COMMAND_IGNORED);
+            return;
+        }
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             brakeTransitionDuration[i] = duration;
@@ -1221,6 +1232,28 @@ void getBrakeTransitionDuration(OscMessage &msg)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             sendTwoData("/brakeTransitionDuration", i + MOTOR_ID_FIRST, brakeTransitionDuration[i]);
+        }
+    }
+}
+
+// State number of brakeControl.h, or -1 with the brake disabled.
+static void sendBrakeStatus(uint8_t motorId)
+{
+    const int32_t state = electromagnetBrakeEnable[motorId] ? (int32_t)brakeStatus[motorId] : -1;
+    sendTwoData("/brakeStatus", (int32_t)(motorId + MOTOR_ID_FIRST), state);
+}
+void getBrakeStatus(OscMessage &msg)
+{
+    uint8_t motorID = getInt(msg, 0);
+    if (isCorrectMotorId(motorID))
+    {
+        sendBrakeStatus(motorID - MOTOR_ID_FIRST);
+    }
+    else if (motorID == MOTOR_ID_ALL)
+    {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        {
+            sendBrakeStatus(i);
         }
     }
 }

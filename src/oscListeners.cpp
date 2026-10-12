@@ -2915,32 +2915,7 @@ void activate(uint8_t motorId, bool state)
     {
         if (state)
         {
-            if ((brakeStatus[motorId] == BRAKE_ENGAGED) || (brakeStatus[motorId] == BRAKE_ENGAGING))
-            {
-                // The holding current must be able to hold the load once the brake is released.
-#ifdef DRIVER_POWERSTEP01
-                if (!isCurrentMode[motorId])
-#endif
-                {
-                    uint8_t t = kvalRun[motorId] >> 1;
-                    if (kvalHold[motorId] < t)
-                    {
-                        stepper[motorId].setHoldKVAL(t);
-                        kvalHold[motorId] = t;
-                    }
-                }
-#ifdef DRIVER_POWERSTEP01
-                else
-                {
-                    uint8_t t = tvalRun[motorId] >> 1;
-                    if (tvalHold[motorId] < t)
-                    {
-                        stepper[motorId].setHoldTVAL(t);
-                        tvalHold[motorId] = t;
-                    }
-                }
-#endif
-            }
+            // applyBrakeAction() raises the holding current when the motor is energized.
             brakeCommand(motorId, BRAKE_CMD_ACTIVATE);
         }
         else

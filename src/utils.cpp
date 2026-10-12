@@ -295,10 +295,38 @@ void sendBootMsg(uint32_t _currentTime) {
     isWaitingSendBootMsg = false;
 }
 #ifdef HAVE_BRAKE
+// The holding current must be able to hold the load once the brake is released:
+// KVAL_HOLD (TVAL_HOLD in current mode) at least half of the RUN value.
+static void ensureHoldingCurrent(uint8_t motorId) {
+#ifdef DRIVER_POWERSTEP01
+    if (isCurrentMode[motorId])
+    {
+        uint8_t t = tvalRun[motorId] >> 1;
+        if (tvalHold[motorId] < t)
+        {
+            stepper[motorId].setHoldTVAL(t);
+            tvalHold[motorId] = t;
+        }
+        return;
+    }
+#endif
+    uint8_t t = kvalRun[motorId] >> 1;
+    if (kvalHold[motorId] < t)
+    {
+        stepper[motorId].setHoldKVAL(t);
+        kvalHold[motorId] = t;
+    }
+}
+
 void applyBrakeAction(uint8_t motorId, const BrakeAction &action) {
     const BrakeState current = brakeStatus[motorId];
     const bool wasReleased = brakeOutputReleased(current);
     const bool willRelease = brakeOutputReleased(action.next);
+    // From HiZ (or engaging) back to energized, before the driver is energized: also
+    // after /free, where the brake is released already.
+    if (((current == BRAKE_ENGAGED) || (current == BRAKE_ENGAGING) || (current == BRAKE_FREE)) &&
+        ((action.next == BRAKE_RELEASING) || (action.next == BRAKE_RELEASED)))
+        ensureHoldingCurrent(motorId);
     // Release the brake before the driver goes HiZ (/free), and stop the motor before
     // the brake engages (/hardHiZ).
     if (willRelease && !wasReleased)

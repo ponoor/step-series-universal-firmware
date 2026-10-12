@@ -208,7 +208,9 @@ P1 rise of their request, and the home switch steps at the DIO15 edges, so the n
 delay does not enter the judgement (over Wi-Fi it varied from 3 to 86 ms).
 
 Scenarios can exempt an invariant over a range (e.g. INV-1 after `/free`, which releases
-the brake with the motor HiZ on purpose) and add checks:
+the brake with the motor HiZ on purpose; for INV-3, the pairs of readings that overlap the
+range). A range starts one excitation window (1 ms) before its step, since an excitation
+edge is known to one window only. Scenarios also add checks:
 
 | Check | Judged on | Meaning |
 |---|---|---|

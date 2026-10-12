@@ -422,9 +422,11 @@ def check_inv2(released: Step, excited: Step, allowance: float, exempt: list[tup
                        f"{len(overlaps)} overlap(s), longest {longest * 1e3:.1f} ms, allowance {allowance * 1e3:.0f} ms")
 
 
-def check_inv3(released: Step, pos_t: np.ndarray, pos: np.ndarray) -> CheckResult:
+def check_inv3(released: Step, pos_t: np.ndarray, pos: np.ndarray,
+               exempt: list[tuple[float, float]] = ()) -> CheckResult:
     """INV-3: the position does not change while the brake is engaged (both readings of a
-    changed pair taken with the brake engaged)."""
+    changed pair taken with the brake engaged). Pairs that overlap an exempt range are
+    not checked."""
     pos_t = np.asarray(pos_t, float)
     pos = np.asarray(pos)
     bad = []
@@ -433,7 +435,9 @@ def check_inv3(released: Step, pos_t: np.ndarray, pos: np.ndarray) -> CheckResul
         changed = pos[1:] != pos[:-1]
         both = engaged[1:] & engaged[:-1]
         for k in np.flatnonzero(changed & both):
-            bad.append((float(pos_t[k]), float(pos_t[k + 1])))
+            pair = (float(pos_t[k]), float(pos_t[k + 1]))
+            if not any(lo < pair[1] and pair[0] < hi for lo, hi in exempt):
+                bad.append(pair)
     return CheckResult("INV-3", not bad, bad, f"{len(bad)} position change(s) while engaged")
 
 

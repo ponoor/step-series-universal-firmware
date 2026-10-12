@@ -263,6 +263,9 @@ def test_inv3():
     assert a.check_inv3(RELEASED, t, np.array([0, 0, 10, 20, 20, 20])).passed
     r = a.check_inv3(RELEASED, t, np.array([0, 0, 10, 20, 20, 25]))
     assert not r.passed and r.violations == [(3.5, 3.52)]
+    # A pair that overlaps an exempt range is not checked.
+    assert a.check_inv3(RELEASED, t, np.array([0, 0, 10, 20, 20, 25]), exempt=[(3.51, 4.0)]).passed
+    assert not a.check_inv3(RELEASED, t, np.array([0, 0, 10, 20, 20, 25]), exempt=[(3.53, 4.0)]).passed
 
 
 def test_check_constant():

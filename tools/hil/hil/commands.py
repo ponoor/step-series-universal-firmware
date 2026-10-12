@@ -842,21 +842,23 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     pos_t = np.array([float(p1[i]) for i, _ in answered])
     pos = np.array([int(r.args[1]) for _, r in answered])
 
+    window = float(cfg.section("excitation")["window_ms"]) / 1e3
     exempt: dict[str, list] = {}
     for ex in scenario.exempt:
         if ex.span is not None:
             t_to = label_t[ex.from_label] + sc.resolve_delay(ex.span, transition, latency)
         else:
             t_to = label_t[ex.to_label] + latency if ex.to_label else end
-        exempt.setdefault(ex.invariant, []).append((label_t[ex.from_label], t_to))
-    window = float(cfg.section("excitation")["window_ms"]) / 1e3
+        # An excitation edge is known to one window only: it can appear up to one window
+        # before the step that caused it.
+        exempt.setdefault(ex.invariant, []).append((label_t[ex.from_label] - window, t_to))
     checks: list[analyze.CheckResult] = []
     if "INV-1" in scenario.invariants:
         checks.append(analyze.check_inv1(released, excited, exempt.get("INV-1", []), resolution=window))
     if "INV-2" in scenario.invariants:
         checks.append(analyze.check_inv2(released, excited, transition + latency, exempt.get("INV-2", [])))
     if "INV-3" in scenario.invariants:
-        checks.append(analyze.check_inv3(released, pos_t, pos))
+        checks.append(analyze.check_inv3(released, pos_t, pos, exempt.get("INV-3", [])))
     for c in scenario.checks:
         t_from = label_t[c.from_label] + sc.resolve_delay(c.delay, transition, latency)
         t_to = label_t[c.to_label] if c.to_label else end

@@ -35,3 +35,10 @@ def test_long_pulse():
     e = analyze.Edges(rise=np.array([0.01, 0.02, 0.5]), fall=np.array([0.011, 0.021, 0.8]), initial=0, final=0, duration=1.0)
     assert restart.long_pulse(e, 0.05) == (0.5, 0.8)
     assert restart.long_pulse(e, 0.5) is None
+
+
+def test_standby_entry():
+    rate = 1e4
+    v = np.concatenate((np.zeros(1000), 6.0 * np.exp(-np.arange(800) / 150.0) + 0.13, np.full(500, 1.8)))
+    assert restart.standby_entry(v, rate) == 0.1
+    assert restart.standby_entry(np.full(2000, 1.8), rate) is None

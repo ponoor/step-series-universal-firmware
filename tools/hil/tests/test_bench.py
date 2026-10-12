@@ -151,7 +151,7 @@ def test_scenario_definitions(scenario):
     for m in scenario.motion:
         assert m.from_label in labels
         assert getattr(m, "to_label", None) is None or m.to_label in labels
-    if scenario.motion:
+    if any(isinstance(m, (sc.Motion, sc.EngageAfterStop)) for m in scenario.motion):
         assert scenario.poll_position
     ids = scenario.check_ids()
     assert len(ids) == len(scenario.invariants) + len(scenario.checks) + len(scenario.replies) + len(scenario.motion)
@@ -162,9 +162,11 @@ def test_scenario_definitions(scenario):
         for arg in sc.resolve_args(st.args, values):
             assert isinstance(arg, (int, float)) and not isinstance(arg, bool)
         if st.kind == "serial":
-            assert st.label and st.edge == sc.EXCITATION_OFF
+            assert st.label and st.edge in (sc.EXCITATION_OFF, sc.BRAKE_ENGAGE)
     if scenario.reboots:
-        assert scenario is sc.SCENARIOS[-1] and not scenario.poll_position
+        # Restarting scenarios run last.
+        later = sc.SCENARIOS[sc.SCENARIOS.index(scenario):]
+        assert all(s.reboots for s in later) and not scenario.poll_position
 
 
 def test_verdict():

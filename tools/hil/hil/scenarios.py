@@ -38,6 +38,7 @@ STATUS_POLL_S = 0.010
 # Time of a serial step on the AD2: the serial command has no probe pulse, so it is
 # taken from the signal it changes.
 EXCITATION_OFF = "excitation_off"  # first excited -> not excited edge after the previous step
+BRAKE_ENGAGE = "brake_engage"  # first brake engage edge after the previous step
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,15 @@ class Motion:
 
 
 @dataclass(frozen=True)
+class EngageBeforeReset:
+    """The brake engaged at the labelled step is engaged before the drivers enter standby
+    at the MCU reset (OUT1A jump, see hil/restart.py) and stays engaged to the end."""
+
+    id: str
+    from_label: str
+
+
+@dataclass(frozen=True)
 class EngageAfterStop:
     """After the labelled step, the brake engages only once the position has stopped
     changing: the first engage edge is not before a reading that is followed by a change."""
@@ -142,7 +152,7 @@ class Scenario:
     checks: tuple[Check, ...] = ()
     exempt: tuple[Exempt, ...] = ()
     replies: tuple[Reply, ...] = ()
-    motion: tuple[Motion | EngageAfterStop, ...] = ()
+    motion: tuple[Motion | EngageAfterStop | EngageBeforeReset, ...] = ()
     extra_setup: tuple[Step, ...] = ()
     poll_position: bool = True
     # The board restarts during the steps (/resetDevice): only the first P1 pulses (one
@@ -449,7 +459,22 @@ SCENARIOS: tuple[Scenario, ...] = (
         analog_rate=1e4,
         p0_ref=False,
         notes="Records the brake engage and the excitation stop against /resetDevice. Run last: "
-              "the board restarts.",
+              "the board restarts. The MCU reset puts the drivers in standby: OUT1A then sits at "
+              "about 0.13 V, which the excitation detection reads as excited (below clamp_v).",
+    ),
+    Scenario(
+        "B19", "USB serial 'R' while released and stopped", "PASS",
+        steps=_ACTIVATE + (
+            serial("R", label="R", edge=BRAKE_ENGAGE), wait(3.0),
+        ),
+        invariants=(),
+        motion=(EngageBeforeReset("ENGAGED-BEFORE-RESET", "R"),),
+        poll_position=False,
+        reboots=True,
+        analog_rate=1e4,
+        p0_ref=False,
+        notes="'R' goes through safeSystemReset(): brake engaged, wait, then the MCU reset, which "
+              "puts the drivers in standby. The step is timed by the brake engage edge.",
     ),
 )
 

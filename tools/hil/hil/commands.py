@@ -692,7 +692,12 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
             t = float(p1[tx_index[id(entry)]])
         elif st.kind == "serial":
             # No probe pulse: the first change of the signal the command acts on.
-            t = analyze.first_edge_to(excited, t_prev, False) if st.edge == sc.EXCITATION_OFF else None
+            if st.edge == sc.EXCITATION_OFF:
+                t = analyze.first_edge_to(excited, t_prev, False)
+            elif st.edge == sc.BRAKE_ENGAGE:
+                t = analyze.first_edge_to(released, t_prev, False)
+            else:
+                t = None
             if t is None:
                 t = float(fit.to_ad2(host_s(cap, t_ns)))
                 timing_notes.append(f"{st.label or st.address}: no {st.edge} edge, host time used")
@@ -741,6 +746,9 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
                                              resolution=window if c.signal == "excited" else 0.0))
     for m in scenario.motion:
         t_from = label_t[m.from_label]
+        if isinstance(m, sc.EngageBeforeReset):
+            checks.append(check_engage_before_reset(cfg, cap, shift, released, t_from, m.id))
+            continue
         if isinstance(m, sc.EngageAfterStop):
             checks.append(analyze.check_engage_after_stop(released, pos_t, pos, t_from, m.id))
             continue
@@ -782,6 +790,21 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     events += [[round(t, 6), "excited", int(v)] for t, v in zip(excited.times, excited.values)]
     write_csv(out / f"{scenario.id}_events.csv", ["t_s", "signal", "value"], sorted(events))
     return res
+
+
+def check_engage_before_reset(cfg: Config, cap: Capture, shift: float, released: analyze.Step,
+                              t_engage: float, check_id: str) -> analyze.CheckResult:
+    from .restart import standby_entry
+    t = standby_entry(cap.analog[int(cfg.ad2["scope"]["out1a"])], cap.analog_rate)
+    if t is None:
+        return analyze.CheckResult(check_id, False, [], "no driver standby entry (OUT1A jump) found")
+    t_reset = t + shift
+    engaged_at_reset = not bool(released.at(t_reset))
+    stays = not analyze.intersect([(t_reset, released.t_end)], released.intervals(True))
+    ok = engaged_at_reset and stays and t_engage < t_reset
+    return analyze.CheckResult(check_id, ok, [] if ok else [(t_engage, t_reset)],
+                               f"brake engaged {(t_reset - t_engage) * 1e3:.1f} ms before the drivers' standby"
+                               + ("" if stays else "; released again after the reset"))
 
 
 def check_reply(link, reply: sc.Reply, t_ns: int, args: tuple) -> analyze.CheckResult:

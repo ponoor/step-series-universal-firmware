@@ -12,7 +12,14 @@ state is judged from:
 
 The MCU reset is the last P0 (loop toggle) edge before the longest gap: P0 stops when
 the MCU resets and resumes in loop() after setup() (a blocking command such as the
-brake wait of /resetDevice makes a shorter gap before it).
+brake wait of /resetDevice makes a shorter gap before it). safeSystemReset() sets P0
+high just before the reset in HIL_PROBE builds. P0 (D1, PA10) is also the UART TX pin,
+which the bootloader drives about 30 ms after the reset, so this time is approximate.
+
+The driver standby entry is judged on OUT1A: an energized driver going to standby
+makes OUT1A jump to about 6 V and decay to about 0.13 V within 80 ms (bench, 12 V
+motor supply, no motor). The entry is the first 1 ms window whose median exceeds 3 V
+(energized: about 0 V, HiZ: about 1.8 V).
 """
 
 from __future__ import annotations
@@ -45,6 +52,17 @@ def mcu_reset_time(p0_edges: np.ndarray, gap: float = 0.2) -> float | None:
     d = np.diff(t)
     k = int(np.argmax(d))
     return float(t[k]) if d[k] >= gap else None
+
+
+STANDBY_JUMP_V = 3.0
+
+
+def standby_entry(volts: np.ndarray, rate: float, after: float = 0.0, window: float = 1e-3,
+                  level: float = STANDBY_JUMP_V) -> float | None:
+    """Start (scope time) of the first window after `after` whose median exceeds level."""
+    med = analyze.window_medians(np.asarray(volts, float), rate, window)
+    k = np.flatnonzero((med > level) & (np.arange(med.size) * window >= after))
+    return float(k[0] * window) if k.size else None
 
 
 def long_pulse(edges, min_width: float) -> tuple[float, float] | None:
@@ -85,11 +103,21 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     p0 = analyze.bit_edges(seg, probe[0]).all
     t_reset = mcu_reset_time(p0) if how != "standby" else None
     ref = t_reset if t_reset is not None else (t_cmd or 0.0)
-    res["t_ref"] = "MCU reset (last P0 edge)" if t_reset is not None else "command"
+    ch = int(cfg.ad2["scope"]["out1a"])
+    shift = res.get("scope_minus_digital_s", 0.0)
+    t_sb = standby_entry(cap.analog[ch], cap.analog_rate)
+    t_sb = t_sb + shift if t_sb is not None else None
+    if how != "standby" and t_sb is not None:
+        ref = t_sb
+    res["t_ref"] = ("driver standby entry (OUT1A jump)" if how != "standby" and t_sb is not None
+                    else "MCU reset (last P0 edge)" if t_reset is not None else "command")
+    res["standby_entry_s"] = t_sb
     res["mcu_reset_s"] = t_reset
+    if t_reset is not None and t_sb is not None:
+        res["p0_reset_marker_to_standby_ms"] = (t_sb - t_reset) * 1e3
     res["command_s"] = t_cmd
-    if t_cmd is not None and t_reset is not None:
-        res["command_to_mcu_reset_ms"] = (t_reset - t_cmd) * 1e3
+    if t_cmd is not None and t_sb is not None:
+        res["command_to_standby_ms"] = (t_sb - t_cmd) * 1e3
     released = analyze.Step.from_edges(analyze.bit_edges(seg, cfg.brake_dio))
     res["brake_edges_ms"] = [[round((t - ref) * 1e3, 2), bool(v)] for t, v in zip(released.times[1:], released.values[1:])]
     res["brake_released_at_start"] = bool(released.values[0])
@@ -111,8 +139,6 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
         res["standby_window_ms"] = [0.0, (win[1] - win[0]) * 1e3] if win else None
         ref = win[0] if win else ref
         res["brake_edges_ms"] = [[round((t - ref) * 1e3, 2), bool(v)] for t, v in zip(released.times[1:], released.values[1:])]
-    ch = int(cfg.ad2["scope"]["out1a"])
-    shift = res.get("scope_minus_digital_s", 0.0)
     res["out1a_segments"] = level_segments(cap.analog[ch], cap.analog_rate, t0=ref - shift)
     excited, _, _ = commands.excitation_step(cfg, cap, shift)
     res["excited_edges_ms"] = [[round((t - ref) * 1e3, 1), bool(v)] for t, v in zip(excited.times[1:], excited.values[1:])]
@@ -169,7 +195,7 @@ def cmd_reboot(cfg: Config, args) -> int:
     res["drivers_reset_at_boot"] = {m: d["config"] == CONFIG_DEFAULT for m, d in drivers.items()}
     commands.write_json(out / "summary.json", res)
     print(f"how: {how}, capture ok: {cap.ok} {'; '.join(cap.problems())}")
-    for k in ("command_to_mcu_reset_ms", "p0_resumes_ms", "first_p4_after_reset_ms", "standby_window_ms",
+    for k in ("t_ref", "command_to_standby_ms", "p0_reset_marker_to_standby_ms", "p0_resumes_ms", "first_p4_after_reset_ms", "standby_window_ms",
               "brake_released_at_start", "brake_edges_ms"):
         if k in res:
             print(f"{k}: {res[k]}")

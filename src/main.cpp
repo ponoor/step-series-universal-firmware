@@ -146,6 +146,16 @@ void checkStatus()
             HiZ[i] = t;
             if (reportHiZ[i])
                 sendTwoData("/HiZ", i + MOTOR_ID_FIRST, (int32_t)t);
+            // The driver went HiZ by itself (overcurrent, thermal shutdown, UVLO): the
+            // commands that make it HiZ cancel the servo mode first. Cancel it here, before
+            // the servo update of this poll, whose Run would energize the driver again.
+            // Nothing is sent to the driver. With the brake enabled, updateBrake() also
+            // engages the brake and sends BrakeEngagedOnHiZ.
+            if (t && isServoMode[i])
+            {
+                isServoMode[i] = false;
+                sendCommandError(i + MOTOR_ID_FIRST, ERROR_SERVO_MODE_CANCELLED_ON_HIZ);
+            }
         }
         // BUSY, low for busy
         t = (status & STATUS_BUSY) == 0;

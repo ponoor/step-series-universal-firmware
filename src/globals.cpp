@@ -37,7 +37,8 @@ const char *const commandErrorText[] = {
     "ReleaseSwTimeout",
     "InServoMode",
     "BrakeReleaseFailed",
-    "BrakeEngagedOnHiZ"
+    "BrakeEngagedOnHiZ",
+    "ServoModeCancelledOnHiZ"
 };
 static_assert(sizeof(commandErrorText) / sizeof(commandErrorText[0]) == ERROR_COUNT,
               "commandErrorText must have one entry per error code");

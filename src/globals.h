@@ -143,6 +143,7 @@ enum {
     ERROR_IN_SERVO_MODE,
     ERROR_BRAKE_RELEASE_FAILED,
     ERROR_BRAKE_ENGAGED_ON_HIZ,
+    ERROR_SERVO_MODE_CANCELLED_ON_HIZ,
     ERROR_COUNT // number of error codes, keep last
 };
 extern const char *const commandErrorText[]; // globals.cpp, ERROR_COUNT entries

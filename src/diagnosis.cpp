@@ -63,6 +63,13 @@ void diagnosisCommand(uint8_t inByte) {
 	case 'P':
 		hilProbeSelfTest();
 		break;
+	case 'Z':
+		// HIL test: HardHiZ to every driver, bypassing the brake state machine, to
+		// simulate a driver that goes HiZ by itself (overcurrent, thermal, UVLO).
+		for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+			stepper[i].hardHiZ();
+		dbgPrint("HIL: hardHiZ sent to all drivers\n");
+		break;
 #endif
 	default:
 		break;
@@ -85,6 +92,7 @@ void printMenu() {
 	dbgPrint("p: print timing stats [us] and reset them\n");
 #ifdef HIL_PROBE
 	dbgPrint("P: HIL probe self-test (ch + 1 pulses on P0-P6)\n");
+	dbgPrint("Z: HIL test, hardHiZ to all drivers (bypasses the brake)\n");
 #endif
 }
 

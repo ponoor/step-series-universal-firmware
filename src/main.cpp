@@ -3,7 +3,7 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <ArduinoJson.h>        //https://arduinojson.org/
-#include <Adafruit_SleepyDog.h> // https://github.com/adafruit/Adafruit_SleepyDog
+#include "watchdog.h"
 
 #include "boardsDef.h"
 #ifdef DRIVER_POWERSTEP01

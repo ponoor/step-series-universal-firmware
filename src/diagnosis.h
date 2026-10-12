@@ -9,7 +9,7 @@
 	#include "WProgram.h"
 #endif
 
-#include <Adafruit_SleepyDog.h>
+#include "watchdog.h"
 #include "boardsDef.h"
 #include "globals.h"
 #include "loadConfig.h"

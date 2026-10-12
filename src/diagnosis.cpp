@@ -73,6 +73,13 @@ void diagnosisCommand(uint8_t inByte) {
 	case 'D':
 		hilPrintDriversAtBoot();
 		break;
+	case 'W':
+		// HIL test: hang without resetting the watchdog (early warning, then reset).
+		dbgPrint("HIL: hanging for the watchdog\n");
+		SerialUSB.flush();
+		while (true)
+			;
+		break;
 	case 'Y':
 		hilDriverStandbyTest();
 		break;
@@ -101,6 +108,7 @@ void printMenu() {
 	dbgPrint("Z: HIL test, hardHiZ to all drivers (bypasses the brake)\n");
 	dbgPrint("D: HIL test, driver CONFIG / STATUS read at boot before the reset\n");
 	dbgPrint("Y: HIL test, driver reset line floating for 300 ms (standby), then setup\n");
+	dbgPrint("W: HIL test, hang until the watchdog resets the board\n");
 #endif
 }
 

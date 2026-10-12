@@ -121,6 +121,23 @@ void initBrakeOutputsEngaged()
 #endif
 }
 
+// Watchdog early warning: engages every brake output without SPI, so it does not matter
+// what the interrupted code was doing.
+void engageAllBrakeOutputsFromIsr()
+{
+#ifdef STEP400_R1
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        digitalWrite(brakePin[i], LOW);
+#elif defined(STEP800_R1)
+    // SHIFTOUT_ENABLE low clears the shift register of the 74HC595 at once; the latch
+    // then puts the zeros on the outputs.
+    digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+    brakeOut = 0;
+#endif
+}
+
 void initBrake()
 {
 #if defined(STEP800_R1)

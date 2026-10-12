@@ -183,6 +183,29 @@ void resetMotorDriver(uint8_t deviceID) {
     }
 }
 
+// Watchdog early warning (interrupt, watchdog.h): the MCU resets right after this, and
+// the reset puts the drivers in standby. Engage the brakes and wait for them. No driver
+// SPI here (the interrupted code may be using it), so no hard stop.
+void onWatchdogEarlyWarning() {
+#ifdef HAVE_BRAKE
+    PROBE_HIGH(2); // HIL: early warning
+    engageAllBrakeOutputsFromIsr();
+    uint16_t waitMs = 0;
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (electromagnetBrakeEnable[i] && (brakeStatus[i] != BRAKE_ENGAGED))
+        {
+            const uint16_t t = min(brakeTransitionDuration[i], (uint16_t)1000);
+            if (t > waitMs)
+                waitMs = t;
+        }
+    }
+    // The watchdog resets at twice the early warning time (4 s), well after this.
+    for (uint16_t ms = 0; ms < waitMs; ms++)
+        delayMicroseconds(1000);
+#endif
+}
+
 void safeSystemReset() {
 #ifdef HAVE_BRAKE
     // The MCU reset puts the drivers in standby (their STBY/RST input floats and is

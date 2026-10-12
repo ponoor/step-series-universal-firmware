@@ -12,7 +12,7 @@
 #include "oscParser.h"
 #include "oscWriter.h"
 #include <Ethernet.h>
-#include <Adafruit_SleepyDog.h>
+#include "watchdog.h"
 #include "globals.h"
 #include "boardsSpecific.h"
 

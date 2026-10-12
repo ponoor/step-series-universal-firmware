@@ -33,7 +33,7 @@ extern uint8_t resetCauseRaw; // raw MCU register value, diagnosis output only
 #define STATUS_POLL_PERIOD   10 // [ms]
 // Watchdog timeout. A UDP send blocks until ARP is resolved (W5500 retries every 200 ms),
 // which can exceed 100 ms.
-#define WATCHDOG_TIMEOUT_MS  2000 // [ms]
+#define WATCHDOG_TIMEOUT_MS  2000 // [ms] early warning (brakes engaged, then reset); watchdog.h
 
 
 // Tx, Rx LED

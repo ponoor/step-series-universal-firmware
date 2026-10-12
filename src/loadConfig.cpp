@@ -2,7 +2,7 @@
 //
 //
 #include "loadConfig.h"
-#include <Adafruit_SleepyDog.h>
+#include "watchdog.h"
 #include <strings.h>
 
 static bool findFirstValidJson(JsonDocument& doc) {

@@ -104,21 +104,16 @@ void initBrakeOutputsEngaged()
         digitalWrite(brakePin[i], LOW);
         pinMode(brakePin[i], OUTPUT);
     }
-#elif defined(STEP800_R1)
-    // The output register of the 74HC595 is undefined at power-up (G is tied to GND).
-    // Keep the shift register cleared (SHIFTOUT_ENABLE low, also pulled down by R3) and
-    // latch it: all outputs low. initBrake() enables the shift register afterwards.
-    digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, LOW);
-    pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
-    digitalWrite(PIN_DIPSW_LATCH, LOW);
-    pinMode(PIN_DIPSW_LATCH, OUTPUT);
-    digitalWrite(PIN_DIPSW_LATCH, HIGH);
 #endif
+    // STEP800: latching the cleared shift register here did not shorten the released
+    // outputs at power-up (HIL bench: 236-262 ms vs 251-262 ms), so it was not kept.
+    // The outputs go low at the first latch, in initDipSw().
 }
 
 void initBrake()
 {
 #if defined(STEP800_R1)
+    pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
     digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, HIGH);
 #endif
 }

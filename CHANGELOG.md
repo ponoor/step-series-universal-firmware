@@ -6,6 +6,31 @@
 
 These changes are visible to OSC clients.
 
+- Electromagnetic brake (STEP400, STEP800): the brake of each motor follows a new state machine with six states, readable with `/getBrakeStatus`. Changes for a motor with the brake enabled:
+  - `/activate 1` while the brake is released does nothing. It sent a hard stop, which stopped a turning motor abruptly.
+  - `/activate 1` releases the brake only if a status read after the command shows the driver energized. If the driver stays HiZ (e.g. no motor power), the brake stays engaged and `/error/command BrakeReleaseFailed motorID` is sent. Before, the brake was released after `brakeTransitionDuration` in any case.
+  - `/activate 1` during the deceleration of `/softHiZ` (or `/activate 0`) cancels the engaging and keeps the brake released; the deceleration goes on. Before, it stopped the motor with a hard stop, and the brake still engaged when the motor stopped.
+  - `/activate 0` on a turning motor decelerates it and engages the brake when it has stopped, like `/softHiZ`. It engaged the brake without stopping the motor.
+  - `/softHiZ` and `/activate 0` on a stopped motor engage the brake at the next status poll (up to 10 ms later). The stop is now judged on a status read after the command.
+  - After `/free`, a stop of the motor no longer engages the brake (when `/free` was sent during the deceleration of `/softHiZ`).
+  - After `/free`, a motion command (`/run`, `/move`, `/goTo`, ...) is executed and the motor returns to the released (energized) state. `/activate 1` does the same. `/activate 0`, `/softHiZ` and `/hardHiZ` after `/free` engage the brake at once (the motor is already HiZ).
+  - A motion command during the deceleration of `/softHiZ` or `/activate 0` cancels the engaging; the brake stays released. Before, the brake engaged when the motor stopped later.
+  - `/softStop`, `/hardStop` and `/enableServoMode 0` while the brake is engaged or after `/free` (motor HiZ) do nothing. They energized the motor, and the brake state was left engaged, so `/activate 0` and `/hardHiZ` could not make the motor HiZ again.
+  - `/enableServoMode 1` and `/homing` while the brake is not released reply `/error/command BrakeEngaged motorID` and do nothing. `/enableServoMode 1` energized and moved the motor with the brake engaged; `/homing` set the homing state although it did not start.
+  - When the driver goes HiZ by itself while the brake is released (overcurrent shutdown, thermal shutdown, UVLO), the brake engages at the next status poll (up to 10 ms) and `/error/command BrakeEngagedOnHiZ motorID` is sent. The brake stayed released.
+  - `/resetMotorDriver` is accepted only while the brake is engaged or after `/free` (motor HiZ); otherwise it replies `CommandIgnored`. It made the driver HiZ with the brake released.
+  - `/enableElectromagnetBrake` changes the setting only while the driver is HiZ, and disables the brake only while it is engaged or after `/free`; otherwise it replies `CommandIgnored`. Sending the current value does nothing. After a change the brake output is engaged and the state is engaged. Before, disabling a released brake engaged it on a turning motor, and enabling it on an energized motor left a state where `/activate 0` and `/hardHiZ` did nothing. The same rule applies to a config loaded over USB serial (a warning is printed for a motor that is not changed).
+  - `/setBrakeTransitionDuration` with a value outside 0-65535 replies `CommandIgnored` and keeps the setting. The value wrapped around.
+  - `/resetDevice` first stops the turning motors with a hard stop, engages their brakes and waits for the longest `brakeTransitionDuration` of them (at most 1 s), then restarts. The brakes stayed released, with the motors running, until `setup()` reset the drivers.
+  - Homing at startup (`homingAtStartup`) with the brake enabled first releases the brake as `/activate 1` does, and starts the homing once the brake is released. It failed because the brake was engaged, and the goUntil timeout later sent a hard stop to the HiZ motor.
+  - `/activate 1` no longer toggles the LED (debug code).
+- Stop and HiZ commands cancel pending motion, **also for motors with the brake disabled**: `/softStop`, `/hardStop`, `/softHiZ`, `/hardHiZ`, `/activate 0`, `/free`, `/enableServoMode` (both), `/resetMotorDriver`, and the automatic brake engage cancel
+  - a `/goTo`, `/goToDir`, `/goHome` or `/goMark` waiting for the BUSY flag to clear. It was sent when the motor became not busy, so a stopped motor started again.
+  - the homing, also the state left by a `/goUntil` or `/releaseSw` sent directly: its timeout sent a hard stop, which energized a motor made HiZ in the meantime. `/homingStatus` is reported as before (only for `/homing`).
+  - the servo mode.
+  An accepted motion command also cancels a `/goTo` (etc.) waiting for BUSY, so the waiting command no longer overrides it later.
+- The automatic hard stops are not sent to a motor whose driver is HiZ, **also with the brake disabled**: home switch with `/setProhibitMotionOnHomeSw`, limit switch (STEP400, `SW_HARD_STOP`), switch event in the servo mode, and the goUntil / releaseSw timeouts (the timeout error is still sent). A hard stop energizes a HiZ driver.
+- A motion command (e.g. `/run`) that clears the homing state now also clears the state of a `/goUntil` sent directly.
 - Boolean values that were sent with the OSC type tags `T` / `F` are now sent as integers `0` / `1` (type tag `i`), as intended for all STEP series messages. Clients that expect `T` / `F` for these arguments must be updated:
   - `/uvlo motorID state`: the report sent when the UVLO state changes (enabled by `/enableUvloReport`). The reply to `/getUvlo` already used `i`.
   - `/lowSpeedOptimizeThreshold motorID threshold enabled`: the third argument (`enabled`), reply to `/getLowSpeedOptimizeThreshold`.
@@ -43,6 +68,9 @@ These changes are visible to OSC clients.
 
 ### Changed
 
+- STEP800: the brake outputs change as soon as the brake state changes (0.2-0.3 ms after the command on the HIL bench). They were sent with the next DIP switch read and appeared at the read after it, 10-20 ms after the command, so the brake and motor overlapped for less than `brakeTransitionDuration` (about 89 ms instead of 100 ms).
+- STEP400: the brake outputs are driven low (engaged) first in `setup()`, before the drivers are reset.
+- In the 10 ms status poll, the status of the drivers is read first; the brake, the limit switches (STEP400) and the homing timeouts use this status.
 - OSC messages are received with a single read into a static buffer and dispatched by a table lookup instead of about 140 sequential address comparisons. Patterns in received addresses (e.g. `/enable*Report`, `/set{Acc,Dec}`) and addresses followed by `/...` keep working as before.
 - OSC messages are encoded into a static buffer and sent with a single write, without heap allocation.
 - Status and position reads of all drivers (servo mode, status polling, position reports, `/getPositionList`, `/getStatusList`, `/getPosition 255`, `/getStatus 255`) use one packed daisy-chain transfer instead of one transfer per driver. Requires driver libraries v1.2.0.
@@ -53,6 +81,20 @@ These changes are visible to OSC clients.
 
 ### Added
 
+- `/getBrakeStatus motorID` replies `/brakeStatus motorID state` (`i`, `i`); `255` for all motors. `state` is `-1` for a motor with the brake disabled, otherwise:
+
+  | Value | State | Brake output | Driver |
+  |---|---|---|---|
+  | 0 | Engaged | engaged | HiZ |
+  | 1 | Releasing (`/activate 1`, waiting `brakeTransitionDuration`) | engaged | energized |
+  | 2 | Released | released | energized |
+  | 3 | Stopping (`/softHiZ`, `/activate 0`: decelerating, engages when stopped) | released | energized |
+  | 4 | Engaging (waiting `brakeTransitionDuration`, then HiZ) | engaged | energized |
+  | 5 | Free (`/free`) | released | HiZ |
+
+  The numbers are part of the specification; new states will only be added as 6, 7, ...
+- Command errors `BrakeReleaseFailed` and `BrakeEngagedOnHiZ` (`/error/command`, follow `/reportError`).
+- USB serial: the brake states are shown with their numbers and names (`s`). HIL_PROBE builds: `Z` sends HardHiZ to all drivers, bypassing the brake (for the HIL bench).
 - USB serial command `p`: prints timing statistics (loop, OSC receive, servo update, status check, servo interval, OSC messages dispatched by pattern matching or not matched) and resets them.
 - STEP800: timing probes on spare pins, enabled with the `HIL_PROBE` build flag (no effect on normal builds).
 - `tools/hil/`: a hardware-in-the-loop test bench using Digilent Analog Discovery 2.

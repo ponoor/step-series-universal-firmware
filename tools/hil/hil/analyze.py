@@ -437,10 +437,12 @@ def check_inv3(released: Step, pos_t: np.ndarray, pos: np.ndarray) -> CheckResul
     return CheckResult("INV-3", not bad, bad, f"{len(bad)} position change(s) while engaged")
 
 
-def check_constant(signal: Step, t_from: float, t_to: float, value: bool, check_id: str) -> CheckResult:
-    """The signal keeps `value` from t_from to t_to."""
+def check_constant(signal: Step, t_from: float, t_to: float, value: bool, check_id: str,
+                   resolution: float = 0.0) -> CheckResult:
+    """The signal keeps `value` from t_from to t_to. Intervals not longer than the
+    resolution of the signal (e.g. one excitation window) are ignored."""
     window = [(t_from, t_to)]
-    bad = intersect(window, signal.intervals(not value))
+    bad = [iv for iv in intersect(window, signal.intervals(not value)) if iv[1] - iv[0] > resolution]
     return CheckResult(check_id, not bad, bad, f"expected {'high' if value else 'low'} from {t_from:.3f} s to {t_to:.3f} s")
 
 

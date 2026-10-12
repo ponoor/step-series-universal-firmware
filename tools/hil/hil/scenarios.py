@@ -148,6 +148,10 @@ class Scenario:
     # The board restarts during the steps (/resetDevice): only the first P1 pulses (one
     # per OSC message sent) are matched; the probe pins float during the restart.
     reboots: bool = False
+    # Scope sample rate instead of [brake] analog_rate, and whether P0 on the Scope aligns
+    # the recording (it needs a rate that resolves the P0 toggles).
+    analog_rate: float | None = None
+    p0_ref: bool = True
     notes: str = ""
 
     def labels(self) -> list[str]:
@@ -434,8 +438,16 @@ SCENARIOS: tuple[Scenario, ...] = (
             osc("/run", AXIS, MAX_SPEED, label="run"), wait(1.0),
             osc("/resetDevice", label="resetDevice"), wait(2.0),
         ),
+        # At 10 kS/s the window median misreads the stepping waveform while running.
+        exempt=(Exempt("INV-1", "run", "resetDevice"),),
         poll_position=False,
         reboots=True,
+        # The USB re-enumeration of the STEP800 stalls the AD2 stream for about 0.5 s: at
+        # 200 kS/s the Scope lost 98303 samples every time. 10 kS/s fits the stall in the
+        # device buffer; the excitation is then judged by the window median (clamp_v), and
+        # the Scope is aligned by [sync] (+/-0.4 ms) instead of P0.
+        analog_rate=1e4,
+        p0_ref=False,
         notes="Records the brake engage and the excitation stop against /resetDevice. Run last: "
               "the board restarts.",
     ),

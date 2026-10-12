@@ -87,8 +87,14 @@ digital_rate = 1e6
 # (under 3 us at KVAL 16) are only partly sampled.
 analog_rate = 2e5
 transition_ms = 100
-# Allowed brake output delay added to transition_ms for INV-2.
-latency_allowance_ms = 30
+# Allowed brake output delay added to transition_ms for INV-2 and to the checks.
+# Measured (brake fix, Task 5): a command that changes the output directly (/hardHiZ,
+# /free, /activate 0 on a stopped motor) changes it 0.23-0.33 ms after its P1 rise.
+# Changes made by the 10 ms status poll come up to one poll later: the release
+# after /activate 1 came 101.4-109.5 ms after the command for a 100 ms transition.
+# 20 ms = poll period + loop jitter + one excitation window (1 ms). (It was 30 ms when
+# the STEP800 output followed the second getMyId(), 10-20 ms after the command.)
+latency_allowance_ms = 20
 kval = 16
 max_speed = 200.0
 position_poll_ms = 20

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import glob
 import re
+import termios
 import time
 
 import serial
@@ -132,15 +133,21 @@ class SerialDiag:
         was printed in the first second (the boot messages may be gone already)."""
         try:
             self.command("R", until=r"Rebooting")
-        except (serial.SerialException, OSError, DiagError):
-            pass  # the port can disappear before the reply is read
-        self.close()
+        except (serial.SerialException, OSError, termios.error, DiagError):
+            # The port can disappear before the reply is read, or be gone already when
+            # the board restarted by itself (/resetDevice): the handle is stale then.
+            pass
+        try:
+            self.close()
+        except (serial.SerialException, OSError, termios.error):
+            self._ser = None
         deadline = time.monotonic() + timeout
         time.sleep(0.5)
         while time.monotonic() < deadline:
             try:
                 self.open()
                 return self.read_available(idle=1.0, timeout=3.0)
-            except (serial.SerialException, OSError):
+            except (serial.SerialException, OSError, termios.error):
+                self._ser = None
                 time.sleep(0.2)
         raise DiagError(f"{self.port} did not come back within {timeout} s after reboot")

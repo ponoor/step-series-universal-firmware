@@ -304,3 +304,9 @@ def test_check_engage_after_stop():
     assert not a.check_engage_after_stop(brake(0.10), t, pos, 0.0, "E").passed
     never = a.Step(np.array([0.0]), np.array([True]), 1.0)
     assert not a.check_engage_after_stop(never, t, pos, 0.0, "E").passed
+
+
+def test_check_constant_resolution():
+    sig = a.Step(np.array([0.0, 1.0, 1.0005]), np.array([False, True, False]), 2.0)
+    assert not a.check_constant(sig, 0.0, 2.0, False, "C").passed
+    assert a.check_constant(sig, 0.0, 2.0, False, "C", resolution=0.001).passed

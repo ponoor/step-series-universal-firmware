@@ -150,10 +150,10 @@ class ScopeGapError(RuntimeError):
     pass
 
 
-def scope_offset(cfg: Config, cap: Capture) -> tuple[float, dict]:
+def scope_offset(cfg: Config, cap: Capture, use_ref: bool = True) -> tuple[float, dict]:
     """Scope start minus Digital In start for this capture, from the P0 edges seen by
     both instruments (ad2.scope.p0_ref); the configured constant without a reference."""
-    ref = int(cfg.ad2["scope"].get("p0_ref", 0))
+    ref = int(cfg.ad2["scope"].get("p0_ref", 0)) if use_ref else 0
     if ref and ref in cap.analog and cap.digital is not None:
         t_dig = analyze.bit_edges(cap.digital, cfg.probe_dio[0]).all
         t_ana = analyze.comparator_edges(cap.analog[ref], cap.analog_rate, 1.65, 0.6)
@@ -598,12 +598,12 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
     probe = cfg.probe_dio
     brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
     out1a = int(cfg.ad2["scope"]["out1a"])
-    ref = int(cfg.ad2["scope"].get("p0_ref", 0))
+    ref = int(cfg.ad2["scope"].get("p0_ref", 0)) if scenario.p0_ref else 0
     # P0 is recorded only as the time reference of the Scope.
     mask = mask_of(brake_dios + (probe if ref else probe[1:]) + [15])
     rec = ad2.start_recording(None, digital_rate=float(b["digital_rate"]), sensible_mask=mask,
                               analog_channels=(out1a, ref) if ref else (out1a,),
-                              analog_rate=float(b["analog_rate"]))
+                              analog_rate=float(scenario.analog_rate or b["analog_rate"]))
     stop = threading.Event()
 
     def poll():
@@ -674,7 +674,7 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     end = seg.duration
     released = analyze.Step.from_edges(analyze.bit_edges(seg, cfg.brake_dio))
     try:
-        shift, res["scope_alignment"] = scope_offset(cfg, cap)
+        shift, res["scope_alignment"] = scope_offset(cfg, cap, scenario.p0_ref)
     except ScopeGapError as ex:
         res.update(outcome="ERROR", error=str(ex), retryable=True)
         return res
@@ -736,7 +736,9 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
         t_from = label_t[c.from_label] + sc.resolve_delay(c.delay, transition, latency)
         t_to = label_t[c.to_label] if c.to_label else end
         sig = released if c.signal == "brake" else excited
-        checks.append(analyze.check_constant(sig, t_from, t_to, c.value, c.id))
+        # An excitation edge is known to one window (1 ms) only.
+        checks.append(analyze.check_constant(sig, t_from, t_to, c.value, c.id,
+                                             resolution=window if c.signal == "excited" else 0.0))
     for m in scenario.motion:
         t_from = label_t[m.from_label]
         if isinstance(m, sc.EngageAfterStop):
@@ -862,7 +864,11 @@ def cmd_brake(cfg: Config, args) -> int:
         for scenario in chosen:
             print(f"running {scenario.id}: {scenario.title}")
             for attempt in range(3):
-                res = run_scenario(cfg, scenario, ad2, diag, link, out)
+                try:
+                    res = run_scenario(cfg, scenario, ad2, diag, link, out)
+                except Exception as ex:  # keep the results of the other scenarios
+                    res = {"id": scenario.id, "title": scenario.title, "expect": scenario.expect,
+                           "outcome": "ERROR", "error": f"{type(ex).__name__}: {ex}"}
                 if not res.get("retryable"):
                     break
                 print(f"  {scenario.id}: {res['error']} Running again.")

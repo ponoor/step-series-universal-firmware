@@ -30,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--rate", type=float, help="digital sample rate (default: [timing] digital_rate)")
     s.add_argument("--label", required=True, help="name of the measurement, e.g. baseline / head")
     s.add_argument("--no-reboot", action="store_true", help="do not reboot the board first")
+    s.add_argument("--position-report-ms", type=int,
+                   help="position report interval, 0: no reports (default: [timing] position_report_ms)")
 
     s = sub.add_parser("brake", help="run the brake scenarios")
     s.add_argument("--scenario", choices=[sc.id for sc in SCENARIOS], help="one scenario (default: all)")

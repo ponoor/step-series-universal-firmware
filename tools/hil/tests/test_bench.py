@@ -132,6 +132,44 @@ def test_timing_series():
     assert series["oscReceive"].size == 0
 
 
+def test_servo_delays():
+    # P3 every 10 ms; P2 alternately 1 ms and 3.5 ms after it.
+    p3 = np.arange(10) * 0.010
+    p2 = p3 + np.where(np.arange(10) % 2, 0.0035, 0.001)
+    assert np.allclose(commands.servo_delays(p3, p2), np.where(np.arange(10) % 2, 0.0035, 0.001))
+    # The last P3 at or before each P2 is used, also when P3 has extra rises.
+    p3x = np.sort(np.concatenate((p3, p3 + 0.0005)))
+    assert np.allclose(commands.servo_delays(p3x, p2), np.where(np.arange(10) % 2, 0.003, 0.0005))
+    # P2 at the same time as P3 counts as 0.
+    assert np.allclose(commands.servo_delays(p3, p3), 0.0)
+
+
+def test_servo_delays_excludes():
+    p3 = np.array([0.010, 0.020, 0.100])
+    # before the first P3; 5 ms after; 14.9 ms after (kept); 15.1 ms after (left out); 2 ms after
+    p2 = np.array([0.005, 0.025, 0.0349, 0.0351, 0.102])
+    assert np.allclose(commands.servo_delays(p3, p2), [0.005, 0.0149, 0.002])
+    assert commands.servo_delays(np.array([]), p2).size == 0
+    assert commands.servo_delays(p3, np.array([])).size == 0
+
+
+def test_timing_series_servo_delay():
+    cfg = default_cfg()
+    n = 100000
+    s = np.zeros(n, np.uint32)
+    d = cfg.probe_dio
+    # P3 (230 us) every 10 ms; P2 (300 us) starts 1000 / 3500 us after P3 alternately.
+    for k in range(9):
+        t3 = 1000 + 10000 * k
+        t2 = t3 + (3500 if k % 2 else 1000)
+        s[t3:t3 + 230] |= np.uint32(1 << d[3])
+        s[t2:t2 + 300] |= np.uint32(1 << d[2])
+    series = commands.timing_series(cfg, analyze.segments_from_samples(s, 1e6))
+    assert np.allclose(series["servoDelay"], [1000.0 if k % 2 == 0 else 3500.0 for k in range(9)])
+    assert np.allclose(series["servoInterval"], [12500.0 if k % 2 == 0 else 7500.0 for k in range(8)])
+    assert np.allclose(series["checkStatus"], 230.0)
+
+
 # --- scenarios --------------------------------------------------------------------------
 
 
@@ -328,6 +366,10 @@ def test_compare(tmp_path: Path, capsys):
     for label, period in (("baseline", 50), ("head", 40)):
         n = 200000
         level = ((np.arange(n) // period) % 2).astype(np.uint32) << cfg.probe_dio[0]
+        for k in range(19):  # P3 every 10 ms, P2 starting 2 * period us later
+            t3 = 1000 + 10000 * k
+            level[t3:t3 + 100] |= np.uint32(1 << cfg.probe_dio[3])
+            level[t3 + 2 * period:t3 + 2 * period + 100] |= np.uint32(1 << cfg.probe_dio[2])
         seg = analyze.segments_from_samples(level, 1e6)
         d = tmp_path / label
         d.mkdir()
@@ -342,6 +384,7 @@ def test_compare(tmp_path: Path, capsys):
     assert commands.cmd_compare(cfg, Args) == 0
     out = capsys.readouterr().out
     assert "loop" in out and "-10.0" in out  # p50 of the loop: 50 -> 40 us
+    assert "servoDelay" in out and "-20.0" in out  # servoDelay: 100 -> 80 us
     assert (Path(dirs[1]) / "compare_baseline" / "compare.csv").exists()
 
 

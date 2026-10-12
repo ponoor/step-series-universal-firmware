@@ -415,11 +415,44 @@ def timing_series(cfg: Config, seg: analyze.Segments) -> dict[str, np.ndarray]:
         "udpSend": widths[5],
         "servoInterval": analyze.intervals(e[2].rise) * 1e6,
         "pollInterval": analyze.intervals(e[4].rise) * 1e6,
+        "servoDelay": servo_delays(e[3].rise, e[2].rise) * 1e6,
     }
+
+
+SERVO_DELAY_MAX_S = 0.015
+
+
+def servo_delays(p3_rise: np.ndarray, p2_rise: np.ndarray, max_delay: float = SERVO_DELAY_MAX_S) -> np.ndarray:
+    """Seconds from the last P3 rise (checkStatus) at or before each P2 rise (updateServo)
+    to that P2 rise. P2 rises with no P3 rise within max_delay before them are left out."""
+    p3, p2 = np.asarray(p3_rise, float), np.asarray(p2_rise, float)
+    idx = np.searchsorted(p3, p2, side="right") - 1
+    ok = idx >= 0
+    d = p2[ok] - p3[idx[ok]]
+    return d[d <= max_delay]
 
 
 PERF_OF_SERIES = {"loop": "loop", "oscReceive": "oscReceive", "updateServo": "updateServo",
                   "checkStatus": "checkStatus", "servoInterval": "servoInterval"}
+
+
+SERVO_SETTLE_S = 1.0
+
+
+def servo_settle(link: OscLink, axis: int, pos0: int) -> dict:
+    """Record only (no pass / fail): sets the target of the test axis back to pos0 (the
+    other motors stay at 0, as during the load), waits SERVO_SETTLE_S and reads the
+    position. Checks that the servo still follows."""
+    targets = [0] * NUM_MOTORS
+    targets[axis - 1] = pos0
+    link.send("/setTargetPositionList", *targets)
+    time.sleep(SERVO_SETTLE_S)
+    try:
+        pos = int(link.request("/getPosition", axis, reply="/position",
+                               predicate=lambda a: int(a[0]) == axis).args[1])
+    except OscError as e:
+        return {"target": pos0, "wait_s": SERVO_SETTLE_S, "error": None, "problem": str(e)}
+    return {"target": pos0, "wait_s": SERVO_SETTLE_S, "position": pos, "error": pos - pos0}
 
 
 def cmd_timing(cfg: Config, args) -> int:
@@ -440,7 +473,8 @@ def cmd_timing(cfg: Config, args) -> int:
         summary["firmware"] = firmware_version(link)
 
         # Load (STATUS 7): servo mode on all motors, target list at 100 Hz, position reports.
-        report_ms = int(t["position_report_ms"])
+        report_ms = int(args.position_report_ms if args.position_report_ms is not None
+                        else t["position_report_ms"])
         link.send("/setKval", axis, kval, kval, kval, kval)
         pos0 = int(link.request("/getPosition", axis, reply="/position",
                                 predicate=lambda a: int(a[0]) == axis).args[1])
@@ -474,6 +508,7 @@ def cmd_timing(cfg: Config, args) -> int:
         stop.set()
         sender.join(1.0)
         link.send("/setPositionReportInterval", 255, 0)
+        summary["servo_settle"] = servo_settle(link, axis, pos0)
         link.send("/enableServoMode", 255, 0)
         link.send("/softHiZ", axis)
         time.sleep(0.2)
@@ -510,6 +545,9 @@ def cmd_timing(cfg: Config, args) -> int:
     print_table(["perf vs probe", "perf max", "probe max", "perf avg", "probe mean"],
                 [[k, v["perf_max_us"], v["probe_max_us"], v["perf_avg_us"], v["probe_mean_us"]]
                  for k, v in summary["perf_vs_probe"].items()])
+    settle = summary["servo_settle"]
+    print(f"servo_settle: position {settle.get('position')} - target {settle['target']} = {settle['error']}"
+          f" after {settle['wait_s']} s" + (f" ({settle['problem']})" if "problem" in settle else ""))
     if len(tx) != p1.size:
         print(f"WARNING: sent {len(tx)} OSC messages but saw {p1.size} P1 pulses")
     print(f"results: {out}")

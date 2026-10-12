@@ -36,7 +36,7 @@ void diagnosisCommand(uint8_t inByte) {
 	case 't':
 		testMotion();
 		break;
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 	case 'b':
 		testBrake();
 		break;
@@ -94,7 +94,7 @@ void printMenu() {
 	dbgPrint("s: show status\n");
 	dbgPrint("c: show config\n");
 	dbgPrint("t: test motion\n");
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 	dbgPrint("b: test brake\n");
 #endif
 	dbgPrint("G: print config as JSON\n");
@@ -534,7 +534,7 @@ void boldHeader(String header) {
 void printHeader(String header) {
 	dbgPrint("-------------- %s --------------\n", header.c_str());
 }
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 void testBrake(){
 	static uint8_t brakeTestCount =0;
 	setBrake(brakeTestCount, LOW);

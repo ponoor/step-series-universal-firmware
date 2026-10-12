@@ -28,7 +28,7 @@ void printAllBools(String title, bool* val);
 void printIpAddress(String title, IPAddress ip);
 void boldHeader(String header);
 void printHeader(String header);
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 void testBrake();
 #endif
 

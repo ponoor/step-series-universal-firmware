@@ -916,6 +916,7 @@ def cmd_powerup(cfg: Config, args) -> int:
     p4 = cfg.probe_dio[4]
     brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
     v33 = int(cfg.ad2["scope"]["v33"])
+    out1a = int(cfg.ad2["scope"]["out1a"])
     runs = []
     with open_ad2(cfg) as ad2:
         prompt(f"Scope {v33}+ must be on 3.3 V (J3-2), not on P0, and the STEP800 USB cable unplugged "
@@ -927,7 +928,7 @@ def cmd_powerup(cfg: Config, args) -> int:
                 runs.append({"run": i + 1, "error": "3.3 V did not go below 0.3 V within 10 minutes"})
                 break
             rec = ad2.start_recording(args.duration, digital_rate=1e6, sensible_mask=mask_of(brake_dios + [p4]),
-                                      analog_channels=(v33,), analog_rate=1e5, analog_trigger=(v33, 1.65))
+                                      analog_channels=(v33, out1a), analog_rate=1e5, analog_trigger=(v33, 1.65))
             print(f"[{i + 1}/{args.repeat}] Power is off, armed. Switch the 12 V supply ON (no time limit).",
                   flush=True)
             cap = rec.wait(timeout=600.0 + args.duration)
@@ -936,7 +937,7 @@ def cmd_powerup(cfg: Config, args) -> int:
                 runs.append({"run": i + 1, "error": "no 3.3 V rising edge within 10 minutes"})
                 continue
             cap.save(out / f"powerup_{i + 1}.npz")
-            runs.append(_analyze_powerup(i + 1, cap, brake_dios, p4, v33))
+            runs.append(_analyze_powerup(i + 1, cap, brake_dios, p4, v33, out1a))
             print(f"[{i + 1}/{args.repeat}] recorded.", flush=True)
     write_json(out / "summary.json", {"runs": runs})
     rows = [[r["run"], r.get("first_p4_ms"), ",".join(str(m) for m in r.get("released_before_p4", [])) or "none",
@@ -946,7 +947,8 @@ def cmd_powerup(cfg: Config, args) -> int:
     return 0
 
 
-def _analyze_powerup(run: int, cap: Capture, brake_dios: list[int], p4: int, v33: int) -> dict:
+def _analyze_powerup(run: int, cap: Capture, brake_dios: list[int], p4: int, v33: int,
+                     out1a: int | None = None) -> dict:
     """Times are from the 3.3 V rise (1.65 V crossing found in the trace). The 74HC595
     output register is not cleared at power-up (only the shift register is, by
     SHIFTOUT_ENABLE / R3) and G is tied to GND, so the outputs show their power-up state
@@ -972,6 +974,12 @@ def _analyze_powerup(run: int, cap: Capture, brake_dios: list[int], p4: int, v33
         outputs[motor] = {"high_after_rise_ms": [[round((a - t_rise) * 1e3, 2), round((b - t_rise) * 1e3, 2)] for a, b in high],
                           "edges_ms": [round((t - t_rise) * 1e3, 2) for t in e.all if t_rise <= t <= t_p4 + 0.05]}
     released_ms = (f"{min(a for a, _ in spans) * 1e3:.1f} to {max(b for _, b in spans) * 1e3:.1f}" if spans else "")
-    return {"run": run, "rise_in_capture_ms": t_rise * 1e3,
-            "first_p4_ms": (t_p4 - t_rise) * 1e3 if p4_rise.size else None,
-            "released_before_p4": released, "released_ms": released_ms, "outputs": outputs}
+    res = {"run": run, "rise_in_capture_ms": t_rise * 1e3,
+           "first_p4_ms": (t_p4 - t_rise) * 1e3 if p4_rise.size else None,
+           "released_before_p4": released, "released_ms": released_ms, "outputs": outputs}
+    if out1a is not None and out1a in cap.analog:
+        # Driver state at power-up (standby / HiZ / energized) until 0.3 s after the first P4.
+        from .restart import level_segments
+        res["out1a_segments"] = [s for s in level_segments(cap.analog[out1a], cap.analog_rate, t0=t_rise)
+                                 if s["to_ms"] >= 0 and s["from_ms"] <= (t_p4 - t_rise) * 1e3 + 300]
+    return res

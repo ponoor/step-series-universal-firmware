@@ -1,6 +1,7 @@
 """USB serial diagnosis commands of the firmware (src/diagnosis.cpp):
 p (timing stats, then reset), P (probe self-test, HIL_PROBE builds), b (brake output
-test), s (status), R (reboot), Z (HardHiZ to all drivers, HIL_PROBE builds)."""
+test), s (status), R (reboot), and in HIL_PROBE builds Z (HardHiZ to all drivers),
+D (driver registers read at boot), Y (driver standby test)."""
 
 from __future__ import annotations
 
@@ -137,6 +138,11 @@ class SerialDiag:
             # The port can disappear before the reply is read, or be gone already when
             # the board restarted by itself (/resetDevice): the handle is stale then.
             pass
+        return self.reconnect(timeout)
+
+    def reconnect(self, timeout: float = 15.0) -> str:
+        """Waits for the USB port of a restarted board and reopens it. Returns what was
+        printed in the first second."""
         try:
             self.close()
         except (serial.SerialException, OSError, termios.error):

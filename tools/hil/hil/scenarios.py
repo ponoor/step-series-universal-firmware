@@ -476,6 +476,21 @@ SCENARIOS: tuple[Scenario, ...] = (
         notes="'R' goes through safeSystemReset(): brake engaged, wait, then the MCU reset, which "
               "puts the drivers in standby. The step is timed by the brake engage edge.",
     ),
+    Scenario(
+        "B20", "Watchdog: USB serial 'W' (hang) while released and stopped", "PASS",
+        steps=_ACTIVATE + (
+            serial("W", label="W", edge=BRAKE_ENGAGE), wait(4.0),
+        ),
+        invariants=(),
+        motion=(EngageBeforeReset("ENGAGED-BEFORE-RESET", "W"),),
+        poll_position=False,
+        reboots=True,
+        analog_rate=1e4,
+        p0_ref=False,
+        notes="The watchdog early warning (2 s after the last clear) engages every brake output "
+              "without SPI and waits the longest transition time, then the watchdog resets the "
+              "MCU. The step is timed by the brake engage edge, 2 s after 'W'.",
+    ),
 )
 
 

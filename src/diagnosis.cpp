@@ -1299,7 +1299,8 @@ void saveCurrentConfigToSd() {
 }
 
 void rebootBoard() {
+	// Reply first: the brakes can take up to 1 s, and the config tool waits 3 s for it.
 	SerialUSB.println(F("{\"result\":\"ok\",\"message\":\"Rebooting...\"}"));
 	SerialUSB.flush();
-	NVIC_SystemReset();
+	safeSystemReset();
 }

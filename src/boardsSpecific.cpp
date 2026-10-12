@@ -95,6 +95,9 @@ static uint8_t exchangeShiftRegisters()
 
 #ifdef HAVE_BRAKE
 // First thing in setup(): engages every brake output before the drivers are reset.
+// Mainly for a restart that did not engage the brakes first (watchdog, reset button,
+// brown-out): the MCU reset puts the drivers in standby, while the brakes keep their
+// state until here.
 void initBrakeOutputsEngaged()
 {
 #ifdef STEP400_R1
@@ -104,10 +107,18 @@ void initBrakeOutputsEngaged()
         digitalWrite(brakePin[i], LOW);
         pinMode(brakePin[i], OUTPUT);
     }
+#elif defined(STEP800_R1)
+    // The 74HC595 keeps its output register through an MCU reset (G is tied to GND),
+    // while the shift register is cleared (SHIFTOUT_ENABLE floats and R3 pulls it down).
+    // Latch the cleared shift register: all outputs low. initBrake() enables the shift
+    // register afterwards. (At power-up the outputs are released until here; the
+    // bootloader takes most of that time.)
+    digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, LOW);
+    pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    pinMode(PIN_DIPSW_LATCH, OUTPUT);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
 #endif
-    // STEP800: latching the cleared shift register here did not shorten the released
-    // outputs at power-up (HIL bench: 236-262 ms vs 251-262 ms), so it was not kept.
-    // The outputs go low at the first latch, in initDipSw().
 }
 
 void initBrake()

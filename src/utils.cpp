@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "oscListeners.h"
 #include "hilProbe.h"
+#include "resetCause.h"
 #include <stdarg.h>
 #include <utility/w5100.h>
 
@@ -180,6 +181,32 @@ void resetMotorDriver(uint8_t deviceID) {
         stepper[deviceID].getStatus(); // clears error flags
         dbgPrint(" -> 0x%02X\n", stepper[deviceID].getParam(CONFIG));
     }
+}
+
+void safeSystemReset() {
+#ifdef HAVE_BRAKE
+    // The MCU reset puts the drivers in standby (their STBY/RST input floats and is
+    // pulled down inside), so engage the brakes and wait for them first.
+    uint16_t waitMs = 0;
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (electromagnetBrakeEnable[i] && (brakeStatus[i] != BRAKE_ENGAGED))
+        {
+            // GetParam does not clear the latched flags (GetStatus does).
+            const uint16_t status = stepper[i].getParam(REG_STATUS);
+            if (!(status & STATUS_HIZ) && (status & STATUS_MOT_STATUS))
+                stepper[i].hardStop();
+            setBrake(i, LOW);
+            const uint16_t t = min(brakeTransitionDuration[i], (uint16_t)1000);
+            if (t > waitMs)
+                waitMs = t;
+        }
+    }
+    const uint32_t start = millis();
+    while ((uint32_t)(millis() - start) < waitMs)
+        Watchdog.reset();
+#endif
+    systemReset();
 }
 
 // The W5500 defaults (RTR 200 ms, RCR 8) can block Udp.endPacket() for about 1.8 s when

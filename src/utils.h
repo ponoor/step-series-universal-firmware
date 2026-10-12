@@ -69,6 +69,10 @@ void clearHomingStatus(uint8_t motorId);
 bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatus = true);
 void sendCommandError(uint8_t motorID, uint8_t errorNum);
 void resetMotorDriver(uint8_t deviceID);
+// Restart of the MCU (/resetDevice, USB serial 'R'): hard-stops the turning motors with
+// the brake enabled, engages their brakes, waits for the longest brakeTransitionDuration
+// of them (at most 1 s), then resets.
+void safeSystemReset();
 void initEthernet();
 void sendBootMsg(uint32_t _currentTime);
 

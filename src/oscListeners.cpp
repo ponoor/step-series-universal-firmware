@@ -225,29 +225,7 @@ void getAdcVal(OscMessage &msg)
 
 void resetDevice(OscMessage &msg)
 {
-#ifdef HAVE_BRAKE
-    // Engage the brakes and wait for them before the reset: the drivers go HiZ when
-    // setup() resets them.
-    uint16_t waitMs = 0;
-    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-    {
-        if (electromagnetBrakeEnable[i] && (brakeStatus[i] != BRAKE_ENGAGED))
-        {
-            // GetParam does not clear the latched flags (GetStatus does).
-            const uint16_t status = stepper[i].getParam(REG_STATUS);
-            if (!(status & STATUS_HIZ) && (status & STATUS_MOT_STATUS))
-                stepper[i].hardStop();
-            setBrake(i, LOW);
-            const uint16_t t = min(brakeTransitionDuration[i], (uint16_t)1000);
-            if (t > waitMs)
-                waitMs = t;
-        }
-    }
-    const uint32_t start = millis();
-    while ((uint32_t)(millis() - start) < waitMs)
-        Watchdog.reset();
-#endif
-    systemReset();
+    safeSystemReset();
 }
 
 void saveConfig(OscMessage &msg)

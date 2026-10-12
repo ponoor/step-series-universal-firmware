@@ -102,6 +102,7 @@ cd tools/hil
 .venv/bin/python hil.py compare results/<baseline dir> results/<head dir>
 .venv/bin/python hil.py brake               # all scenarios, or --scenario B3
 .venv/bin/python hil.py powerup --repeat 5  # interactive: power cycles the board
+.venv/bin/python hil.py reboot --how R      # brake and driver state across a restart
 ```
 
 Each run writes `results/<YYYYmmdd-HHMMSS>_<git short sha>_<label>/` with `summary.json`,
@@ -114,6 +115,7 @@ The console shows a summary table and the result directory only.
 | `timing` | Reboots the board, applies the load (servo mode on all motors, `/setTargetPositionList` at 100 Hz, position reports), records the probes at 1 MHz for the duration, reads `p` before and after. Reports min / p50 / p99 / p99.9 / max / mean of the loop period, each handler, the servo and status poll intervals, and compares them with `perfStats`. |
 | `compare` | Table of p50 / p99 / p99.9 / max of two `timing` results and overlaid histograms. |
 | `brake` | For each scenario of `hil/scenarios.py`: reboot, common setup, record (digital 1 MHz, OUT1A and P0 at 200 kS/s) while running the steps and polling `/getPosition` every 20 ms, then judge INV-1 to INV-3 and the scenario's checks. Saves a timing diagram per scenario. |
+| `reboot` | `--how R` (USB serial reboot), `resetDevice` (OSC) or `standby` (`Y`: the driver reset line floats for 300 ms while the MCU runs). With the test axis released and stopped: records the brake outputs, probes and OUT1A (10 kS/s across a restart), reports the OUT1A level segments from the driver standby entry and the driver registers read at boot (`D`). |
 | `powerup` | Needs Scope 2+ moved to 3.3 V and the STEP800 USB cable unplugged: USB VBUS is connected to the board's 5 V net without a diode (schematic sheet 1), so USB alone powers the 3.3 V rail and the 74HC595. Reports, per run, the initial level and every edge of each brake output until the first P4 rise. The 74HC595 output register is not cleared at power-up (SHIFTOUT_ENABLE / R3 clear only the shift register, G is tied to GND), so the outputs keep their power-up state until the first RCK edge. Afterwards, move Scope 2+ back to P0. Arms a recording triggered by the 3.3 V rise on Scope 2, asks for a power cycle, and reports any brake output that is HIGH (released) before the first P4 rise. |
 
 ## How it works
@@ -183,9 +185,19 @@ AD2 time is the first excitation-off edge on OUT1A after the previous step. `Z` 
 builds only) sends HardHiZ to every driver, bypassing the brake state machine, to
 simulate a driver that goes HiZ by itself (overcurrent, thermal shutdown, UVLO).
 
-B18 (`/resetDevice`) restarts the board: only the first P1 pulses (one per message sent)
+**Driver standby.** The driver reset line (L6470 STBY/RST) is not reachable on the board.
+An MCU reset leaves it floating, and the drivers' internal pull-down puts them in standby
+at once: OUT1A of an energized driver jumps to about 6 V and decays to about 0.13 V within
+80 ms. The excitation detection reads 0.13 V as excited (below `clamp_v`), so judge a
+restart with `hil.py reboot` (the standby entry is the first 1 ms window above 3 V) and
+with `D`: CONFIG 0x2E88 (power-on default) at boot means the drivers were reset.
+HIL_PROBE builds also set P0 high just before a firmware reset; the bootloader drives
+P0 (D1, UART TX) about 30 ms after the reset.
+
+B18-B20 restart the board: only the first P1 pulses (one per message sent)
 are matched, because the probe pins float during the restart, and the position is not
-polled. Run it last (`hil.py brake` does).
+polled. They run last (`hil.py brake` does). B19 and B20 time their serial step by the
+brake engage edge and check that it comes before the driver standby entry.
 
 ## Tests
 
@@ -203,7 +215,8 @@ The tests use synthetic data and run without the hardware.
 | `hil.py` | CLI |
 | `hil/ad2.py` | AD2 open/close, recording, DIO15 open-drain control |
 | `hil/osc.py` | OSC send/receive with timestamps, `/setDestIp` check |
-| `hil/diag.py` | USB serial commands (`p`, `P`, `b`, `s`, `R`, `Z`) |
+| `hil/diag.py` | USB serial commands (`p`, `P`, `b`, `s`, `R`; HIL_PROBE builds: `Z`, `D`, `Y`, `W`) |
+| `hil/restart.py` | `reboot`: restart and driver standby analysis |
 | `hil/analyze.py` | edges, durations, statistics, command matching, excitation, invariants |
 | `hil/scenarios.py` | brake scenarios as data |
 | `hil/commands.py` | subcommands |

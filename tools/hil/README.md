@@ -110,6 +110,7 @@ cd tools/hil
 .venv/bin/python hil.py check --test C9 --cases b   # one check (C6e, C8-C11 need a human)
 .venv/bin/python hil.py check --test C6e --label prefix   # --label: suffix of the result directory
 .venv/bin/python hil.py selftest --id 85    # board ID (DIP switch) other than board.id
+.venv/bin/python hil.py arp --topology T1 --step e1   # client replaced, same IP (see "Client replacement")
 ```
 
 `--id N` (before or after the subcommand) replaces `board.id` of `bench.toml`: the board is
@@ -130,6 +131,7 @@ The console shows a summary table and the result directory only.
 | `brake` | For each scenario of `hil/scenarios.py`: reboot, common setup, record (digital 1 MHz, OUT1A and P0 at 200 kS/s) while running the steps and polling `/getPosition` every 20 ms, then judge INV-1 to INV-3 and the scenario's checks. Saves a timing diagram per scenario. |
 | `reboot` | `--how R` (USB serial reboot), `resetDevice` (OSC) or `standby` (`Y`: the driver reset line floats for 300 ms while the MCU runs). With the test axis released and stopped: records the brake outputs, probes and OUT1A (10 kS/s across a restart), reports the OUT1A level segments from the driver standby entry and the driver registers read at boot (`D`). |
 | `check` | The remaining checks C1-C11, see below. |
+| `arp` | Client replaced by another MAC address with the same IP address, see below. |
 | `powerup` | Needs Scope 2+ moved to 3.3 V and the STEP800 USB cable unplugged: USB VBUS is connected to the board's 5 V net without a diode (schematic sheet 1), so USB alone powers the 3.3 V rail and the 74HC595. Reports, per run, the initial level and every edge of each brake output until the first P4 rise. The 74HC595 output register is not cleared at power-up (SHIFTOUT_ENABLE / R3 clear only the shift register, G is tied to GND), so the outputs keep their power-up state until the first RCK edge. Afterwards, move Scope 2+ back to P0. Arms a recording triggered by the 3.3 V rise on Scope 2, asks for a power cycle, and reports any brake output that is HIGH (released) before the first P4 rise. |
 
 ### Timing load
@@ -200,6 +202,59 @@ operation (a `/booted` message, the new ID in `T`, ...), up to 10 minutes.
 | C10boot | DIP switch already at `--dip` (85); run with `--id 85`: `R`, brake outputs at 10 kS/s | `T` myId, `/setDestIp` answered; the boot output is printed before the port opens (recorded if seen). Then `hil.py selftest --id 85` |
 | C11 | Test SD card in (stops unless `sdInitializeSucceeded` 1). `F/hil_save_test.json`; 5 x `G` sent back with `{`, 5 x `/saveConfig` (1 MHz); a save, then `W` (10 kS/s) | C11-2 / C11-3: `{"result":"ok",...}` / `/saveConfig Saved...`, no `/booted`, no early warning, `resetCause` unchanged; the longest P0 interval (the save, for `{` with the serial transfer) is recorded. C11-4: P2 early warning 1.95-2.06 s after the last P4 (watchdog reset), `/booted` and `T` resetCause 4 |
 | C12 | SD card removed (stops otherwise). `{` with `network.myIp` (last byte 123) and `outPort` (50123); `{` with `bootedMsgEnable` only; `{` with the values before; `s` and `c` saved; restart | C12-1: `G` shows the sent values (only these two keys change), `T` myIp unchanged, replies still to the bench port. C12-2: keys left out do not change `G`. C12-c: no title printed twice in `c`, no `reportLimitSwStatus` (STEP800). C12-s: the thermal status texts are L6470 names (since `0d90d03`), the `s` fields match the raw values as in C5 |
+
+## Client replacement (`hil.py arp`)
+
+Checks whether the board keeps sending to the MAC address it resolved first when the
+client is replaced by another device with the same IP address (another PC, another USB-LAN
+adapter). Two USB-LAN adapters of the Mac, NIC A and NIC B (`[arp] nic_a`, `nic_b`), are
+both set to `[arp] client_ip` / 255.255.255.0 without router and DNS (System Settings >
+Network > the adapter > Details > TCP/IP, Manually). Only one is connected at a time (the
+same address twice on the network would conflict). Topologies (`--topology`):
+
+- **T1**: the board, NIC A and NIC B at an unmanaged switch without uplink. The swap
+  unplugs the cable of one adapter at the switch and plugs in the other: the board's link
+  stays up, as in the field.
+- **T2**: the board cabled directly to NIC A; the swap moves the cable to NIC B: the
+  board's link goes down once.
+
+While a step runs the bench
+
+- captures both adapters with `tcpdump -i <if> -e -n -U --immediate-mode -w <pcap>
+  'ether host <board MAC> or arp'` (promiscuous, the tcpdump default). No `sudo`: the BPF
+  devices must be readable (Wireshark's "Install ChmodBPF"; open a new terminal or log in
+  again afterwards). The board MAC is read from `s` (`Current MAC address`; `c` prints the
+  configured MAC before the ID is added). In T2 the adapter sees every frame of the board,
+  also those to the other MAC address. In T1 a frame to the old MAC address reaches NIC B
+  only if the switch floods it; there the board's ARP requests (broadcast) and the frames
+  to NIC B decide.
+- polls the link status of both adapters (`ifconfig`, every 0.1 s). The swap and the
+  alias address are detected from it, so the bench also runs without a terminal: it prints
+  `OPERATOR:` and goes on when the adapters change.
+- records P0-P6 at 1 MHz in consecutive 30 s AD2 recordings (`ad2_<k>.npz`), stopped
+  across a restart of the board: the USB re-enumeration dropped 0.53 s of a 10.5 s 1 MHz
+  recording without a lost-sample report. A recording whose data are shorter than its host
+  time by more than 5 ms is reported and not used. P1 is checked against the OSC packets
+  sent (`ad2_segments` in `summary.json`).
+- sends and receives OSC through sockets scoped to one adapter (`IP_BOUND_IF`) and bound
+  to the client address, one log per socket (`osc_log_<k>_<NIC>_<address>.jsonl`).
+
+| Step | What is done |
+|---|---|
+| `check` | NIC A only. E1 1 (below), then `/getVersion` |
+| `e1` | 1: NIC A (asked for if not the only active adapter), `R`, `/setDestIp` from NIC A, `/setPositionListReportInterval` `[arp] report_ms` (100). 2: swap to NIC B (human). 3: wait `--wait` s (300). 4: `/getVersion` from NIC B (2 s). 5: `/setDestIp` from NIC B, observe `--observe` s (30). 6: swap back to NIC A (human), 10 s without a command, `/getVersion` from NIC A. `p` before the swap, after 3 and after 5 |
+| `e2a` | e1 1-5 (`--wait` 30), then the operator adds `[arp] alias_ip` to NIC B, `/setDestIp` from it (10 s), `/setDestIp` from the client address (`--observe`), the alias is removed, e1 6 |
+| `e2b` | e1 1-5, then `R` and `/setDestIp` from NIC B, the reports again, `--observe` s, e1 6 |
+| `c1`, `c2` | HIL_PROBE builds with the candidate fixes. e1 1-5, then the serial command (`N` / `U`) while `/getVersion` is sent from NIC B 20 times every 2 ms, `--observe` s, e1 6; then the command again while the client is reachable (reports every 20 ms, 3 s before and after) |
+
+`summary.json` has, per phase (each step above starts one): the board's ARP requests
+(time from the phase start, the address asked for), its frames by destination MAC
+(`NIC A`, `NIC B`, `broadcast`) and OSC address, the ARP to the board (requests for its
+address, replies, gratuitous ARP), what NIC B received, P1 / P5 counts and P5 widths, the
+P5 pulses paired with the captured frames of the board (within 5 ms after the clock
+offset, only within the AD2 recordings), and the OSC messages received per socket. `arp
+H1` merges the phases 3-5: H1 is observed when the board sent no ARP request for the
+client address and no frame to NIC B. All items are RECORD.
 
 ## How it works
 
@@ -323,4 +378,5 @@ The tests use synthetic data and run without the hardware.
 | `hil/commands.py` | subcommands |
 | `hil/config.py` | `bench.toml` loading and validation |
 | `hil/plots.py` | PNG output |
+| `hil/arp.py` | `arp`: pcap parsing, capture, link status, AD2 segments, client replacement steps |
 | `hil/checks.py` | `check`: C1-C11, the logged USB serial (`SerialLog`) and their judgement helpers |

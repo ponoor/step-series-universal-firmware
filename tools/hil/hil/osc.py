@@ -19,6 +19,11 @@ class OscError(Exception):
     pass
 
 
+# macOS: setsockopt(IPPROTO_IP, IP_BOUND_IF, interface index) scopes a socket to one
+# interface (sends leave through it, receives only from it). Not in the socket module.
+IP_BOUND_IF = 25
+
+
 @dataclass
 class LogEntry:
     t_ns: int
@@ -38,13 +43,16 @@ def local_ip_for(remote_ip: str, port: int) -> str:
 
 
 class OscLink:
-    def __init__(self, board_ip: str, board_in_port: int, listen_port: int, local_ip: str = "0.0.0.0"):
+    def __init__(self, board_ip: str, board_in_port: int, listen_port: int, local_ip: str = "0.0.0.0",
+                 bound_if: str = ""):
         """local_ip: send from and receive on this local address only (e.g. an alias
-        address of the interface); by default any address."""
+        address of the interface); by default any address. bound_if: send and receive
+        through this interface only (macOS IP_BOUND_IF), e.g. "en7"."""
         self.board_ip = board_ip
         self.board_in_port = board_in_port
         self.listen_port = listen_port
         self.local_ip = local_ip
+        self.bound_if = bound_if
         self.log: list[LogEntry] = []
         self._log_lock = threading.Lock()
         self._cond = threading.Condition(self._log_lock)
@@ -57,9 +65,13 @@ class OscLink:
     def open(self) -> "OscLink":
         self._rx_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._rx_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._tx_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if self.bound_if:
+            index = socket.if_nametoindex(self.bound_if)
+            for s in (self._rx_sock, self._tx_sock):
+                s.setsockopt(socket.IPPROTO_IP, IP_BOUND_IF, index)
         self._rx_sock.bind((self.local_ip, self.listen_port))
         self._rx_sock.settimeout(0.1)
-        self._tx_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if self.local_ip != "0.0.0.0":
             self._tx_sock.bind((self.local_ip, 0))
         self._running = True

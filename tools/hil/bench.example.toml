@@ -121,3 +121,17 @@ hiz_median_v = [1.5, 2.1]
 # Scope start minus Digital In start, in seconds, used only when ad2.scope.p0_ref = 0.
 # It is not constant (Task 3 measured -395 to +26 us), so prefer p0_ref.
 scope_minus_digital_s = 0.0
+
+[arp]
+# hil.py arp: the client is replaced by another adapter with the same IP address.
+# Two USB-LAN adapters of this Mac, both set to client_ip / 255.255.255.0 (no router),
+# never connected at the same time. Their MAC addresses are read with ifconfig.
+nic_a = "en9"
+nic_b = "en7"
+client_ip = "10.0.0.10"
+# E2 a: an alias address of NIC B, added and removed by a human.
+alias_ip = "10.0.0.11"
+# /setPositionListReportInterval while the client is swapped (ms).
+report_ms = 100
+# Length of each AD2 recording (P0-P6, 1 MHz); the recordings follow each other.
+segment_s = 30.0

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hardware-in-the-loop test bench for the STEP800 with a Digilent Analog Discovery 2.
 
-Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check> [--id N] ...
+Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp> [--id N] ...
 See README.md.
 """
 
@@ -11,6 +11,7 @@ import argparse
 import sys
 
 from hil import config
+from hil.arp import STEPS as ARP_STEPS
 from hil.checks import TESTS as CHECKS
 from hil.scenarios import SCENARIOS
 
@@ -77,6 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--label", help="suffix of the result directory, e.g. prefix for the firmware before a fix")
     s.add_argument("--dip-values", help="C10: comma-separated DIP switch values (default 1,2,4,...,128)")
     s.add_argument("--dip", type=int, default=85, help="C10boot: DIP switch value set before the restart")
+
+    s = sub.add_parser("arp", parents=[common], help="client replaced by another MAC with the same IP (needs a human)")
+    s.add_argument("--topology", choices=["T1", "T2"], required=True,
+                   help="T1: board and both NICs at a switch, T2: board cabled directly to one NIC")
+    s.add_argument("--step", choices=list(ARP_STEPS), required=True,
+                   help="check: NIC A only; e1: E1 1-6; e2a / e2b: E2; c1 / c2: candidate fixes (HIL_PROBE)")
+    s.add_argument("--wait", type=float, help="E1 3: seconds on NIC B before /getVersion (e1: 300, others: 30)")
+    s.add_argument("--observe", type=float, default=30.0, help="seconds after /setDestIp from NIC B (E1 5)")
+    s.add_argument("--label", help="suffix of the result directory")
     return p
 
 
@@ -85,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.load(args.config)
     if getattr(args, "id", None) is not None:
         cfg.override_board_id(args.id)
-    from hil import checks, commands, restart
+    from hil import arp, checks, commands, restart
 
     handler = {
         "selftest": commands.cmd_selftest,
@@ -95,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         "compare": commands.cmd_compare,
         "reboot": restart.cmd_reboot,
         "check": checks.cmd_check,
+        "arp": arp.cmd_arp,
     }[args.command]
     return handler(cfg, args)
 

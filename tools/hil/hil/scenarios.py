@@ -31,7 +31,8 @@ FAR = 4 * MOVE
 # Delay symbols for checks, resolved from bench.toml [brake]:
 #   "latency":    brake output delay allowance (latency_allowance_ms)
 #   "transition": transition_ms + latency_allowance_ms
-#   "poll":       one status poll of the firmware (10 ms) + latency_allowance_ms
+#   "poll":       one status poll of the firmware (10 ms; the status is read every 5 ms
+#                 since the 5 ms slots, so this allows two reads) + latency_allowance_ms
 LATENCY = "latency"
 TRANSITION = "transition"
 POLL = "poll"
@@ -245,7 +246,8 @@ SCENARIOS: tuple[Scenario, ...] = (
             Check("ENGAGED-AFTER-ACTIVATE0", "brake", False, "activate0", None, LATENCY),
         ),
         notes="Also records the command -> brake output delay and the engaged + excited overlaps. "
-              "/softHiZ on a stopped motor engages at the next status poll (up to 10 ms).",
+              "/softHiZ on a stopped motor engages at the next status read (up to 5 ms; 10 ms "
+              "before the 5 ms slots).",
     ),
     Scenario(
         "B2", "Servo mode enabled while the brake is engaged (STATUS 5.1)", "PASS",
@@ -448,7 +450,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         steps=_ACTIVATE + (
             serial("Z", label="Z"), wait(0.5),
         ),
-        # The brake engages at the next status poll.
+        # The brake engages at the next status read.
         exempt=(Exempt("INV-1", "Z", span=POLL),),
         checks=(Check("ENGAGED-AFTER-Z", "brake", False, "Z", None, POLL),),
         replies=(_brake_error("ENGAGED-ON-HIZ-REPLY", "Z", "BrakeEngagedOnHiZ"),),
@@ -492,7 +494,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         "S2", "Driver HiZ by itself (serial Z) in the servo mode, brake enabled and released", "PASS",
         steps=_ACTIVATE + _SERVO_TO_Z + (osc("/activate", AXIS, 1, label="activate2"), wait(0.5)) + _SERVO_AGAIN,
-        # The brake engages at the next status poll.
+        # The brake engages at the next status read.
         exempt=(Exempt("INV-1", "Z", span=POLL),),
         checks=_servo_hiz_checks("activate2")[0] + (
             Check("ENGAGED-AFTER-Z", "brake", False, "Z", "activate2", POLL),

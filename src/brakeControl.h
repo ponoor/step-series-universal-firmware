@@ -92,7 +92,7 @@ bool brakeOutputReleased(BrakeState state);
 // can still reject it).
 BrakeAction brakeOnCommand(BrakeState state, BrakeCommand command);
 
-// Action for a status poll (every 10 ms).
+// Action for a status read (every 5 ms slot of loop()).
 BrakeAction brakeOnPoll(BrakeState state, const BrakePollInput &in);
 
 #endif

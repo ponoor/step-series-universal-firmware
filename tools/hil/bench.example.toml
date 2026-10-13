@@ -70,8 +70,8 @@ digital_rate = 1e6
 duration = 60.0
 # Load: servo mode on all motors, /setTargetPositionList at target_rate_hz (a sine
 # around the current position on the test axis, 0 on the others), position reports
-# of all motors every position_report_ms.
-# TODO(Task 4): match position_report_ms to the procedure of STATUS chapter 7.
+# of all motors every position_report_ms (20 ms: the load of STATUS chapter 7; change
+# it per run with --position-report-ms or --position-list-report-ms).
 target_rate_hz = 100.0
 sine_amplitude = 1280   # microsteps (10 full steps at 1/128)
 sine_period = 2.0       # seconds
@@ -90,10 +90,11 @@ transition_ms = 100
 # Allowed brake output delay added to transition_ms for INV-2 and to the checks.
 # Measured (brake fix, Task 5): a command that changes the output directly (/hardHiZ,
 # /free, /activate 0 on a stopped motor) changes it 0.23-0.33 ms after its P1 rise.
-# Changes made by the 10 ms status poll come up to one poll later: the release
-# after /activate 1 came 101.4-109.5 ms after the command for a 100 ms transition.
-# 20 ms = poll period + loop jitter + one excitation window (1 ms). (It was 30 ms when
-# the STEP800 output followed the second getMyId(), 10-20 ms after the command.)
+# Changes made by the status read come up to one read period later: with the 10 ms
+# status poll the release after /activate 1 came 101.4-109.5 ms after the command for a
+# 100 ms transition; with the 5 ms slots, 99.8-105.4 ms. 20 ms = the 10 ms poll period
+# + loop jitter + one excitation window (1 ms), kept for the 5 ms slots. (It was 30 ms
+# when the STEP800 output followed the second getMyId(), 10-20 ms after the command.)
 latency_allowance_ms = 20
 kval = 16
 max_speed = 200.0

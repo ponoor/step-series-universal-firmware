@@ -93,7 +93,7 @@ extern bool
     reportErrors;
 #define BOOT_MSG_WAIT_TIME  1000    //[ms], The waiting duration for sending a boot message after Ethernet has been linked
 #define W5500_RETRANSMISSION_TIMEOUT_MS 20 // [ms], W5500 RTR (see setEthernetRetransmission())
-#define W5500_RETRANSMISSION_COUNT      2  // W5500 RCR, worst-case block = 20 ms x (2 + 1)
+#define W5500_RETRANSMISSION_COUNT      2  // W5500 RCR; a send to an address without ARP reply blocks 20 ms x 2 (measured 40.8 ms)
 
 // Motor settings.
 #ifdef DRIVER_POWERSTEP01

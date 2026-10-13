@@ -236,8 +236,11 @@ void safeSystemReset(uint16_t minWaitMs) {
     systemReset();
 }
 
-// The W5500 defaults (RTR 200 ms, RCR 8) can block Udp.endPacket() for about 1.8 s when
-// the destination does not answer ARP. The worst case is RTR x (RCR + 1).
+// The W5500 defaults (RTR 200 ms, RCR 8) can block Udp.endPacket() for 1.6 s or more
+// (not measured) when the destination does not answer ARP. With RTR 20 ms and RCR 2 one send to such a
+// destination blocked 40.8 ms on the HIL bench (STEP800), i.e. RTR x RCR (measured; the
+// earlier estimate RTR x (RCR + 1) = 60 ms was not reached). sendOscMessage() then pauses
+// the sends to that destination (sendBackoff.h).
 // Ethernet 2.0.2 setRetransmissionTimeout()/setRetransmissionCount() write the W5100
 // register addresses (0x0017/0x0019), which are SIR/SIMR and the upper byte of RTR on
 // the W5500. On the W5500, write RTR (0x0019-0x001A, 100 us units) and RCR (0x001B) directly.

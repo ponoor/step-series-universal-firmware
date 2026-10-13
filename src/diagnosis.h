@@ -22,7 +22,7 @@ void printConfigurations();
 void printTitle(String title);
 void showBoolResult(String title, bool val);
 template <class T>
-T printAllData(String title, T* val);
+void printAllData(String title, T* val);
 
 void printAllBools(String title, bool* val);
 void printIpAddress(String title, IPAddress ip);

@@ -334,12 +334,22 @@ void printCurrentState() {
 			case 1:
 				s = "Warning";
 				break;
+#ifdef DRIVER_L6470
+			// bit 0: TH_WRN, bit 1: TH_SD (both active low in STATUS, inverted above)
+			case 2:
+				s = "Shutdown";
+				break;
+			case 3:
+				s = "Warning and shutdown";
+				break;
+#elif defined(DRIVER_POWERSTEP01)
 			case 2:
 				s = "Bridge shutdown";
 				break;
 			case 3:
 				s = "Device shutdown";
 				break;
+#endif
 			default:
 				break;
 			}
@@ -420,7 +430,6 @@ void printConfigurations() {
 	showBoolResult(F("reportErrors"), reportErrors);
 
 	printHeader(F("Report & Alarm"));
-	printAllBools(F("reportBUSY"), reportBUSY); 
 	printAllBools(F("reportBUSY"), reportBUSY);
 	printAllBools(F("reportHiZ"), reportHiZ);
 	printAllBools(F("reportHomeSwStatus"), reportHomeSwStatus);
@@ -431,7 +440,9 @@ void printConfigurations() {
 	printAllBools(F("reportThermalStatus"), reportThermalStatus);
 	printAllBools(F("reportOCD"), reportOCD);
 	printAllBools(F("reportStall"), reportStall);
-	printAllBools(F("reportOCD"), reportOCD);
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+	printAllBools(F("reportLimitSwStatus"), reportLimitSwStatus);
+#endif
 	printAllData(F("reportPosition Interval"), reportPositionInterval);
 	dbgPrint("reportPositionList Interval : %d\n", reportPositionListInterval);
 	printAllData("OCThreshold", overCurrentThreshold);
@@ -500,7 +511,7 @@ void showBoolResult(String title, bool val) {
 }
 
 template <class T>
-T printAllData(String title, T* val) {
+void printAllData(String title, T* val) {
 	String out;
 	printTitle(title);
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
@@ -946,9 +957,11 @@ void receiveConfigJson() {
 		JsonArray network_dns = network["dns"];
 		JsonArray network_gateway = network["gateway"];
 		JsonArray network_subnet = network["subnet"];
+		// The address, port and MAC are the values before the ID is added (as 'G' and the
+		// SD save write them). Only the config values change; the running myIp, outPort
+		// and mac are applied by a reboot.
 		for (uint8_t i = 0; i < 4; i++) {
-			myIp[i] = network_myIp[i] | myIp[i];
-			myIp_from_config[i] = myIp[i];
+			myIp_from_config[i] = network_myIp[i] | myIp_from_config[i];
 			destIp[i] = network_destIp[i] | destIp[i];
 			dns[i] = network_dns[i] | dns[i];
 			gateway[i] = network_gateway[i] | gateway[i];
@@ -956,13 +969,11 @@ void receiveConfigJson() {
 		}
 		isMyIpAddId = network["isMyIpAddId"] | isMyIpAddId;
 		inPort = network["inPort"] | inPort;
-		outPort = network["outPort"] | outPort;
-		outPort_from_config = outPort;
+		outPort_from_config = network["outPort"] | outPort_from_config;
 		isOutPortAddId = network["isOutPortAddId"] | isOutPortAddId;
 		JsonArray network_mac = network["mac"];
 		for (uint8_t i = 0; i < 6; i++) {
-			mac[i] = network_mac[i] | mac[i];
-			mac_from_config[i] = mac[i];
+			mac_from_config[i] = network_mac[i] | mac_from_config[i];
 		}
 		isMacAddId = network["isMacAddId"] | isMacAddId;
 		bootedMsgEnable = network["bootedMsgEnable"] | bootedMsgEnable;
@@ -1260,7 +1271,10 @@ static bool sdSaveConfig() {
 	if (!sdInitializeSucceeded) {
 		return false;
 	}
-	Watchdog.disable();   // SD first-write can take > 128 ms; re-enabled after close
+	// The first write to the card can take long (the save measured 82-86 ms by /saveConfig
+	// on the HIL bench, but the card's own delays are not bounded); the watchdog (early
+	// warning 2 s, reset 4 s) is off until the file is closed, then enabled again.
+	Watchdog.disable();
 	sd.remove(configFilename);
 	File32 file;
 	file.open(configFilename, O_RDWR | O_CREAT);

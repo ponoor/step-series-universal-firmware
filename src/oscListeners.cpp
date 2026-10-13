@@ -38,6 +38,7 @@ bool OSCMsgReceive()
     if ((size = Udp.parsePacket()) > 0)
     {
         PROBE_HIGH(1);
+        sendBackoffOnReceive(Udp.remoteIP()); // before any reply
         if (size > OSC_RX_BUFFER_SIZE)
         {
             // Too large: the rest of the packet is discarded by the next parsePacket().

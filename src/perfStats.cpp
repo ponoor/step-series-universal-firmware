@@ -31,4 +31,6 @@ void perfStatsPrint()
     dbgPrint("oscNotMatched  %lu\n", (unsigned long)s.oscNotMatchedCount);
     dbgPrint("slotLate       %lu\n", (unsigned long)s.slotLateCount);
     dbgPrint("reportClockRealign %lu\n", (unsigned long)s.reportClockRealignCount);
+    dbgPrint("udpSendFailed  %lu\n", (unsigned long)s.udpSendFailedCount);
+    dbgPrint("udpSendDropped %lu\n", (unsigned long)s.udpSendDroppedCount);
 }

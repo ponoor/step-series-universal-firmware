@@ -82,8 +82,11 @@ void sendBootMsg(uint32_t _currentTime);
 constexpr uint16_t OSC_TX_BUFFER_SIZE = 640;
 
 // Encodes msg into the static send buffer, sends it and lights TXL. A message that does not
-// fit is not sent (warning on USB serial once).
+// fit is not sent (warning on USB serial once). After a failed send (the destination does
+// not answer ARP) the messages to that address are dropped for 1 s (sendBackoff.h).
 void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port);
+// A packet was received from ip: resumes the sends to it if they were paused.
+void sendBackoffOnReceive(const IPAddress &ip);
 
 template <class T>
 void sendOneDatum(const char *address, T data) {

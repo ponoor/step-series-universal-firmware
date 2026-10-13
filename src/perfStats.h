@@ -32,6 +32,8 @@ struct PerfStats
     uint32_t oscNotMatchedCount; // messages answered with MessageNotMatch
     uint32_t slotLateCount;      // slots started a whole slot period or more late (rescheduled)
     uint32_t reportClockRealignCount; // position report clock more than 20 ms off millis() (realigned)
+    uint32_t udpSendFailedCount;  // UDP sends that failed (destination did not answer ARP)
+    uint32_t udpSendDroppedCount; // messages dropped while the sends to the destination were paused
 };
 
 extern PerfStats perfStats;

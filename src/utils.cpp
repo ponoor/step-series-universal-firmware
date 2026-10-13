@@ -6,6 +6,8 @@
 #include "oscListeners.h"
 #include "hilProbe.h"
 #include "resetCause.h"
+#include "perfStats.h"
+#include "sendBackoff.h"
 #include <stdarg.h>
 #include <utility/w5100.h>
 
@@ -502,6 +504,15 @@ bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatu
     return true;
 }
 
+static SendBackoff sendBackoff;
+
+static void printSendBackoffEvent(SendBackoffEvent event, const IPAddress &ip) {
+    if (event == SEND_BACKOFF_PAUSED)
+        dbgPrint("Warning: destination %d.%d.%d.%d unreachable, sends paused\n", ip[0], ip[1], ip[2], ip[3]);
+    else if (event == SEND_BACKOFF_RESUMED)
+        dbgPrint("Destination %d.%d.%d.%d reachable, sends resumed\n", ip[0], ip[1], ip[2], ip[3]);
+}
+
 void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
     static uint8_t oscTxBuffer[OSC_TX_BUFFER_SIZE];
     static bool warned = false;
@@ -513,12 +524,24 @@ void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
         }
         return;
     }
+    const uint32_t ipRaw = (uint32_t)ip;
+    if (!sendBackoffShouldSend(sendBackoff, ipRaw, millis())) {
+        perfStats.udpSendDroppedCount++;
+        return;
+    }
     PROBE_HIGH(5);
     Udp.beginPacket(ip, port);
     Udp.write(oscTxBuffer, len);
-    Udp.endPacket();
+    const bool ok = Udp.endPacket(); // 0: timeout (no ARP reply), see sendBackoff.h
     PROBE_LOW(5);
+    if (!ok)
+        perfStats.udpSendFailedCount++;
+    printSendBackoffEvent(sendBackoffSent(sendBackoff, ipRaw, ok, millis()), ip);
     turnOnTXL();
+}
+
+void sendBackoffOnReceive(const IPAddress &ip) {
+    printSendBackoffEvent(sendBackoffReceived(sendBackoff, (uint32_t)ip), ip);
 }
 
 void sendThreeInt(const char *address, int32_t data1, int32_t data2, int32_t data3) {

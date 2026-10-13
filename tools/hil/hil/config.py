@@ -87,6 +87,15 @@ class Config:
     def probe_dio(self) -> list[int]:
         return [int(d) for d in self.ad2["dio"]["probes"]]
 
+    def override_board_id(self, board_id: int) -> None:
+        """--id: the DIP switch ID instead of board.id. The firmware defaults derive the IP
+        address and the send port from it, so explicit board.ip / out_port are an error."""
+        if not 0 <= board_id <= 255:
+            raise ConfigError("--id must be 0-255")
+        if self.raw["board"].get("ip") or self.raw["board"].get("out_port"):
+            raise ConfigError("--id cannot be used with board.ip or board.out_port in bench.toml")
+        self.raw["board"]["id"] = board_id
+
     def section(self, name: str) -> dict:
         return self.raw[name]
 

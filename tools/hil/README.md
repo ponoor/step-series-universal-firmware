@@ -106,7 +106,14 @@ cd tools/hil
 .venv/bin/python hil.py brake               # all scenarios, or --scenario B3
 .venv/bin/python hil.py powerup --repeat 5  # interactive: power cycles the board
 .venv/bin/python hil.py reboot --how R      # brake and driver state across a restart
+.venv/bin/python hil.py check --all-auto    # remaining checks C1-C7 (see "Remaining checks")
+.venv/bin/python hil.py check --test C9 --cases b   # one check (C8-C11 need a human)
+.venv/bin/python hil.py selftest --id 85    # board ID (DIP switch) other than board.id
 ```
+
+`--id N` (before or after the subcommand) replaces `board.id` of `bench.toml`: the board is
+then reached at `10.0.0.100 + N` and replies to port `50100 + N` (not with an explicit
+`board.ip` / `board.out_port`).
 
 Each run writes `results/<YYYYmmdd-HHMMSS>_<git short sha>_<label>/` with `summary.json`,
 CSV tables, PNG plots, the raw captures (`*.npz`) and the OSC log (`osc_log.jsonl`).
@@ -119,6 +126,7 @@ The console shows a summary table and the result directory only.
 | `compare` | Table of min / p50 / p99 / p99.9 / max / mean of two `timing` results (every metric, and the CPU usage) and overlaid histograms. The statistics are computed again from both captures, so results recorded before a metric was added (`slotInterval`) or changed (the `servoDelay` window) are compared with the current definitions. |
 | `brake` | For each scenario of `hil/scenarios.py`: reboot, common setup, record (digital 1 MHz, OUT1A and P0 at 200 kS/s) while running the steps and polling `/getPosition` every 20 ms, then judge INV-1 to INV-3 and the scenario's checks. Saves a timing diagram per scenario. |
 | `reboot` | `--how R` (USB serial reboot), `resetDevice` (OSC) or `standby` (`Y`: the driver reset line floats for 300 ms while the MCU runs). With the test axis released and stopped: records the brake outputs, probes and OUT1A (10 kS/s across a restart), reports the OUT1A level segments from the driver standby entry and the driver registers read at boot (`D`). |
+| `check` | The remaining checks C1-C11, see below. |
 | `powerup` | Needs Scope 2+ moved to 3.3 V and the STEP800 USB cable unplugged: USB VBUS is connected to the board's 5 V net without a diode (schematic sheet 1), so USB alone powers the 3.3 V rail and the 74HC595. Reports, per run, the initial level and every edge of each brake output until the first P4 rise. The 74HC595 output register is not cleared at power-up (SHIFTOUT_ENABLE / R3 clear only the shift register, G is tied to GND), so the outputs keep their power-up state until the first RCK edge. Afterwards, move Scope 2+ back to P0. Arms a recording triggered by the 3.3 V rise on Scope 2, asks for a power cycle, and reports any brake output that is HIGH (released) before the first P4 rise. |
 
 ### Timing load
@@ -159,6 +167,33 @@ of the position reports realigned to `millis()`; `null` with firmware without it
 `summary.json` also has `load` (above), `slot_late` (the `slotLate` counter of `p` after
 the recording: slots that started a whole period or more late; `null` with firmware
 without it) and `servo_settle` (`target`, `position`, `error` = position - target).
+
+## Remaining checks (`hil.py check`)
+
+Checks of the phase 1 / brake fix / 5 ms slot changes that the other commands do not
+cover. Every check reboots the board first (`R`) and records the USB serial output for
+its whole duration (`serial_log.txt`, each line with the time since the start); every
+line containing `Warning:` is listed in `summary.json` (`warnings`). Each item is PASS /
+FAIL, or RECORD (recorded only). `--all-auto` runs C1-C7; `--test` runs the given checks.
+
+Checks that need a human print a line starting with `OPERATOR:` once the recording runs.
+On a terminal they wait for Enter; without a terminal they wait for the effect of the
+operation (a `/booted` message, the new ID in `T`, ...), up to 10 minutes.
+
+| ID | What is done | Judged |
+|---|---|---|
+| C1 | `p` (counters reset), `/enable*Report 255 0`, `G`, `/enable*Report 255 1`, `G`, `T`, `p`; then other patterns one by one with `p` before and after: `/getPositio? 1`, `/get[PD]osition 1`, `/{getPosition,getDir} 1`, `/getPosition/extra 1`, `/noSuchCommand 1` | C1-2: the ten report flags of `G` false for all motors. C1-3: all true, nothing else in `G` changed, the servo mode (`T`) unchanged. C1-4: `oscSlowPath` 2, `oscNotMatched` 0. C1-5 (RECORD): replies and counters against `PATTERN_CASES` (CNMAT semantics, expected `/position`; `/position`; `/position`, `/dir`; `/position`; `/error/osc`) |
+| C2 | `/setMinSpeed` on the test axis (10.0) and the next motor (5.0), then 255 (20.0); `/enableLowSpeedOptimize axis 1`, then 0; `/getLowSpeedOptimizeThreshold`, `/getUvlo 255` | C2-1, C2-2: `/getMinSpeed m` equals the value for m in `/getMinSpeed 255`, within one MIN_SPEED LSB (0.238 steps/s) of the setting. C2-3: `0.0` (single and 255) while enabled, other motors unchanged; C2-3r (RECORD): the value after disabling. C2-4: type tag `i` for the third argument of `/lowSpeedOptimizeThreshold` (1 / 0) and the second of `/uvlo` (python-osc decodes `T` / `F` as bool) |
+| C3 | DIO15 pressed; `/goUntil axis 0 +-100.0`, `/goUntilRaw axis 0 +-6711`, with `/reportError 1` and 0; released: `/goUntil axis 0 -100.0`, pressed after 0.1 s; pressed: `/goUntil 255 0 100.0`. OUT1A recorded at 200 kS/s, KVAL 16 | C3-1: `/getHomeSw` 1. C3-2: `/error/command HomeSwActivating axis` within 300 ms, position unchanged, OUT1A not excited 50-450 ms after the command. C3-3: as C3-2 without any error. C3-4: the position changes while released (excited), stays constant after the press, `/homingStatus` 3. C3-5: one error for the test axis only, all other motors moved, the test axis did not |
+| C4 | Homing: the settings (`/getHomingDirection` etc.), `/homing`, press when the position changes, release at `/homingStatus` 2; `/setGoUntilTimeout axis 1000` and `/homing` without a press. Positions: `/setPosition` 2^21-200 then 8 x `/move 50` (and from -2^21+200, `-50`), `/getPosition` and `/getPositionList` at every stop. Servo: position 2^21-52, `/enableServoMode`, targets -2^21+52 and back | C4-1: no `Warning:` line in the serial logs of all `check` runs with the same git sha (judged at the end of a run that includes C4). C4-2: `/homingStatus` 1, 2, 3, position 0 at the end (ReleaseSW with ACT 0), no error. C4-2t: `GoUntilTimeout` 1000-1300 ms after `/homing` (host time) and `/homingStatus` 4. C4-3: both readings equal the 22-bit wrapped expectation at all 18 stops. C4-4: every position step in the direction of `servo_error()` (the firmware's wrap, the short way) and a final error of at most 2; the servo mode is switched off if the motor moves 500 microsteps away |
+| C5 | `s` and `c` saved; `/setHomeSwMode axis` toggled, a `/move`, `s` again | Each CONFIG field of `s` against the raw value with the datasheet positions (masks of `Ponoor_L6470Constants.h`, OSC_SEL / EXT_CLK split as in the datasheet), each STATUS text against the raw STATUS, EL_POS, ALARM_EN and the DIP switch BIN / DEC; SW_MODE follows the change |
+| C6 | SD card removed (stops if `/configName` reports `sdInitializeSucceeded` 1) and `--dead-ip` unused (ping, ARP). Loads a: `/getPosition axis` at 2 Hz, b: `/setPositionListReportInterval 20`, c: `/setPositionReportInterval 255 20`, d: one `/getPosition 255`, each recorded at 1 MHz for `--duration` (10 s), first to this Mac, then after `{"network":{"destIp":[dead]}}` over `{`; `/setDestIp` back at the end | C6-cfg: only `network.destIp` changed in `G`. C6-p5: P5 width at most 70 ms (bound 20 ms x 3). C6-loop-ab: longest P0 interval at most 70 ms. C6-loop-cd (RECORD). C6-reset: no P2 pulse over 1 ms (early warning), no `/booted`, `resetCause` unchanged |
+| C7 | `R` with the test axis brake enabled and released, `brakeTransitionDuration` a 100, b 1000, c 5000 ms; d brake disabled (motor energized by `/hardStop`); e all motors, 100-1000 ms. Brake outputs, probes and OUT1A at 10 kS/s (`--cases`, `--repeat`) | Reply `Rebooting...` within 100 ms of writing `R` (host time); brake output fall to driver standby (first 1 ms OUT1A window above 3 V) within -1/+6 ms of 100 / 1000 / 1000 / - / 1000 ms (d: no brake edge, last loop P0 edge at most 6 ms before the standby); `/booted` with resetCause 5 |
+| C8 | a: `R`, then `/setDestIp` every 50 ms until `/destIp`; b: `R`, `/setDestIp` on `/booted` (again after 300 ms); c (human): power cycle, `/setDestIp` every 50 ms, counted from the first reply after 1 s without replies (the board keeps running on 12 V while the USB cable is out). 10 kS/s | One `/booted` per run with the cause `T` reports (no second restart). RECORD: time from the reset (standby entry; c: the first P0 edge after power-on) to the first P1, P5, `/destIp` and `/booted` (host times mapped with the trigger time, about +-5 ms), sends until the reply, P1 pulses until the reply, P5 max, longest P0 interval. C9a: resetCause 1 after the power cycles of C8c |
+| C9 | b (human): reset button, with the test axis brake released (brake outputs and OUT1A at 10 kS/s); c: `pio run -e step800_devlib_probe -t upload` (serial port closed); d: `/resetDevice`. a is judged from C8c | `/booted` cause and `T` resetCause: b 3, d 5; c RECORD. C9b-brake (RECORD): the brake output edges from the driver standby entry |
+| C10 | Human: DIP switch 1, 2, 4, ..., 128 (`--dip-values`) while running; brake outputs at 1 MHz | `T` myId equals the value, `W5500 RTR:200 RCR:2` and `New IP: 10.0.0.<100 + id>` printed, `/setDestIp` answered from that address to port 50100 + id, no brake output edge, all outputs low |
+| C10boot | DIP switch already at `--dip` (85); run with `--id 85`: `R`, brake outputs at 10 kS/s | `T` myId, `/setDestIp` answered; the boot output is printed before the port opens (recorded if seen). Then `hil.py selftest --id 85` |
+| C11 | Test SD card in (stops unless `sdInitializeSucceeded` 1). `F/hil_save_test.json`; 5 x `G` sent back with `{`, 5 x `/saveConfig` (1 MHz); a save, then `W` (10 kS/s) | C11-2 / C11-3: `{"result":"ok",...}` / `/saveConfig Saved...`, no `/booted`, no early warning, `resetCause` unchanged; the longest P0 interval (the save, for `{` with the serial transfer) is recorded. C11-4: P2 early warning 1.95-2.06 s after the last P4 (watchdog reset), `/booted` and `T` resetCause 4 |
 
 ## How it works
 
@@ -282,3 +317,4 @@ The tests use synthetic data and run without the hardware.
 | `hil/commands.py` | subcommands |
 | `hil/config.py` | `bench.toml` loading and validation |
 | `hil/plots.py` | PNG output |
+| `hil/checks.py` | `check`: C1-C11, the logged USB serial (`SerialLog`) and their judgement helpers |

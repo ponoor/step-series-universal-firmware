@@ -141,6 +141,7 @@ The values used are stored in `summary.json` (`load`).
 | `servoInterval` | P2 | time between two P2 rises (servo update period) |
 | `slotInterval` | P3 | time between two P3 rises: the period of the status read (checkStatus), which starts every slot (5 ms; 10 ms with the status poll of earlier firmware) |
 | `pollInterval` | P4 | time between two P4 rises (getMyId: every 10 ms, every other slot) |
+| `reportInterval` | P2, P4, P5 | time between the starts of two position report bursts. In a 10 ms (housekeeping) slot the reports are sent after the servo update and before getMyId(), so the P5 rises (UDP sends) between a P2 fall and the next P4 rise of the same slot (less than 5 ms apart) are one burst: 8 sends of `/position`, or 1 of `/positionList`. Replies to OSC messages are sent while P1 is high and never fall in that window, so `--burst-hz` runs are included |
 | `servoDelay` | P3, P2 | time from the last P3 rise (checkStatus, start of the slot) at or before a P2 rise to that P2 rise: how late the servo update starts in the slot. P2 rises with no P3 rise within 4 ms before them are left out (below the 5 ms slot, so that a P2 rise is never paired with the P3 rise of the slot before; it was 15 ms with the 10 ms poll) |
 
 **CPU usage** (`summary.json` `cpu`, also in `compare`): every pass of `loop()` toggles
@@ -151,6 +152,10 @@ longer than base, divided by the sum of all passes (the recorded time). With all
 at the base it is 0. It equals (mean - base) / mean of the loop periods, the stage 1
 estimate (about 28 % with the 10 ms status poll).
 
+`summary.json` also has `report_interval`: the report intervals that are off the configured
+interval (`load`) by 2 ms or more (`off`, with up to 20 of the values; also a row of
+`compare`), and `report_clock_realign`: the `reportClockRealign` counter of `p` (the clock
+of the position reports realigned to `millis()`; `null` with firmware without it).
 `summary.json` also has `load` (above), `slot_late` (the `slotLate` counter of `p` after
 the recording: slots that started a whole period or more late; `null` with firmware
 without it) and `servo_settle` (`target`, `position`, `error` = position - target).

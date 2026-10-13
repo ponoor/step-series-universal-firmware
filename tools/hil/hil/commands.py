@@ -19,7 +19,7 @@ from . import analyze, plots
 from . import scenarios as sc
 from .ad2 import AD2, Capture
 from .config import HIL_DIR, NUM_MOTORS, Config
-from .diag import SLOT_LATE_COUNTER, SerialDiag, parse_probe_map
+from .diag import REPORT_CLOCK_COUNTER, SLOT_LATE_COUNTER, SerialDiag, parse_probe_map
 from .osc import OscError, OscLink
 
 RESULTS_DIR = HIL_DIR / "results"
@@ -417,13 +417,52 @@ def timing_series(cfg: Config, seg: analyze.Segments) -> dict[str, np.ndarray]:
         "slotInterval": analyze.intervals(e[3].rise) * 1e6,
         "pollInterval": analyze.intervals(e[4].rise) * 1e6,
         "servoDelay": servo_delays(e[3].rise, e[2].rise) * 1e6,
+        "reportInterval": analyze.intervals(report_bursts(e[2], e[4].rise, e[5].rise)[0]) * 1e6,
     }
+
+
+def report_bursts(p2: analyze.Edges, p4_rise: np.ndarray, p5_rise: np.ndarray,
+                  max_gap: float = 0.005) -> tuple[np.ndarray, np.ndarray]:
+    """Position reports: in a 10 ms (housekeeping) slot the reports are sent after the servo
+    update and before getMyId(), so the UDP sends (P5 rises) between a P2 fall and the next
+    P4 rise of the same slot (less than max_gap apart) are one report burst (8 x /position,
+    or one /positionList). Replies to OSC messages are sent inside a P1 pulse and never fall
+    there. Returns (start of each burst, number of sends in it) in seconds."""
+    p2_fall = np.asarray(p2.fall, float)
+    p4, p5 = np.asarray(p4_rise, float), np.asarray(p5_rise, float)
+    starts, sizes = [], []
+    idx = np.searchsorted(p2_fall, p4, side="left") - 1
+    for t4, i in zip(p4, idx):
+        if i < 0 or t4 - p2_fall[i] > max_gap:
+            continue
+        sel = p5[(p5 > p2_fall[i]) & (p5 < t4)]
+        if sel.size:
+            starts.append(sel[0])
+            sizes.append(sel.size)
+    return np.array(starts), np.array(sizes, int)
+
+
+REPORT_TOLERANCE_MS = 2.0
+
+
+def report_interval_check(intervals_us: np.ndarray, load: dict | None,
+                          tolerance_ms: float = REPORT_TOLERANCE_MS) -> dict:
+    """Report intervals off the configured interval by tolerance_ms or more."""
+    load = load or {}
+    expected = int(load.get("position_list_report_ms") or load.get("position_report_ms") or 0)
+    v = np.asarray(intervals_us, float) / 1e3
+    if not expected or v.size == 0:
+        return {"expected_ms": expected or None, "intervals": int(v.size), "off": None}
+    off = np.abs(v - expected) >= tolerance_ms
+    return {"expected_ms": expected, "tolerance_ms": tolerance_ms, "intervals": int(v.size),
+            "off": int(off.sum()), "off_values_ms": [round(float(x), 2) for x in v[off][:20]]}
 
 
 # Below the 5 ms slot period, so that a P2 rise is never paired with the P3 rise of the
 # slot before (it was 15 ms with the 10 ms status poll).
 SERVO_DELAY_MAX_S = 0.004
 CPU_BASE_PERCENTILE = 1.0
+REALIGN_COUNTERS = (REPORT_CLOCK_COUNTER,)
 
 
 def cpu_usage(loop_us: np.ndarray, base_percentile: float = CPU_BASE_PERCENTILE) -> dict:
@@ -598,8 +637,10 @@ def cmd_timing(cfg: Config, args) -> int:
     summary["p1_vs_sent"] = {"sent": len(tx), "p1_pulses": int(p1.size)}
     summary["stats_us"] = {k: analyze.stats(v) for k, v in series.items()}
     summary["cpu"] = cpu_usage(series["loop"])
+    summary["report_interval"] = report_interval_check(series["reportInterval"], summary["load"])
     # Slots run late by a whole period or more (5 ms slot firmware only; None before).
     summary["slot_late"] = perf_after.get(SLOT_LATE_COUNTER)
+    summary["report_clock_realign"] = perf_after.get(REPORT_CLOCK_COUNTER)
     summary["perf_before"] = perf_before
     summary["perf_after"] = perf_after
     summary["perf_vs_probe"] = {
@@ -621,6 +662,13 @@ def cmd_timing(cfg: Config, args) -> int:
     if cpu["busy_fraction"] is not None:
         print(f"cpu: {cpu['busy_fraction'] * 100:.1f} % beyond the base loop of {cpu['base_loop_us']:.0f} us")
     print(f"slot late (p): {'-' if summary['slot_late'] is None else summary['slot_late']}")
+    for key in REALIGN_COUNTERS:
+        if key in perf_after:
+            print(f"{key} (p): {perf_after[key]}")
+    ri = summary["report_interval"]
+    if ri["off"] is not None:
+        print(f"reportInterval: {ri['off']} of {ri['intervals']} off {ri['expected_ms']} ms by "
+              f"{ri['tolerance_ms']:.0f} ms or more")
     settle = summary["servo_settle"]
     print(f"servo_settle: position {settle.get('position')} - target {settle['target']} = {settle['error']}"
           f" after {settle['wait_s']} s" + (f" ({settle['problem']})" if "problem" in settle else ""))
@@ -651,6 +699,9 @@ def cmd_compare(cfg: Config, args) -> int:
     cpu = [cpu_usage(s["loop"])["busy_fraction"] for s in series]
     if None not in cpu:
         rows.append(["cpu", "busy [%]", cpu[0] * 100, cpu[1] * 100, (cpu[1] - cpu[0]) * 100, None])
+    off = [report_interval_check(s["reportInterval"], sm.get("load"))["off"] for s, sm in zip(series, sums)]
+    if None not in off:
+        rows.append(["reportInterval", f"off >= {REPORT_TOLERANCE_MS:.0f} ms [n]", off[0], off[1], off[1] - off[0], None])
     out = dirs[1] / f"compare_{dirs[0].name}"
     out.mkdir(exist_ok=True)
     headers = ["metric", "stat", f"{labels[0]} [us]", f"{labels[1]} [us]", "delta [us]", "delta [%]"]

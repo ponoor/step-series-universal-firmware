@@ -17,6 +17,8 @@ PERF_LINE = re.compile(r"^(\w+)\s+max\s+(\d+) us\s+avg\s+(\d+) us\s+n (\d+)\s*$"
 # firmware). Any other "name value" line added later is kept under its name.
 PERF_COUNTER = re.compile(r"^(\w+)\s+(\d+)\s*$")
 SLOT_LATE_COUNTER = "slotLate"
+# Position report clock realigned to millis() (5 ms slot firmware with the report clock).
+REPORT_CLOCK_COUNTER = "reportClockRealign"
 BRAKE_LINE = re.compile(r"Turn off #(\d+), Turn on #(\d+)")
 PROBE_MAP = re.compile(r"HIL probe:((?: P\d=\w+\(P[AB]\d+\))+)")
 

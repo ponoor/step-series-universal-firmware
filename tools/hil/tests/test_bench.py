@@ -190,6 +190,55 @@ def test_timing_series_slot_interval():
     assert np.allclose(series["servoDelay"], 240.0) and series["servoDelay"].size == 19
 
 
+def report_capture(cfg, report_slots, reply_slots=(), n_slots=40, sends=8):
+    """5 ms slots: P3, then P2 (servo), then in every other slot (housekeeping) the report
+    sends (P5) if the slot is in report_slots, then P4. A P1 pulse with 8 P5 replies (an
+    OSC packet such as /getPosition 255) follows the slots in reply_slots."""
+    d = cfg.probe_dio
+    s = np.zeros(n_slots * 5000 + 5000, np.uint32)
+    for k in range(n_slots):
+        t = 1000 + 5000 * k
+        s[t:t + 230] |= np.uint32(1 << d[3])
+        s[t + 240:t + 860] |= np.uint32(1 << d[2])
+        u = t + 900
+        if k % 2 == 0:
+            if k in report_slots:
+                for j in range(sends):
+                    s[u:u + 245] |= np.uint32(1 << d[5])
+                    u += 250
+            s[u + 10:u + 23] |= np.uint32(1 << d[4])
+            u += 30
+        if k in reply_slots:
+            s[u + 100:u + 2800] |= np.uint32(1 << d[1])
+            for j in range(8):
+                s[u + 300 + 300 * j:u + 545 + 300 * j] |= np.uint32(1 << d[5])
+    return analyze.segments_from_samples(s, 1e6)
+
+
+def test_report_bursts():
+    cfg = default_cfg()
+    # Reports every 20 ms (every other housekeeping slot), one late by a slot pair (30 ms).
+    slots = [0, 4, 8, 12, 18, 22, 26]
+    seg = report_capture(cfg, slots, reply_slots=(2, 3, 9))
+    e = [analyze.bit_edges(seg, cfg.probe_dio[c]) for c in range(7)]
+    starts, sizes = commands.report_bursts(e[2], e[4].rise, e[5].rise)
+    assert sizes.tolist() == [8] * len(slots)  # the replies inside P1 are not counted
+    assert np.allclose(starts * 1e6, [1000 + 5000 * k + 900 for k in slots])
+    series = commands.timing_series(cfg, seg)
+    assert np.allclose(series["reportInterval"], [20000, 20000, 20000, 30000, 20000, 20000])
+    chk = commands.report_interval_check(series["reportInterval"], {"position_report_ms": 20})
+    assert chk["off"] == 1 and chk["off_values_ms"] == [30.0] and chk["expected_ms"] == 20
+    # /positionList: one send per burst
+    seg = report_capture(cfg, [0, 4, 8], sends=1)
+    e = [analyze.bit_edges(seg, cfg.probe_dio[c]) for c in range(7)]
+    assert commands.report_bursts(e[2], e[4].rise, e[5].rise)[1].tolist() == [1, 1, 1]
+    chk = commands.report_interval_check(np.array([20000.0, 21900.0, 22000.0, 18000.0]),
+                                         {"position_report_ms": 0, "position_list_report_ms": 20})
+    assert chk["off"] == 2  # 2 ms off counts
+    assert commands.report_interval_check(np.array([]), {"position_report_ms": 0})["off"] is None
+    assert commands.report_interval_check(np.array([10000.0]), None)["off"] is None
+
+
 def test_cpu_usage():
     # 90 idle loops of 50 us and 10 loops of 550 us: 10 x 500 us busy of 9500 us.
     loop = np.array([50.0] * 90 + [550.0] * 10)
@@ -527,7 +576,28 @@ def test_compare(tmp_path: Path, capsys):
     assert "loop" in out and "-10.0" in out  # p50 of the loop: 50 -> 40 us
     assert "servoDelay" in out and "-20.0" in out  # servoDelay: 100 -> 80 us
     assert "slotInterval" in out and "cpu" in out
+    assert "reportInterval" in out
     assert (Path(dirs[1]) / "compare_baseline" / "compare.csv").exists()
+
+
+def test_compare_report_interval(tmp_path: Path, capsys):
+    cfg = default_cfg()
+    dirs = []
+    for label, slots in (("after", [0, 4, 8, 14, 18, 22]), ("fix", [0, 4, 8, 12, 16, 20])):
+        seg = report_capture(cfg, slots)
+        d = tmp_path / label
+        d.mkdir()
+        Capture(digital=seg).save(d / "capture.npz")
+        commands.write_json(d / "summary.json", {"label": label, "load": {"position_report_ms": 20}})
+        dirs.append(str(d))
+
+    class Args:
+        result_dirs = dirs
+
+    assert commands.cmd_compare(cfg, Args) == 0
+    rows = (Path(dirs[1]) / "compare_after" / "compare.csv").read_text().splitlines()
+    off = next(r for r in rows if r.startswith("reportInterval,off"))
+    assert off.split(",")[2:5] == ["1", "0", "-1"]
 
 
 def test_load_dwfpy_redirect():

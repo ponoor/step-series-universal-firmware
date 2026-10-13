@@ -8,6 +8,7 @@
 #include "resetCause.h"
 #include "perfStats.h"
 #include "sendBackoff.h"
+#include "idOffset.h"
 #include <stdarg.h>
 #include <utility/w5100.h>
 
@@ -271,9 +272,19 @@ void initEthernet() {
     digitalWrite(ledPin, LOW);
     delay(1);
 #endif
-    if ( isMyIpAddId ) myIp[3] = myIp_from_config[3] + myId;
-    if ( isMacAddId ) mac[5] = mac_from_config[5] + myId;
-    if ( isOutPortAddId ) outPort = outPort_from_config + myId;
+    if ( isMyIpAddId ) {
+        uint8_t last;
+        if (!addIdToIpLastByte(myIp_from_config[3], myId, last))
+            dbgPrint("Warning: IP address out of range with ID %d, ID not added\n", myId);
+        myIp[3] = last;
+    }
+    if ( isMacAddId ) mac[5] = mac_from_config[5] + myId; // wraps, still unique per ID
+    if ( isOutPortAddId ) {
+        uint16_t port;
+        if (!addIdToPort(outPort_from_config, myId, port))
+            dbgPrint("Warning: port out of range with ID %d, ID not added\n", myId);
+        outPort = port;
+    }
     Ethernet.init(PIN_W5500_CS);
     Ethernet.begin(mac, myIp, dns, gateway, subnet);
     // Must be set after Ethernet.begin(), which resets the chip.

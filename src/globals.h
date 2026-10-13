@@ -12,6 +12,7 @@
 #include <Ethernet.h>
 #include "boardsDef.h"
 #include "brakeControl.h"
+#include "latchedReport.h"
 #ifdef DRIVER_POWERSTEP01
 #include <Ponoor_PowerSTEP01Library.h>
 #elif defined(DRIVER_L6470)
@@ -189,6 +190,8 @@ extern bool
     bProhibitMotionOnLimitSw[NUM_OF_MOTOR],
 #endif
     bHomingAtStartup[NUM_OF_MOTOR];
+// Rate limit of /overCurrent and /stall (latchedReport.h)
+extern LatchedReport overCurrentReport[NUM_OF_MOTOR], stallReport[NUM_OF_MOTOR];
 extern uint32_t
     goUntilTimeout[NUM_OF_MOTOR],
     releaseSwTimeout[NUM_OF_MOTOR];

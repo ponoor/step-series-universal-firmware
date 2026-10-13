@@ -119,6 +119,7 @@ bool
 #endif
     bHomingAtStartup[NUM_OF_MOTOR];
 float homingSpeed[NUM_OF_MOTOR];
+LatchedReport overCurrentReport[NUM_OF_MOTOR], stallReport[NUM_OF_MOTOR];
 uint32_t
     goUntilTimeout[NUM_OF_MOTOR],
     releaseSwTimeout[NUM_OF_MOTOR];

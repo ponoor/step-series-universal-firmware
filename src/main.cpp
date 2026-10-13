@@ -131,6 +131,7 @@ void checkStatus()
     uint32_t t;
     uint16_t statusList[NUM_OF_MOTOR];
     readAllStatus(statusList);
+    const uint32_t nowMs = millis();
 #ifdef HAVE_BRAKE
     // Read after every brake action so far; an action below makes it stale again.
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
@@ -291,9 +292,11 @@ void checkStatus()
             if (reportThermalStatus[i])
                 sendTwoData("/thermalStatus", i + MOTOR_ID_FIRST, thermalStatus[i]);
         }
-        // OCD, active low, latched
+        // OCD, active low, latched. The latched flags are set again at every read while
+        // the condition lasts: reported at once, then at most every
+        // LATCHED_REPORT_INTERVAL_MS per motor and kind (latchedReport.h).
         t = (status & STATUS_OCD) == 0;
-        if (t && reportOCD[i])
+        if (latchedReportPoll(overCurrentReport[i], t, reportOCD[i], nowMs))
             sendOneDatum("/overCurrent", i + MOTOR_ID_FIRST);
 
         // STALL A&B, active low, latched
@@ -302,7 +305,7 @@ void checkStatus()
 #elif defined(DRIVER_POWERSTEP01)
         t = (status & (STATUS_STALL_A | STATUS_STALL_B)) >> 14;
 #endif
-        if ((t != 3) && reportStall[i])
+        if (latchedReportPoll(stallReport[i], t != 3, reportStall[i], nowMs))
             sendOneDatum("/stall", i + MOTOR_ID_FIRST);
     }
 }

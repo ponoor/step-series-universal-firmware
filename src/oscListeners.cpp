@@ -390,15 +390,20 @@ void enableOverCurrentReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
+    // A detection pending while the report is disabled is not sent later.
     if (isCorrectMotorId(motorID))
     {
         reportOCD[motorID - MOTOR_ID_FIRST] = bEnable;
+        if (!bEnable)
+            latchedReportCancel(overCurrentReport[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             reportOCD[i] = bEnable;
+            if (!bEnable)
+                latchedReportCancel(overCurrentReport[i]);
         }
     }
 }
@@ -406,15 +411,20 @@ void enableStallReport(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool bEnable = getBool(msg, 1);
+    // A detection pending while the report is disabled is not sent later.
     if (isCorrectMotorId(motorID))
     {
         reportStall[motorID - MOTOR_ID_FIRST] = bEnable;
+        if (!bEnable)
+            latchedReportCancel(stallReport[motorID - MOTOR_ID_FIRST]);
     }
     else if (motorID == MOTOR_ID_ALL)
     {
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             reportStall[i] = bEnable;
+            if (!bEnable)
+                latchedReportCancel(stallReport[i]);
         }
     }
 }

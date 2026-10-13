@@ -1180,7 +1180,7 @@ def check_c6(b: Bench) -> list[Item]:
                 bad.append(f"{r['load']}: blocked sends {gap:.0f} ms apart")
             if not 0 <= (r["udpSendFailed"] or 0) - r["p5_long"] <= 2:
                 bad.append(f"{r['load']}: udpSendFailed {r['udpSendFailed']} vs {r['p5_long']} long P5 pulses")
-            if r["loop_max_ms"] > C6_LOOP_MAX_MS:
+            if r["load"] != "w" and r["loop_max_ms"] > C6_LOOP_MAX_MS:  # w: see C6-wild
                 bad.append(f"{r['load']}: loop max {r['loop_max_ms']:.1f} ms")
         items.append(judged("C6-pause", not bad, "; ".join(
             f"{r['load']}: {r['p5_long']} blocked sends (min interval {fmt_ms(r['p5_long_min_interval_ms'])} ms), "
@@ -1205,8 +1205,11 @@ def check_c6(b: Bench) -> list[Item]:
         items.append(recorded("C6-loop-cd", "; ".join(f"{r['load']}: loop max {r['loop_max_ms']:.1f} ms, slotLate "
                                                       f"{r['slotLate']}, P5 count {r['p5_count']}" for r in cd)))
     if "w" in dead_res:
+        # The handler itself runs about 35 ms besides its 276 sends (106 ms in all to this
+        # Mac): with one blocked send it takes about 75 ms. Judged: not longer than to a
+        # reachable destination, and no watchdog early warning or restart.
         r = dead_res["w"]
-        ok = r["loop_max_ms"] <= C6_LOOP_MAX_MS and not r["p2_long_pulses"] and not r["booted"]
+        ok = r["loop_max_ms"] <= normal["w"]["loop_max_ms"] and not r["p2_long_pulses"] and not r["booted"]
         items.append(judged("C6-wild", ok, f"/get* 255 to the dead destination: loop max {r['loop_max_ms']:.1f} ms, "
                             f"{r['p5_long']} blocked sends, sent {r['udp_send_us']['count']}, dropped "
                             f"{r['udpSendDropped']}, early warning {len(r['p2_long_pulses'])}, /booted {r['booted']}; "
@@ -1443,11 +1446,16 @@ def restart_events_from(b: Bench, cap, ref: float) -> dict:
     p0 = analyze.bit_edges(cap.digital, probe[0]).all
     res: dict = {}
     before = p0[p0 <= ref + 1e-4]
-    # safeSystemReset() sets P0 high just before the reset: an edge there (if P0 was low)
-    # is the marker, not a loop pass. The last loop pass is the edge before it.
-    if before.size >= 2 and ref - before[-1] < 1e-3:
-        res["p0_reset_marker_ms"] = (before[-1] - ref) * 1e3
+    # safeSystemReset() sets P0 high just before the reset (the marker, if P0 was low), and
+    # the pin falls when it floats after the reset. The standby entry is known to 1 ms, so
+    # up to these two edges can come within 1 ms before ref; they are not loop passes.
+    marker = []
+    while len(marker) < 2 and before.size >= 2 and ref - before[-1] < 1e-3:
+        marker.append(float(before[-1] - ref) * 1e3)
         before = before[:-1]
+    if marker:
+        res["p0_reset_marker_ms"] = marker[0]
+        res["p0_reset_edges_ms"] = marker
     res["last_p0_before_ms"] = (before[-1] - ref) * 1e3 if before.size else None
     brake = analyze.bit_edges(cap.digital, b.cfg.brake_dio)
     falls = brake.fall[brake.fall <= ref + 1e-4]
@@ -1483,7 +1491,7 @@ C7_CASES = {
 C7_EXPECTED_WAIT = {"a": 100, "b": 1000, "c": 1000, "d": 50, "e": 1000}
 
 
-def c7_case(b: Bench, case: str, first: bool) -> dict:
+def c7_case(b: Bench, case: str, first: bool, run: int = 0) -> dict:
     title, durations = C7_CASES[case]
     ax = b.axis
     if not first:  # run_test() rebooted before the first case
@@ -1518,7 +1526,7 @@ def c7_case(b: Bench, case: str, first: bool) -> dict:
         time.sleep(0.5)
     finally:
         cap = rec.stop()
-    b.save_capture(cap, f"c7_{case}")
+    b.save_capture(cap, f"c7_{case}" + (f"{run + 1}" if run else ""))
     b.ser.reconnect()
     b.connect()
     ev = restart_events(b, cap)
@@ -1549,7 +1557,7 @@ def check_c7(b: Bench) -> list[Item]:
     n = b.args.repeat or 1
     for case in (b.args.cases or "abcde"):
         for run in range(n):
-            r = c7_case(b, case, first)
+            r = c7_case(b, case, first, run)
             first = False
             items.append(judged(
                 f"C7-{case}" + (f"{run + 1}" if n > 1 else ""), r["ok"],

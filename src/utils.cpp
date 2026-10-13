@@ -206,11 +206,11 @@ void onWatchdogEarlyWarning() {
 #endif
 }
 
-void safeSystemReset() {
+void safeSystemReset(uint16_t minWaitMs) {
+    uint16_t waitMs = minWaitMs;
 #ifdef HAVE_BRAKE
     // The MCU reset puts the drivers in standby (their STBY/RST input floats and is
     // pulled down inside), so engage the brakes and wait for them first.
-    uint16_t waitMs = 0;
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         if (electromagnetBrakeEnable[i] && (brakeStatus[i] != BRAKE_ENGAGED))
@@ -225,10 +225,10 @@ void safeSystemReset() {
                 waitMs = t;
         }
     }
+#endif
     const uint32_t start = millis();
     while ((uint32_t)(millis() - start) < waitMs)
         Watchdog.reset();
-#endif
     PROBE_HIGH(0); // HIL: the last P0 edge marks the MCU reset (the pin floats then)
     systemReset();
 }

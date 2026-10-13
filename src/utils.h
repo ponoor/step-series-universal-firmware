@@ -71,8 +71,9 @@ void sendCommandError(uint8_t motorID, uint8_t errorNum);
 void resetMotorDriver(uint8_t deviceID);
 // Restart of the MCU (/resetDevice, USB serial 'R'): hard-stops the turning motors with
 // the brake enabled, engages their brakes, waits for the longest brakeTransitionDuration
-// of them (at most 1 s), then resets.
-void safeSystemReset();
+// of them (at most 1 s), then resets. The reset comes at least minWaitMs after the call;
+// the brakes are engaged first in any case.
+void safeSystemReset(uint16_t minWaitMs = 0);
 void initEthernet();
 void sendBootMsg(uint32_t _currentTime);
 

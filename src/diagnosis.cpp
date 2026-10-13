@@ -1306,9 +1306,14 @@ void saveCurrentConfigToSd() {
 	}
 }
 
+// SerialUSB.flush() only waits until the reply is handed to the USB controller, not until
+// the host has read it. The reset disconnects USB, and a reply still pending is lost (seen
+// without a brake wait). The config tool waits 3 s for the reply.
+static constexpr uint16_t REBOOT_REPLY_MIN_WAIT_MS = 50;
+
 void rebootBoard() {
 	// Reply first: the brakes can take up to 1 s, and the config tool waits 3 s for it.
 	SerialUSB.println(F("{\"result\":\"ok\",\"message\":\"Rebooting...\"}"));
 	SerialUSB.flush();
-	safeSystemReset();
+	safeSystemReset(REBOOT_REPLY_MIN_WAIT_MS);
 }

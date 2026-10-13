@@ -504,6 +504,14 @@ void loop()
     static bool slotScheduled = false;
     static uint32_t nextSlotMicros;
     static uint8_t housekeepingSlot = 0;
+    // Clock of the position reports [ms]: advances by exactly HOUSEKEEPING_PERIOD_MS at
+    // every housekeeping run. millis() at the slot start would not do: a slot delayed by an
+    // OSC packet can start past a millisecond boundary, and the report interval measured
+    // from it to the next, punctual slot is then 1 ms short, so a report waited one more
+    // housekeeping run (30 ms instead of 20 ms). The other functions keep millis(): they
+    // compare it with times taken with millis() while OSC messages are processed.
+    static bool reportClockAligned = false;
+    static uint32_t reportClockMillis;
     if (!slotScheduled)
     {
         nextSlotMicros = loopStartMicros;
@@ -516,6 +524,7 @@ void loop()
         {
             nextSlotMicros = loopStartMicros + SLOT_PERIOD_US;
             perfStats.slotLateCount++;
+            reportClockAligned = false; // the slots no longer follow the old schedule
         }
         // The functions that time in milliseconds get the time of the slot start.
         const uint32_t currentTimeMillis = millis();
@@ -545,9 +554,24 @@ void loop()
         // Every HOUSEKEEPING_SLOTS slots (10 ms), after the servo update.
         if (housekeepingSlot == 0)
         {
-            updatePositionReport(currentTimeMillis);
+            if (!reportClockAligned)
+            {
+                reportClockMillis = currentTimeMillis;
+                reportClockAligned = true;
+            }
+            else
+            {
+                reportClockMillis += HOUSEKEEPING_PERIOD_MS; // uint32_t: wraps with millis()
+                const int32_t offset = (int32_t)(currentTimeMillis - reportClockMillis);
+                if ((offset > 20) || (offset < -20)) // not expected: the slots follow micros()
+                {
+                    reportClockMillis = currentTimeMillis;
+                    perfStats.reportClockRealignCount++;
+                }
+            }
+            updatePositionReport(reportClockMillis);
             if (reportPositionList)
-                updatePositionReportList(currentTimeMillis);
+                updatePositionReportList(reportClockMillis);
             updateRxTxLed(currentTimeMillis);
             uint8_t t = getMyId();
             if (myId != t)

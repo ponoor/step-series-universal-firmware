@@ -30,4 +30,5 @@ void perfStatsPrint()
     dbgPrint("oscSlowPath    %lu\n", (unsigned long)s.oscSlowPathCount);
     dbgPrint("oscNotMatched  %lu\n", (unsigned long)s.oscNotMatchedCount);
     dbgPrint("slotLate       %lu\n", (unsigned long)s.slotLateCount);
+    dbgPrint("reportClockRealign %lu\n", (unsigned long)s.reportClockRealignCount);
 }

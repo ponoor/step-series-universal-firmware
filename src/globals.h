@@ -35,6 +35,9 @@ extern uint8_t resetCauseRaw; // raw MCU register value, diagnosis output only
 // (10 ms): position reports, Tx/Rx LEDs, DIP switch, boot message, watchdog reset.
 #define SLOT_PERIOD_US       5000 // [us]
 #define HOUSEKEEPING_SLOTS   2
+#define HOUSEKEEPING_PERIOD_MS (SLOT_PERIOD_US * HOUSEKEEPING_SLOTS / 1000) // [ms]
+static_assert(HOUSEKEEPING_PERIOD_MS * 1000 == SLOT_PERIOD_US * HOUSEKEEPING_SLOTS,
+              "the housekeeping period must be a whole number of milliseconds");
 // Watchdog timeout. A UDP send blocks until ARP is resolved (W5500 retries every 200 ms),
 // which can exceed 100 ms.
 #define WATCHDOG_TIMEOUT_MS  2000 // [ms] early warning (brakes engaged, then reset); watchdog.h

@@ -189,7 +189,9 @@ ST_HIZ, ST_BUSY, ST_SW_F, ST_DIR = 0x0001, 0x0002, 0x0004, 0x0010
 ST_MOT_STATUS, ST_UVLO, ST_TH_WRN, ST_TH_SD = 0x0060, 0x0200, 0x0400, 0x0800
 ST_OCD, ST_STEP_LOSS_A, ST_STEP_LOSS_B = 0x1000, 0x2000, 0x4000
 MOT_STATUS_TEXT = ("Stopped", "Acceleration", "Deceleration", "Constant speed")
-THERMAL_TEXT = ("Normal", "Warning", "Bridge shutdown", "Device shutdown")
+# L6470 names (firmware after 0d90d03; before it the PowerSTEP01 names "Bridge shutdown",
+# "Device shutdown" were shown for 2 and 3).
+THERMAL_TEXT = ("Normal", "Warning", "Shutdown", "Warning and shutdown")
 
 
 def field_value(raw: int, mask: int) -> int:
@@ -830,13 +832,26 @@ def check_c3(b: Bench) -> list[Item]:
 # --------------------------------------------------------------------------------------
 
 
+# Warnings that checks cause on purpose (C6 / C6e: unreachable destination, C10: ID out
+# of the address range); C4-1 does not count them.
+EXPECTED_WARNINGS = (
+    re.compile(r"Warning: destination \d+\.\d+\.\d+\.\d+ unreachable, sends paused"),
+    re.compile(r"Warning: IP address out of range with ID \d+, ID not added"),
+)
+
+
+def unexpected_warnings(lines: list[str]) -> list[str]:
+    return [w for w in lines if not any(rx.search(w) for rx in EXPECTED_WARNINGS)]
+
+
 def scan_warnings(sha: str, results_dir: Path) -> dict:
-    """'Warning:' lines in the serial logs of every check run with this git sha."""
+    """'Warning:' lines in the serial logs of every check run with this git sha, without
+    the EXPECTED_WARNINGS."""
     out = {}
     for d in sorted(results_dir.glob(f"*_{sha}_check_*")):
         log = d / "serial_log.txt"
         if log.exists():
-            out[d.name] = warning_lines(log.read_text(errors="replace"))
+            out[d.name] = unexpected_warnings(warning_lines(log.read_text(errors="replace")))
     return out
 
 
@@ -1020,7 +1035,23 @@ def load_capture_stats(cfg: Config, cap, t_from: float = 0.0) -> dict:
 
 C6_LOADS = ("a", "b", "c", "d")
 C6_LOAD_TEXT = {"a": "/getPosition axis at 2 Hz", "b": "/setPositionListReportInterval 20",
-                "c": "/setPositionReportInterval 255 20", "d": "/getPosition 255 once"}
+                "c": "/setPositionReportInterval 255 20", "d": "/getPosition 255 once",
+                "w": "/get* 255 once (every getter, all motors)"}
+# A P5 pulse at least this long is a send that waited for an ARP reply (about 41 ms).
+LONG_SEND_S = 5e-3
+# Bounds with the dead destination: one blocked send (measured 40.8 ms, RTR 20 ms x RCR 2)
+# plus the rest of the loop pass.
+C6_P5_MAX_MS = 45.0
+C6_LOOP_MAX_MS = 45.0
+SEND_BACKOFF_S = 1.0  # src/sendBackoff.h
+PAUSED_LINE = re.compile(r"Warning: destination (\d+\.\d+\.\d+\.\d+) unreachable, sends paused")
+RESUMED_LINE = re.compile(r"Destination (\d+\.\d+\.\d+\.\d+) reachable, sends resumed")
+
+
+def long_sends(cfg: Config, cap, t_from: float = -np.inf) -> np.ndarray:
+    """Rise times (AD2 s) of the P5 pulses of LONG_SEND_S or more from t_from."""
+    rise, width = analyze.pulse_widths(analyze.bit_edges(cap.digital, cfg.probe_dio[5]))
+    return rise[(rise >= t_from) & (width >= LONG_SEND_S)]
 
 
 def run_c6_load(b: Bench, load: str, duration: float) -> dict:
@@ -1043,6 +1074,9 @@ def run_c6_load(b: Bench, load: str, duration: float) -> dict:
             b.send("/setPositionReportInterval", 255, 20)
             time.sleep(duration)
             b.send("/setPositionReportInterval", 255, 0)
+        elif load == "w":
+            b.send("/get*", 255)
+            time.sleep(5.0)
         else:
             b.send("/getPosition", 255)
             time.sleep(3.0)
@@ -1053,60 +1087,131 @@ def run_c6_load(b: Bench, load: str, duration: float) -> dict:
     res = load_capture_stats(b.cfg, cap)
     perf = b.perf()
     res["slotLate"] = perf.get("slotLate")
-    res["perf_udp_send_max_us"] = (perf.get("udpSend") or {}).get("max_us")
+    # Firmware with the send pause (after 5981aff) only; None before.
+    res["udpSendFailed"] = perf.get("udpSendFailed")
+    res["udpSendDropped"] = perf.get("udpSendDropped")
+    longs = long_sends(b.cfg, cap)
+    res["p5_long"] = int(longs.size)
+    res["p5_long_min_interval_ms"] = float(np.min(np.diff(longs)) * 1e3) if longs.size > 1 else None
     res["booted"] = [list(e.args) for e in b.link.entries("rx", t_start) if e.address == "/booted"]
     res["capture_ok"] = cap.ok
     return res
 
 
+def c6_rows(normal: dict, dead_res: dict, loads) -> list[dict]:
+    rows = []
+    for load in loads:
+        for dest, r in (("mac", normal.get(load)), ("dead", dead_res.get(load))):
+            if r is None:
+                continue
+            rows.append({"load": load, "dest": dest, "p5_max_ms": (r["udp_send_us"]["max"] or 0) / 1e3,
+                         "p5_p50_ms": (r["udp_send_us"]["p50"] or 0) / 1e3, "p5_count": r["udp_send_us"]["count"],
+                         "p5_long": r["p5_long"], "p5_long_min_interval_ms": r["p5_long_min_interval_ms"],
+                         "loop_max_ms": r["loop_max_ms"], "slotLate": r["slotLate"],
+                         "udpSendFailed": r["udpSendFailed"], "udpSendDropped": r["udpSendDropped"],
+                         "early_warning": len(r["p2_long_pulses"]), "booted": r["booted"]})
+    return rows
+
+
 def check_c6(b: Bench) -> list[Item]:
     items = []
     dead = b.args.dead_ip
+    loads = tuple(b.args.cases) if b.args.cases else C6_LOADS
+    if any(x not in C6_LOAD_TEXT for x in loads):
+        return [judged("C6-pre", False, f"--cases for C6: subset of {''.join(C6_LOAD_TEXT)} (stopped)")]
     cfgname = b.request("/getConfigName", reply="/configName").args
     if int(cfgname[1]) != 0:
         return [judged("C6-pre", False, f"sdInitializeSucceeded is {cfgname[1]}: remove the SD card first (stopped)")]
     unused, why = address_unused(dead)
     if not unused:
         return [judged("C6-pre", False, f"{dead} is not unused ({why}); choose another --dead-ip (stopped)")]
-    items.append(recorded("C6-pre", f"no SD card (sdInitializeSucceeded 0); {dead}: {why}"))
+    has_pause = "udpSendFailed" in b.perf()
+    items.append(recorded("C6-pre", f"no SD card (sdInitializeSucceeded 0); {dead}: {why}; firmware with the send "
+                          f"pause: {has_pause}"))
     status0 = b.status_json()["board"]
     duration = float(b.args.duration or 10.0)
-    normal = {load: run_c6_load(b, load, duration) for load in C6_LOADS}
+    normal = {load: run_c6_load(b, load, duration) for load in loads}
     # destination: the dead address, through the config tool command '{' (no SD card: the
     # values are applied, the save fails with "No SD card")
     g_before = b.config_json()
-    t = b.ser.write('{"network":{"destIp":[' + dead.replace(".", ",") + "]}}")
-    m = b.ser.wait_for(r"\{\"result\".*\}\r?\n", t, 5.0)
+    t_dead = b.ser.write('{"network":{"destIp":[' + dead.replace(".", ",") + "]}}")
+    m = b.ser.wait_for(r"\{\"result\".*\}\r?\n", t_dead, 5.0)
     reply = m.group(0).strip() if m else None
     g_after = b.config_json()
     changed = json_diff(g_before, g_after)
     items.append(judged("C6-cfg", bool(changed) and all(c.startswith("/network/destIp[") for c in changed)
                         and g_after["network"]["destIp"] == [int(x) for x in dead.split(".")],
                         f"'{{' reply {reply}; config changes {changed}", reply=reply))
-    dead_res = {load: run_c6_load(b, load, duration) for load in C6_LOADS}
+    dead_res = {}
+    for load in loads:
+        if load == "w" and not has_pause:
+            # Without the pause, 276 blocked sends would trip the watchdog: not sent.
+            items.append(recorded("C6-w-skipped", "/get* 255 not sent to the dead destination: firmware without "
+                                  "the send pause"))
+            continue
+        dead_res[load] = run_c6_load(b, load, duration)
+    dead_log = b.ser.text(t_dead)
     # back to this Mac
+    t_restore = time.monotonic_ns()
     local = b.connect(5.0)
+    restore_ms = (time.monotonic_ns() - t_restore) / 1e6
     status1 = b.status_json()["board"]
-    items.append(recorded("C6-restore", f"/setDestIp from {local}: reply received; resetCause "
+    items.append(recorded("C6-restore", f"/setDestIp from {local}: reply after {restore_ms:.0f} ms; resetCause "
                           f"{status0['resetCause']} -> {status1['resetCause']}"))
-    rows = []
-    for load in C6_LOADS:
-        for dest, r in (("mac", normal[load]), ("dead", dead_res[load])):
-            rows.append({"load": load, "dest": dest, "p5_max_ms": (r["udp_send_us"]["max"] or 0) / 1e3,
-                         "p5_p50_ms": (r["udp_send_us"]["p50"] or 0) / 1e3, "p5_count": r["udp_send_us"]["count"],
-                         "loop_max_ms": r["loop_max_ms"], "slotLate": r["slotLate"],
-                         "early_warning": len(r["p2_long_pulses"]), "booted": r["booted"]})
-    p5_dead_max = max(r["p5_max_ms"] for r in rows if r["dest"] == "dead")
-    # Expected at most about 60 ms (RTR 20 ms x (RCR 2 + 1), the bound of utils.cpp), not much more.
-    items.append(judged("C6-p5", p5_dead_max <= 70.0,
-                        f"P5 width max with the dead destination {p5_dead_max:.2f} ms (bound about 60 ms = "
-                        f"20 ms x 3)", rows=rows))
-    ab = [r for r in rows if r["dest"] == "dead" and r["load"] in ("a", "b")]
-    items.append(judged("C6-loop-ab", all(r["loop_max_ms"] <= 70.0 for r in ab),
-                        "; ".join(f"{r['load']}: loop max {r['loop_max_ms']:.1f} ms, slotLate {r['slotLate']}" for r in ab)))
-    cd = [r for r in rows if r["dest"] == "dead" and r["load"] in ("c", "d")]
-    items.append(recorded("C6-loop-cd", "; ".join(f"{r['load']}: loop max {r['loop_max_ms']:.1f} ms, slotLate "
-                                                  f"{r['slotLate']}, P5 count {r['p5_count']}" for r in cd)))
+    t = b.send("/setPositionListReportInterval", 20).t_ns
+    time.sleep(1.0)
+    b.send("/setPositionListReportInterval", 0)
+    n_reports = len([e for e in b.link.entries("rx", t, t + 1_000_000_000) if e.address == "/positionList"])
+    items.append(judged("C6-resume", n_reports >= 40, f"after /setDestIp from this Mac: {n_reports} /positionList "
+                        f"in 1 s (20 ms interval)"))
+    rows = c6_rows(normal, dead_res, loads)
+    dead_rows = [r for r in rows if r["dest"] == "dead"]
+    p5_dead_max = max(r["p5_max_ms"] for r in dead_rows)
+    items.append(judged("C6-p5", p5_dead_max <= C6_P5_MAX_MS,
+                        f"P5 width max with the dead destination {p5_dead_max:.2f} ms (bound {C6_P5_MAX_MS} ms: "
+                        f"20 ms x 2 measured 40.8 ms)", rows=rows))
+    if has_pause:
+        # One blocked send (the failure or a retry) per SEND_BACKOFF_S; 'p' counts at least
+        # the failures recorded (it also covers the time around the recording).
+        bad = []
+        for r in dead_rows:
+            gap = r["p5_long_min_interval_ms"]
+            if gap is not None and gap < SEND_BACKOFF_S * 1e3 - 10:
+                bad.append(f"{r['load']}: blocked sends {gap:.0f} ms apart")
+            if not 0 <= (r["udpSendFailed"] or 0) - r["p5_long"] <= 2:
+                bad.append(f"{r['load']}: udpSendFailed {r['udpSendFailed']} vs {r['p5_long']} long P5 pulses")
+            if r["loop_max_ms"] > C6_LOOP_MAX_MS:
+                bad.append(f"{r['load']}: loop max {r['loop_max_ms']:.1f} ms")
+        items.append(judged("C6-pause", not bad, "; ".join(
+            f"{r['load']}: {r['p5_long']} blocked sends (min interval {fmt_ms(r['p5_long_min_interval_ms'])} ms), "
+            f"udpSendFailed {r['udpSendFailed']}, dropped {r['udpSendDropped']}, loop max {r['loop_max_ms']:.1f} ms, "
+            f"slotLate {r['slotLate']}" for r in dead_rows) + (f"; problems: {bad}" if bad else "")))
+        # Messages: sent (P5 pulses) + dropped with the dead destination against the sends
+        # to this Mac (the same load; a and b depend on timing, so recorded only).
+        items.append(recorded("C6-dropped", "; ".join(
+            f"{load}: dead {dead_res[load]['udp_send_us']['count']} sent + {dead_res[load]['udpSendDropped']} dropped, "
+            f"mac {normal[load]['udp_send_us']['count']} sent" for load in loads if load in dead_res)))
+        paused = PAUSED_LINE.findall(dead_log)
+        resumed = RESUMED_LINE.findall(dead_log)
+        # No packet comes from the dead address and every retry fails: paused once, never resumed.
+        items.append(judged("C6-warn", paused == [dead] and not resumed,
+                            f"after '{{': 'sends paused' lines {paused}, 'sends resumed' lines {resumed}"))
+    else:
+        ab = [r for r in dead_rows if r["load"] in ("a", "b")]
+        items.append(judged("C6-loop-ab", all(r["loop_max_ms"] <= 70.0 for r in ab),
+                            "; ".join(f"{r['load']}: loop max {r['loop_max_ms']:.1f} ms, slotLate {r['slotLate']}"
+                                      for r in ab)))
+        cd = [r for r in dead_rows if r["load"] in ("c", "d")]
+        items.append(recorded("C6-loop-cd", "; ".join(f"{r['load']}: loop max {r['loop_max_ms']:.1f} ms, slotLate "
+                                                      f"{r['slotLate']}, P5 count {r['p5_count']}" for r in cd)))
+    if "w" in dead_res:
+        r = dead_res["w"]
+        ok = r["loop_max_ms"] <= C6_LOOP_MAX_MS and not r["p2_long_pulses"] and not r["booted"]
+        items.append(judged("C6-wild", ok, f"/get* 255 to the dead destination: loop max {r['loop_max_ms']:.1f} ms, "
+                            f"{r['p5_long']} blocked sends, sent {r['udp_send_us']['count']}, dropped "
+                            f"{r['udpSendDropped']}, early warning {len(r['p2_long_pulses'])}, /booted {r['booted']}; "
+                            f"to this Mac: sent {normal['w']['udp_send_us']['count']}, loop max "
+                            f"{normal['w']['loop_max_ms']:.1f} ms"))
     no_reset = (all(r["early_warning"] == 0 and not r["booted"] for r in rows)
                 and status1["resetCause"] == status0["resetCause"])
     items.append(judged("C6-reset", no_reset, f"P2 early warning pulses {[r['early_warning'] for r in rows]}, "
@@ -1114,7 +1219,188 @@ def check_c6(b: Bench) -> list[Item]:
                         f"{status0['resetCause']} -> {status1['resetCause']}"))
     items.append(recorded("C6-table", "\n" + "\n".join(
         f"  {r['load']} {r['dest']:4s} P5 n {r['p5_count']:4d} p50 {r['p5_p50_ms']:7.3f} max {r['p5_max_ms']:7.3f} ms, "
-        f"loop max {r['loop_max_ms']:8.1f} ms, slotLate {r['slotLate']}" for r in rows)))
+        f"long {r['p5_long']:3d}, loop max {r['loop_max_ms']:8.1f} ms, slotLate {r['slotLate']}, failed "
+        f"{r['udpSendFailed']}, dropped {r['udpSendDropped']}" for r in rows)))
+    return items
+
+
+# --------------------------------------------------------------------------------------
+# C6e: a resolved destination that leaves the network
+# --------------------------------------------------------------------------------------
+
+# load: (address, arguments to enable, to disable, report address)
+C6E_LOADS = {
+    "b": ("/setPositionListReportInterval", (20,), (0,), "/positionList"),
+    "c": ("/setPositionReportInterval", (255, 20), (255, 0), "/position"),
+}
+C6E_SEGMENT_S = 30.0
+
+
+def interface_for(ip: str) -> str:
+    """Interface the Mac uses to reach ip (route get)."""
+    out = subprocess.run(["route", "-n", "get", ip], capture_output=True, text=True).stdout
+    m = re.search(r"interface:\s*(\S+)", out)
+    if not m:
+        raise DiagError(f"no route to {ip}: {out.strip()}")
+    return m.group(1)
+
+
+def alias_present(iface: str, ip: str) -> bool:
+    out = subprocess.run(["ifconfig", iface], capture_output=True, text=True).stdout
+    return re.search(rf"\binet {re.escape(ip)}\s", out) is not None
+
+
+def open_alias_link(b: Bench, alias: str):
+    """OSC link that sends from and receives on the alias address only."""
+    from .osc import OscLink
+
+    return OscLink(b.cfg.board_ip, b.cfg.board_in_port, b.cfg.board_out_port, local_ip=alias).open()
+
+
+def c6e_segment_stats(b: Bench, cap, t_gone_ns: int) -> dict:
+    probe = b.cfg.probe_dio
+    t_gone = b.host_s(cap, t_gone_ns)  # AD2 s, from the host clock (a few ms)
+    rise, width = analyze.pulse_widths(analyze.bit_edges(cap.digital, probe[5]))
+    after = rise >= t_gone
+    longs = rise[after & (width >= LONG_SEND_S)]
+    p0 = analyze.bit_edges(cap.digital, probe[0]).all
+    gap, at = longest_gap(p0, t_gone)
+    return {"t_gone_s": t_gone,
+            "p5_after": analyze.stats(width[after], 1e3), "p5_before": analyze.stats(width[~after], 1e3),
+            "p5_long": int(longs.size),
+            "first_long_after_gone_s": float(longs[0] - t_gone) if longs.size else None,
+            "loop_max_ms": gap * 1e3, "loop_max_after_gone_s": (at - t_gone) if np.isfinite(at) else None,
+            "early_warning": len(long_pulses(analyze.bit_edges(cap.digital, probe[2]), 1e-3)),
+            "capture_ok": cap.ok}
+
+
+def c6e_case(b: Bench, case: str, alias: str, iface: str, min_s: float, max_s: float) -> dict:
+    addr, on_args, off_args, report = C6E_LOADS[case]
+    res: dict = {"case": case, "load": f"{addr} {' '.join(map(str, on_args))}"}
+    add = f"sudo ifconfig {iface} alias {alias} 255.255.255.255"
+    remove = f"sudo ifconfig {iface} -alias {alias}"
+    present = lambda: alias_present(iface, alias)  # noqa: E731
+    if not present() and not b.operator(f"C6e-{case}: add the alias address: {add}", done=present, timeout=600.0):
+        raise DiagError(f"{alias} was not added to {iface}")
+    alink = open_alias_link(b, alias)
+    try:
+        r = alink.request("/setDestIp", reply="/destIp", timeout=0.5, attempts=5)
+        res["destIp_reply"] = list(r.args)
+        res["dest_ok"] = ".".join(str(int(x)) for x in r.args[:4]) == alias
+        # Enabled from the alias address before it goes (a command from another address
+        # would not change the destination either).
+        t = alink.send(addr, *on_args).t_ns
+        time.sleep(1.0)
+        res["reports_before_1s"] = len([e for e in alink.entries("rx", t) if e.address == report])
+    finally:
+        alink.close()
+    segs = []
+    t_gone = None
+    k = 0
+    while True:
+        b.perf()
+        rec = b.start(b.cfg.probe_dio, 1e6)
+        try:
+            if t_gone is None:
+                time.sleep(2.0)
+                if not b.operator(f"C6e-{case}: remove the alias address: {remove}", done=lambda: not present(),
+                                  timeout=600.0):
+                    raise DiagError(f"{alias} was not removed from {iface}")
+                t_gone = time.monotonic_ns()
+            time.sleep(C6E_SEGMENT_S)
+        finally:
+            cap = rec.stop()
+        b.save_capture(cap, f"c6e_{case}_{k}")
+        perf = b.perf()
+        seg = c6e_segment_stats(b, cap, t_gone)
+        seg.update(slotLate=perf.get("slotLate"), udpSendFailed=perf.get("udpSendFailed"),
+                   udpSendDropped=perf.get("udpSendDropped"))
+        seg["since_gone_s"] = (time.monotonic_ns() - t_gone) / 1e9
+        segs.append(seg)
+        changed = any(s_["p5_long"] for s_ in segs)
+        if (changed and seg["since_gone_s"] >= min_s) or seg["since_gone_s"] >= max_s:
+            break
+        k += 1
+    res["segments"] = segs
+    first = next((s_ for s_ in segs if s_["first_long_after_gone_s"] is not None), None)
+    # t_gone is mapped into the time base of each segment, so this is the time since the removal.
+    res["first_blocked_send_after_gone_s"] = None if first is None else first["first_long_after_gone_s"]
+    res["observed_s"] = segs[-1]["since_gone_s"]
+    # back: the client returns with the same address and sends any OSC packet
+    if not b.operator(f"C6e-{case}: add the alias address again: {add}", done=present, timeout=600.0):
+        raise DiagError(f"{alias} was not added again to {iface}")
+    alink = open_alias_link(b, alias)
+    try:
+        rec = b.start(b.cfg.probe_dio, 1e6)
+        try:
+            time.sleep(0.5)
+            t_s = alink.send("/getVersion").t_ns
+            first_rep = alink.wait_for(report, 3.0, t_s)
+            reply = alink.wait_for("/version", 1.0, t_s)
+            time.sleep(2.0)
+        finally:
+            cap = rec.stop()
+        b.save_capture(cap, f"c6e_{case}_back")
+        res["back_reply_ms"] = (reply.t_ns - t_s) / 1e6 if reply else None
+        res["back_first_report_ms"] = (first_rep.t_ns - t_s) / 1e6 if first_rep else None
+        res["back_p5"] = c6e_segment_stats(b, cap, t_s)["p5_after"]
+        res["back_serial"] = RESUMED_LINE.findall(b.ser.text(t_s))
+        alink.send(addr, *off_args)
+        time.sleep(0.2)
+    finally:
+        alink.close()
+    return res
+
+
+def check_c6e(b: Bench) -> list[Item]:
+    items = []
+    alias = b.args.alias_ip
+    iface = interface_for(b.cfg.board_ip)
+    cases = b.args.cases or "bc"
+    if any(c not in C6E_LOADS for c in cases):
+        return [judged("C6e-pre", False, f"--cases for C6e: subset of {''.join(C6E_LOADS)} (stopped)")]
+    min_s = float(b.args.duration or C6E_SEGMENT_S)
+    max_s = float(b.args.max_duration or 300.0)
+    if alias_present(iface, alias):
+        return [judged("C6e-pre", False, f"{alias} is already on {iface}: remove it first (stopped)")]
+    unused, why = address_unused(alias)
+    if not unused:
+        return [judged("C6e-pre", False, f"{alias} answers ({why}); choose another --alias-ip (stopped)")]
+    has_pause = "udpSendFailed" in b.perf()
+    items.append(recorded("C6e-pre", f"interface {iface}; {alias}: {why}; firmware with the send pause: {has_pause}"))
+    status0 = b.status_json()["board"]
+    rows = []
+    for case in cases:
+        r = c6e_case(b, case, alias, iface, min_s, max_s)
+        rows.append(r)
+        items.append(judged(f"C6e-{case}-dest", r["dest_ok"] and r["reports_before_1s"] > 0,
+                            f"/setDestIp from {alias}: reply {r['destIp_reply']} on {alias}; {r['reports_before_1s']} "
+                            f"{C6E_LOADS[case][3]} in 1 s before the removal"))
+        segs = r["segments"]
+        fb = r["first_blocked_send_after_gone_s"]
+        items.append(recorded(f"C6e-{case}", (
+            f"{r['load']}: observed {r['observed_s']:.0f} s after the removal; " +
+            (f"first blocked send (P5 >= {LONG_SEND_S * 1e3:.0f} ms) {fb:.1f} s after the removal"
+             if fb is not None else "P5 did not change (no blocked send)") +
+            "; per segment: " + "; ".join(
+                f"[{i}] P5 n {s_['p5_after']['count']} p50 {fmt_ms(s_['p5_after']['p50'])} max "
+                f"{fmt_ms(s_['p5_after']['max'])} ms, blocked {s_['p5_long']}, loop max {s_['loop_max_ms']:.1f} ms, "
+                f"slotLate {s_['slotLate']}, failed {s_['udpSendFailed']}, dropped {s_['udpSendDropped']}"
+                for i, s_ in enumerate(segs))), **{k: v for k, v in r.items() if k != "segments"}, segments=segs))
+        items.append(recorded(f"C6e-{case}-back", (
+            f"alias added again, /getVersion from {alias}: reply after {fmt_ms(r['back_reply_ms'])} ms, first "
+            f"{C6E_LOADS[case][3]} report after {fmt_ms(r['back_first_report_ms'])} ms, P5 afterwards p50 "
+            f"{fmt_ms(r['back_p5']['p50'])} max {fmt_ms(r['back_p5']['max'])} ms, 'sends resumed' lines "
+            f"{r['back_serial']}")))
+    # back to this Mac, alias removed, restart
+    local = b.connect(5.0)
+    remove = f"sudo ifconfig {iface} -alias {alias}"
+    gone = b.operator(f"C6e: remove the alias address: {remove}", done=lambda: not alias_present(iface, alias),
+                      timeout=600.0)
+    status1 = b.status_json()["board"]
+    items.append(recorded("C6e-restore", f"/setDestIp from {local}: reply received; alias removed {gone}; "
+                          f"resetCause {status0['resetCause']} -> {status1['resetCause']}"))
+    b.reboot()
     return items
 
 
@@ -1192,7 +1478,9 @@ C7_CASES = {
     "d": ("brake disabled", {}),
     "e": ("all motors, 100-1000 ms", {1: 100, 2: 300, 3: 1000, 4: 200, 5: 700, 6: 400, 7: 900, 8: 500}),
 }
-C7_EXPECTED_WAIT = {"a": 100, "b": 1000, "c": 1000, "d": 0, "e": 1000}
+# d: no brake to wait for; 'R' still waits 50 ms for the reply (firmware after 50a5f86,
+# before it 0).
+C7_EXPECTED_WAIT = {"a": 100, "b": 1000, "c": 1000, "d": 50, "e": 1000}
 
 
 def c7_case(b: Bench, case: str, first: bool) -> dict:
@@ -1241,10 +1529,11 @@ def c7_case(b: Bench, case: str, first: bool) -> dict:
     wait = (-ev["brake_fall_before_ms"]) if ev.get("brake_fall_before_ms") is not None else None
     silent = -ev["last_p0_before_ms"] if ev.get("last_p0_before_ms") is not None else None
     if case == "d":
-        wait_ok = wait is None and within(silent, -1.0, 6.0)
+        wait_ok = wait is None and within(silent, exp - 1.0, exp + 6.0)
     else:
         wait_ok = within(wait, exp - 1.0, exp + 6.0)
     res = {"case": case, "title": title, "durations": durations, "brake_status_before": released,
+           "expected_wait_ms": exp,
            "reply_ms_host": reply_ms, "booted_ms_host": (booted.t_ns - t_w) / 1e6 if booted else None,
            "booted": list(booted.args) if booted else None, "brake_fall_to_standby_ms": wait,
            "p0_silent_before_standby_ms": silent, "events": ev, "resetCause_T": status["resetCause"],
@@ -1265,8 +1554,9 @@ def check_c7(b: Bench) -> list[Item]:
             items.append(judged(
                 f"C7-{case}" + (f"{run + 1}" if n > 1 else ""), r["ok"],
                 f"{r['title']}: reply {fmt_ms(r['reply_ms_host'])} ms (host), brake fall -> standby "
-                f"{fmt_ms(r['brake_fall_to_standby_ms'])} ms (expected {C7_EXPECTED_WAIT[case]}), last loop P0 edge "
-                f"-> standby {fmt_ms(r['p0_silent_before_standby_ms'])} ms, R -> /booted {fmt_ms(r['booted_ms_host'])} "
+                f"{fmt_ms(r['brake_fall_to_standby_ms'])} ms, last loop P0 edge "
+                f"-> standby {fmt_ms(r['p0_silent_before_standby_ms'])} ms (expected wait {C7_EXPECTED_WAIT[case]} "
+                f"ms), R -> /booted {fmt_ms(r['booted_ms_host'])} "
                 f"ms (host), /booted {r['booted']}", **{k: v for k, v in r.items() if k != "ok"}))
     return items
 
@@ -1526,6 +1816,7 @@ def check_c9(b: Bench) -> list[Item]:
 
 
 def c10_check_id(b: Bench, dip: int, t_since: int, cap_brakes: dict | None) -> dict:
+    from .config import fw_ip_for_id, fw_out_port_for_id
     from .osc import OscLink
 
     res: dict = {"dip": dip}
@@ -1535,10 +1826,13 @@ def c10_check_id(b: Bench, dip: int, t_since: int, cap_brakes: dict | None) -> d
     res["w5500_line"] = "W5500 RTR:200 RCR:2" in log
     ips = re.findall(r"New IP: (\d+\.\d+\.\d+\.\d+)", log)
     res["new_ip_lines"] = ips
-    ip = f"10.0.0.{(100 + dip) & 0xFF}"
-    res["ip"] = ip
-    own = b.link.listen_port == 50100 + dip and b.link.board_ip == ip  # --id already set to dip
-    link = b.link if own else OscLink(ip, b.cfg.board_in_port, 50100 + dip).open()
+    # Beyond .254 the ID is not added and a warning is printed (src/idOffset.cpp).
+    ip, port = fw_ip_for_id(dip), fw_out_port_for_id(dip)
+    res["ip"], res["port"] = ip, port
+    res["id_added"] = 100 + dip <= 254
+    res["range_warning"] = f"Warning: IP address out of range with ID {dip}, ID not added" in log
+    own = b.link.listen_port == port and b.link.board_ip == ip  # --id already set to dip
+    link = b.link if own else OscLink(ip, b.cfg.board_in_port, port).open()
     try:
         r = link.request("/setDestIp", reply="/destIp", timeout=0.5, attempts=3)
         res["destIp_reply"] = list(r.args)
@@ -1551,6 +1845,7 @@ def c10_check_id(b: Bench, dip: int, t_since: int, cap_brakes: dict | None) -> d
     if cap_brakes is not None:
         res.update(cap_brakes)
     res["ok"] = bool(st["myId"] == dip and res["w5500_line"] and ip in ips and res["destIp_reply"] is not None
+                     and res["range_warning"] != res["id_added"] and ".".join(map(str, st["myIp"])) == ip
                      and (cap_brakes is None or cap_brakes["brake_edges"] == 0 and cap_brakes["brake_levels"] == [0] * 8))
     return res
 
@@ -1588,8 +1883,9 @@ def check_c10(b: Bench) -> list[Item]:
         r = c10_check_id(b, dip, t, brake_lines(b, cap)) if ok else {"dip": dip, "ok": False, "error": "not detected"}
         rows.append(r)
     items.append(judged("C10-1", all(r["ok"] for r in rows), "; ".join(
-        f"{r['dip']}: myId {r.get('T_myId')}, W5500 line {r.get('w5500_line')}, New IP {r.get('new_ip_lines')}, "
-        f"/destIp {'ok' if r.get('destIp_reply') else 'none'}, brake edges {r.get('brake_edges')}" for r in rows),
+        f"{r['dip']}: myId {r.get('T_myId')}, T myIp {r.get('T_myIp')}, W5500 line {r.get('w5500_line')}, New IP "
+        f"{r.get('new_ip_lines')}, range warning {r.get('range_warning')}, /destIp from {r.get('ip')}:{r.get('port')} "
+        f"{'ok' if r.get('destIp_reply') else 'none'}, brake edges {r.get('brake_edges')}" for r in rows),
                         rows=rows))
     return items
 
@@ -1617,7 +1913,7 @@ def check_c10_boot(b: Bench) -> list[Item]:
     # The boot messages are printed before the port is opened; only the reconnect is logged.
     r["ok"] = bool(r["T_myId"] == dip and r["destIp_reply"] is not None)
     return [judged("C10-2", r["ok"], f"after 'R' with DIP {dip}: myId {r['T_myId']}, myIp {r['T_myIp']}, /destIp from "
-                   f"{r['ip']}:{50100 + dip} {r['destIp_reply']}, W5500 line seen {r['w5500_line']} (boot output "
+                   f"{r['ip']}:{r['port']} {r['destIp_reply']}, W5500 line seen {r['w5500_line']} (boot output "
                    f"is usually printed before the port opens), brake edges across the restart {r['brake_edges']}",
                    **{k: v for k, v in r.items() if k != "ok"})]
 
@@ -1705,6 +2001,80 @@ def check_c11(b: Bench) -> list[Item]:
 
 
 # --------------------------------------------------------------------------------------
+# C12: config from the config tool ('{') and the diagnosis output ('s', 'c')
+# --------------------------------------------------------------------------------------
+
+_TITLE_LINE = re.compile(r"^([^:\t][^:]*?) : ")
+
+
+def duplicate_titles(text: str) -> list[str]:
+    """Titles ("name : value" lines) printed more than once."""
+    seen: dict[str, int] = {}
+    for line in text.splitlines():
+        m = _TITLE_LINE.match(line.strip("\r"))
+        if m:
+            seen[m.group(1)] = seen.get(m.group(1), 0) + 1
+    return sorted(k for k, n in seen.items() if n > 1)
+
+
+def send_config(b: Bench, network: dict) -> str | None:
+    t = b.ser.write(json.dumps({"network": network}, separators=(",", ":")))
+    m = b.ser.wait_for(r"\{\"result\".*\}\r?\n", t, 5.0)
+    return m.group(0).strip() if m else None
+
+
+def check_c12(b: Bench) -> list[Item]:
+    items = []
+    cfgname = b.request("/getConfigName", reply="/configName").args
+    if int(cfgname[1]) != 0:
+        return [judged("C12-pre", False, f"sdInitializeSucceeded is {cfgname[1]}: remove the SD card first (stopped)")]
+    st0 = b.status_json()["board"]
+    g0 = b.config_json()
+    net0 = g0["network"]
+    sent_ip = list(net0["myIp"][:3]) + [123 if net0["myIp"][3] != 123 else 124]
+    sent_port = 50123 if net0["outPort"] != 50123 else 50124
+    reply = send_config(b, {"myIp": sent_ip, "outPort": sent_port})
+    st1 = b.status_json()["board"]
+    g1 = b.config_json()
+    changed = json_diff(g0, g1)
+    try:  # the board still replies to the port of this bench (the running outPort)
+        b.request("/getVersion", reply="/version")
+        port_ok = True
+    except Exception:
+        port_ok = False
+    ok = (set(changed) == {"/network/myIp[3]", "/network/outPort"} and g1["network"]["myIp"] == sent_ip
+          and g1["network"]["outPort"] == sent_port and st1["myIp"] == st0["myIp"] and port_ok)
+    items.append(judged("C12-1", ok, f"'{{' with myIp {sent_ip}, outPort {sent_port}: reply {reply}; 'G' changes "
+                        f"{changed} (myIp {g1['network']['myIp']}, outPort {g1['network']['outPort']}); running myIp "
+                        f"(T) {st0['myIp']} -> {st1['myIp']}; replies still to port {b.cfg.board_out_port}: {port_ok}"))
+    # keys left out keep the config values
+    reply2 = send_config(b, {"bootedMsgEnable": net0["bootedMsgEnable"]})
+    g2 = b.config_json()
+    items.append(judged("C12-2", json_diff(g1, g2) == [], f"'{{' without myIp / outPort / mac: reply {reply2}; 'G' "
+                        f"changes {json_diff(g1, g2)}"))
+    reply3 = send_config(b, {"myIp": net0["myIp"], "outPort": net0["outPort"]})
+    g3 = b.config_json()
+    items.append(recorded("C12-restore", f"'{{' with the values before: reply {reply3}; 'G' changes from the start "
+                          f"{json_diff(g0, g3)}; the board is restarted at the end"))
+    s_text = b.ser.command("s", until=r"Homing status : .*\n", timeout=10)
+    c_text = b.ser.command("c", until=r"kD : .*\n", timeout=10)
+    (b.out / "s.txt").write_text(s_text)
+    (b.out / "c.txt").write_text(c_text)
+    dup = duplicate_titles(c_text)
+    limit = "reportLimitSwStatus" in c_text
+    items.append(judged("C12-c", not dup and not limit, f"'c': titles printed more than once {dup or 'none'}; "
+                        f"reportLimitSwStatus shown {limit} (STEP800: no limit switches)"))
+    thermal = re.findall(r"Thermal status : (.+?)\r?$", s_text, re.M)
+    dump = parse_status_dump(s_text)
+    bad = check_status_dump(dump)
+    items.append(judged("C12-s", len(thermal) == NUM_MOTORS and set(thermal) <= set(THERMAL_TEXT) and not bad,
+                        f"'s': thermal status {sorted(set(thermal))} ({len(thermal)} drivers), mismatches "
+                        f"{bad or 'none'}"))
+    b.reboot()
+    return items
+
+
+# --------------------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------------------
 
@@ -1715,21 +2085,24 @@ TESTS = {
     "C4": ("packed transfers: homing, positions around +/-2^21, servo wrap", check_c4),
     "C5": ("USB serial diagnosis CONFIG / STATUS fields", check_c5),
     "C6": ("destination IP that does not answer ARP", check_c6),
+    "C6e": ("a resolved destination that leaves the network (human: alias address)", check_c6e),
     "C7": ("reboot from the config tool ('R')", check_c7),
     "C8": ("/setDestIp right after a restart", check_c8),
     "C9": ("resetCause of /booted", check_c9),
     "C10": ("DIP switch other than 0 (while running)", check_c10),
     "C10boot": ("DIP switch read at boot (--dip)", check_c10_boot),
     "C11": ("SD save and the watchdog", check_c11),
+    "C12": ("config from '{' keeps the running address; 's' / 'c' output", check_c12),
 }
-AUTO_TESTS = ("C1", "C2", "C3", "C4", "C5", "C6", "C7")
+AUTO_TESTS = ("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C12")
 
 
 def run_test(cfg: Config, test: str, args) -> dict:
     from . import commands
 
     title, fn = TESTS[test]
-    out = commands.new_result_dir(f"check_{test}")
+    label = getattr(args, "label", None)
+    out = commands.new_result_dir(f"check_{test}" + (f"_{label}" if label else ""))
     res: dict = {"test": test, "title": title, "board_id": cfg.board_id, "axis": cfg.test_axis}
     with Bench(cfg, out, args) as b:
         try:
@@ -1742,6 +2115,7 @@ def run_test(cfg: Config, test: str, args) -> dict:
             b.ser.save(out / "serial_log.txt", b.t0_ns)
             b.link.save_log(out / "osc_log.jsonl")
         res["warnings"] = warning_lines(b.ser.text())
+        res["label"] = label
         res["notes"] = b.notes
     res["items"] = [i.to_dict() for i in items]
     commands.write_json(out / "summary.json", res)

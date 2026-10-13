@@ -106,8 +106,27 @@ def test_expected_status_fields():
     assert f["OCD (Overcurrent detection)"] == "No" and f["Stalled"] == "No"
     f = checks.expected_status_fields(0x0070 & ~0x0002)  # busy, forward, constant speed, all flags low
     assert f["BUSY"] == "Yes" and f["Motor direction"] == "Forward" and f["Motor status"] == "Constant speed"
-    assert f["Thermal status"] == "Device shutdown" and f["Stalled"] == "Yes" and f["UVLO (Undervoltage lock out)"] == "Yes"
+    assert f["Thermal status"] == "Warning and shutdown" and f["Stalled"] == "Yes"
+    assert f["UVLO (Undervoltage lock out)"] == "Yes"
+    assert checks.expected_status_fields(0x7E03 & ~0x0400)["Thermal status"] == "Warning"  # TH_WRN low
+    assert checks.expected_status_fields(0x7E03 & ~0x0800)["Thermal status"] == "Shutdown"  # TH_SD low
 
 
 def test_within():
     assert checks.within(100.0, 99, 106) and not checks.within(None, 0, 1) and not checks.within(107, 99, 106)
+
+
+def test_unexpected_warnings():
+    lines = ["Warning: destination 10.0.0.250 unreachable, sends paused",
+             "Warning: IP address out of range with ID 155, ID not added",
+             "Warning: OSC message too long, not sent"]
+    assert checks.unexpected_warnings(lines) == ["Warning: OSC message too long, not sent"]
+    assert checks.PAUSED_LINE.findall(lines[0]) == ["10.0.0.250"]
+    assert checks.RESUMED_LINE.findall("Destination 10.0.0.251 reachable, sends resumed\r\n") == ["10.0.0.251"]
+
+
+def test_duplicate_titles():
+    text = ("-------------- Report & Alarm --------------\r\n"
+            "reportBUSY :  No, No\r\nreportOCD :  Yes, Yes\r\nreportBUSY :  No, No\r\n"
+            "My Ip from Config : 10.0.0.100\r\n\t  Thermal status : Normal\r\n\t  Thermal status : Normal\r\n")
+    assert checks.duplicate_titles(text) == ["reportBUSY"]  # driver sub-lines (tab) are not titles

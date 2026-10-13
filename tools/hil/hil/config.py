@@ -19,6 +19,19 @@ FW_IP_BASE = "10.0.0.100"
 FW_IN_PORT = 50000
 FW_OUT_PORT_BASE = 50100
 
+
+def fw_ip_for_id(board_id: int, base: str = FW_IP_BASE) -> str:
+    """The board address with the ID added (src/idOffset.cpp): the last byte is base + id
+    if that is 254 or less, otherwise the base address (ID not added; firmware after
+    c1787dc, before it the byte wrapped around)."""
+    b = ipaddress.IPv4Address(base).packed
+    last = b[3] + board_id
+    return str(ipaddress.IPv4Address(bytes(b[:3]) + bytes([last if last <= 254 else b[3]])))
+
+
+def fw_out_port_for_id(board_id: int, base: int = FW_OUT_PORT_BASE) -> int:
+    return base + board_id if base + board_id <= 0xFFFF else base
+
 NUM_MOTORS = 8
 NUM_PROBES = 7
 HOME_SW_DIO = 15
@@ -53,7 +66,7 @@ class Config:
         ip = self.raw["board"].get("ip")
         if ip:
             return str(ip)
-        return str(ipaddress.IPv4Address(FW_IP_BASE) + self.board_id)
+        return fw_ip_for_id(self.board_id)
 
     @property
     def board_in_port(self) -> int:
@@ -62,7 +75,7 @@ class Config:
     @property
     def board_out_port(self) -> int:
         port = self.raw["board"].get("out_port")
-        return int(port) if port else FW_OUT_PORT_BASE + self.board_id
+        return int(port) if port else fw_out_port_for_id(self.board_id)
 
     # --- serial / motor ---
     @property

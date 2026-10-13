@@ -491,6 +491,14 @@ def test_config_override(tmp_path: Path):
     assert cfg.section("brake")["transition_ms"] == 100  # default kept
 
 
+def test_firmware_address_for_id():
+    # src/idOffset.cpp: the ID is not added beyond .254
+    assert config.fw_ip_for_id(0) == "10.0.0.100" and config.fw_ip_for_id(154) == "10.0.0.254"
+    assert config.fw_ip_for_id(155) == "10.0.0.100" and config.fw_ip_for_id(255) == "10.0.0.100"
+    assert config.fw_out_port_for_id(155) == 50255
+    assert config.fw_out_port_for_id(1, base=65535) == 65535
+
+
 def test_config_rejects_other_output_pin(tmp_path: Path):
     p = tmp_path / "bench.toml"
     p.write_text('[ad2.dio]\nhome_sw = 14\n')

@@ -61,13 +61,20 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("compare", parents=[common], help="compare two timing results")
     s.add_argument("result_dirs", nargs=2)
 
-    s = sub.add_parser("check", parents=[common], help="remaining checks C1-C11 (see README)")
+    s = sub.add_parser("check", parents=[common], help="remaining checks C1-C12, C6e (see README)")
     s.add_argument("--test", nargs="+", choices=list(CHECKS), help="checks to run")
-    s.add_argument("--all-auto", action="store_true", help="C1-C7 (no human operation needed)")
-    s.add_argument("--cases", help="C7: subset of abcde; C8: of abc; C9: of abcd")
+    s.add_argument("--all-auto", action="store_true", help="C1-C7 and C12 (no human operation needed)")
+    s.add_argument("--cases", help="C6: loads, subset of abcdw (default abcd); C6e: of bc; C7: of abcde; "
+                   "C8: of abc; C9: of abcd")
     s.add_argument("--repeat", type=int, help="C8 / C9 / C11: runs per case (default 10 / 3 / 5)")
     s.add_argument("--dead-ip", default="10.0.0.250", help="C6: unused address in the board's subnet")
-    s.add_argument("--duration", type=float, help="C6: seconds per load (default 10)")
+    s.add_argument("--duration", type=float, help="C6: seconds per load (default 10); C6e: at least this long "
+                   "after the removal (default 30)")
+    s.add_argument("--max-duration", type=float, help="C6e: at most this long after the removal if nothing "
+                   "changes (default 300)")
+    s.add_argument("--alias-ip", default="10.0.0.251", help="C6e: unused address in the board's subnet, added "
+                   "to the Mac's interface by a human")
+    s.add_argument("--label", help="suffix of the result directory, e.g. prefix for the firmware before a fix")
     s.add_argument("--dip-values", help="C10: comma-separated DIP switch values (default 1,2,4,...,128)")
     s.add_argument("--dip", type=int, default=85, help="C10boot: DIP switch value set before the restart")
     return p

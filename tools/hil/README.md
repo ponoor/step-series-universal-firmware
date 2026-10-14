@@ -1,7 +1,8 @@
-# HIL test bench (STEP800 + Analog Discovery 2)
+# HIL test bench (STEP800 / STEP400 + Analog Discovery 2)
 
 Hardware-in-the-loop tests of the STEP800 firmware with a Digilent Analog Discovery 2
-(AD2) connected to a Mac:
+(AD2) connected to a Mac. The STEP400_R1 is supported with its own configuration file,
+see [STEP400_R1](#step400_r1); everything else in this file describes the STEP800 bench.
 
 - **Timing**: firmware built with `-D HIL_PROBE` drives timing probes on spare pins
   (`src/hilProbe.h`). The AD2 logic analyzer records them and the bench computes the
@@ -92,12 +93,19 @@ STEP800_R1 (schematic: `ponoor/STEP800`, `hardware/step800_r1_0_0_schematics.pdf
 
 ### Output safety
 
-The bench drives **only DIO15**, and only as an open-drain output: `press()` sets the
-output value 0 and then enables the output; `release()` disables it (high impedance,
-the L6470 pulls the input up). DIO15 is never driven high. The home switch is released
-when the bench opens the AD2 and before it closes it, also after an exception. The
-waveform generators (W1/W2), the power supplies (V+/V-) and the pattern generator are
-not used. `bench.toml` cannot assign the home switch to another pin.
+The bench drives **only DIO15** on the STEP800 (DIO14 and DIO15 on the STEP400), and only
+as an open-drain output: `press()` sets the output value 0 and then enables the output;
+`release()` disables it (high impedance, the L6470 pulls the input up). No pin is ever
+driven high. The switches are released when the bench opens the AD2 and before it closes
+it, also after an exception. The waveform generators (W1/W2), the power supplies (V+/V-)
+and the pattern generator are not used. `bench.toml` cannot assign the home switch to
+another pin than 15 (nor the STEP400 limit switch to another than 14), and on the STEP800
+it cannot drive DIO14 (P6).
+
+Before every subcommand except `compare` (and the STEP800 `powerup`, whose USB cable is
+unplugged), the bench reads `s` and `P` over the USB serial and stops unless the firmware
+name and the HIL probe map are those of `board.model`: the STEP800 probe pins are brake
+outputs and a DIP switch on the STEP400.
 
 ## Usage
 
@@ -386,6 +394,107 @@ are matched, because the probe pins float during the restart, and the position i
 polled. They run last (`hil.py brake` does). B19 and B20 time their serial step by the
 brake engage edge and check that it comes before the driver standby entry.
 
+## STEP400_R1
+
+Same bench, AD2 and Mac; the STEP400 configuration is a separate file:
+
+```bash
+cd tools/hil
+cp bench.step400.example.toml bench.step400.toml   # gitignored; edit board.id, motor.test_axis
+.venv/bin/python hil.py --config bench.step400.toml selftest
+```
+
+Keys left out of `bench.step400.toml` take the values of `bench.step400.example.toml`,
+then of `bench.example.toml`. Firmware: `step400_devlib_probe` (`platformio_local.ini`, not
+committed):
+
+```ini
+[env:step400_devlib_probe]
+extends = env:step400_devlib
+build_flags =
+	${samd_base.build_flags}
+	-D STEP400_R1
+	-D HIL_PROBE
+```
+
+### Wiring
+
+STEP400_R1 (schematic `step400_r1_schematics.pdf`). No motor and no physical brake; the
+STEP400 Brake Board is connected to J7.
+
+| Signal | Board | Arduino | SAMD21 | AD2 | Direction |
+|---|---|---|---|---|---|
+| Brake outputs EM_1-EM_4 | J7-1 to J7-4 (in parallel with the Brake Board) | A1, D8, D5, D1 | PB08, PA06, PA15, PA10 | DIO 0-3 | input |
+| 3.3 V | J8-2 | - | - | DIO 4 | input |
+| P0 loop toggle | J8-5 | D38 | PA13 | DIO 8 + Scope 2+ | input |
+| P1 OSC packet processing | J8-4 | SCL | PA23 | DIO 9 | input |
+| P2 servo update, watchdog early warning, `Y` | J8-3 | SDA | PA22 | DIO 10 | input |
+| Limit switch of the test axis | CN1-CN4 pin 2 (ADCIN through 100 ohm) | - | - | DIO 14 | open-drain output |
+| Home switch of the test axis | CN5-CN8 pin 2 (SW through 100 ohm) | - | - | DIO 15 | open-drain output |
+| OUT1A of the test axis / GND | motor connector | - | - | Scope 1+ / 1- | +/-25 V range |
+| GND | J8-1 / J7-6 / CN pin 1 | - | - | GND | |
+
+- Brake output polarity: HIGH = released, LOW = engaged. The pins are driven by the MCU
+  directly (`digitalWrite()`), with no pull-up or pull-down on the board; while the MCU is
+  in reset or in the bootloader they float and the Brake Board's gate pull-down engages.
+  EM_4 (D1) is also the UART TX pin of SERCOM0.
+- Leave pin 3 (5 V) of the switch connectors unconnected. DIO 5-7 and 11-13 are not used.
+- The STEP400_R1 has no pin for P3-P6 (D9 is a DIP switch, A1 / D8 / D1 are brake
+  outputs): `ad2.dio.probes` is `[8, 9, 10, -1, -1, -1, -1]` and the metrics of P3-P6
+  (`checkStatus`, `getMyId`, `udpSend`, `slotInterval`, `pollInterval`, `servoDelay`,
+  `reportInterval`, the brake-write pulses P6, the reply loss on the board side) are left
+  out. The position report intervals come from the host receive times.
+- The 3.3 V is on DIO 4 (not on the Scope): every recording starts only if it reads high
+  (wiring), and Scope 2 stays on P0 also for `powerup`. The DIO threshold is about 1.5 V,
+  so power-up times are from that crossing, not from the Scope 1.65 V crossing of the
+  STEP800 runs.
+- Network: as the STEP800 (`10.0.0.100 + id`); take the STEP800 off the switch.
+
+### Configuration (`bench.step400.example.toml`)
+
+| Key | STEP400 | Meaning |
+|---|---|---|
+| `board.model` | `"step400"` | firmware name `STEP400_R1_UNIVERSAL`, 4 motors, probes P0-P2, CONFIG power-on default 0x2C88 (PowerSTEP01) |
+| `ad2.dio.brake` | `[0, 1, 2, 3]` | DIO of the brake output of motor 1-4 |
+| `ad2.dio.probes` | `[8, 9, 10, -1, -1, -1, -1]` | DIO of P0-P6, -1: no pin |
+| `ad2.dio.v33` | `4` | 3.3 V |
+| `ad2.dio.limit_sw` / `home_sw` | `14` / `15` | the only pins the bench drives |
+| `ad2.scope.v33` | `0` | none (the 3.3 V is on the DIO) |
+| `[excitation]` | STEP800 values | to be measured on the STEP400 (`selftest --only excitation`) and written to `bench.step400.toml` |
+
+### Commands on the STEP400
+
+| Command | STEP400 difference |
+|---|---|
+| `selftest` | adds `v33` (DIO 4 high) first and `limit_sw` (as `home_sw`, with `/enableLimitSwReport`, `/getLimitSw`, `/limitSw`, DIO 14); `probes` checks P0-P2 on DIO 8-10 and no edge on DIO 11-13; `brake_map` sends `b` 4 times (no P4: the delay is from the host time of `b`, USB latency included) |
+| `timing` | the P0-P2 metrics only (`loop`, `oscReceive`, `updateServo`, `servoInterval`), `p` as before |
+| `brake` | the same scenarios (they use the test axis and 255 only); the brake output delay of a command is from its P1 rise (`delays[].brake_change_ms`); no P4 / P6 rows |
+| `reboot` | as the STEP800, plus `--how W` (watchdog) and `--all-motors`; judged items below |
+| `powerup` | 10 kS/s, Digital In triggered by the DIO 4 rise starts the Scope; both USB and 12 V are switched; the operator is asked which came on first; judged below |
+| `check` | C1, C2, C4, C7, C9 (`--all-auto`: C1, C2, C4, C7). The others use P3-P6, the L6470 bit layout or the STEP800 brake outputs and are refused |
+| `arp` | refused (needs P5) |
+
+Scenario steps can press / release either switch: `press(label, switch="limit")`
+(default `"home"`); the step's AD2 time is the edge on that switch's DIO.
+
+### Judged items (`reboot`, `powerup`)
+
+`reboot` (also on the STEP800, in `summary.json` `judged`; the earlier fields are kept):
+
+| Item | PASS when |
+|---|---|
+| `engage` | every brake output is engaged at the driver standby entry (first OUT1A window above 3 V) and stays engaged; for `R` / `resetDevice` it engaged `transition_ms` -1/+6 ms before the standby (safeSystemReset() waits the longest transition). `W`: before the standby (the early warning engages them about 2 s earlier) |
+| `boot` | no brake output is high from the MCU reset (last P0 edge before the longest gap) to `loop()` (the first P0 edge followed by 10 edges within 5 ms; single edges of a floating pin or a bootloader are not). High spans are listed per motor as [ms from the reference, length ms] (`brakes_high_during_boot`) |
+| `drivers` | CONFIG read by `D` at boot is the power-on default of every driver (0x2C88 PowerSTEP01, 0x2E88 L6470): the MCU reset put them in standby |
+| `cause` | `/booted <id> <resetCause>`: 5 for `R` / `resetDevice`, 4 for `W` |
+
+`powerup` (STEP400): PASS per run when no brake output is ever high after the 3.3 V rise
+(brake disabled by default, so low before and after `setup()`); a high span is listed as
+motor, [ms from the rise, length ms]. RECORD: the first P0 edge (`hilProbeInit()`, start of
+`setup()`), the first OUT1A segment that stays in `[excitation] hiz_median_v` for 100 ms
+(drivers set up, HiZ), the OUT1A level segments, `/booted` and its host time after arming
+(no AD2 time: the trigger time is not known on the host).
+
 ## Tests
 
 ```bash
@@ -399,15 +508,17 @@ The tests use synthetic data and run without the hardware.
 
 | File | Contents |
 |---|---|
-| `hil.py` | CLI |
-| `hil/ad2.py` | AD2 open/close, recording, DIO15 open-drain control |
+| `hil.py` | CLI, board check before a subcommand |
+| `bench.example.toml` | defaults (STEP800) |
+| `bench.step400.example.toml` | STEP400 defaults, over `bench.example.toml` |
+| `hil/ad2.py` | AD2 open/close, recording, DIO14 / DIO15 open-drain control |
 | `hil/osc.py` | OSC send/receive with timestamps, `/setDestIp` check |
 | `hil/diag.py` | USB serial commands (`p`, `P`, `b`, `s`, `R`; HIL_PROBE builds: `Z`, `D`, `Y`, `W`) |
 | `hil/restart.py` | `reboot`: restart and driver standby analysis |
 | `hil/analyze.py` | edges, durations, statistics, command matching, excitation, invariants |
 | `hil/scenarios.py` | brake scenarios as data |
 | `hil/commands.py` | subcommands |
-| `hil/config.py` | `bench.toml` loading and validation |
+| `hil/config.py` | `bench.toml` loading and validation, board models |
 | `hil/plots.py` | PNG output |
 | `hil/arp.py` | `arp`: pcap parsing, capture, link status, AD2 segments, client replacement steps |
 | `hil/checks.py` | `check`: C1-C11, the logged USB serial (`SerialLog`) and their judgement helpers |

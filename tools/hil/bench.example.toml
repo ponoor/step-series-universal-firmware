@@ -1,7 +1,11 @@
 # HIL test bench configuration.
 # Copy to bench.toml (gitignored) and edit. Keys left out use the defaults shown here.
+# STEP400: copy bench.step400.example.toml instead (see there).
 
 [board]
+# Board model: "step800" (STEP800_R1) or "step400" (STEP400_R1). The bench stops if the
+# firmware name ('s') or the HIL probe map ('P') of the board does not match it.
+model = "step800"
 # DIP switch ID of the STEP800. With the firmware defaults (no config file on the SD
 # card), the network settings follow from it:
 #   IP address    10.0.0.100 + id    (myIp, isMyIpAddId = true)
@@ -51,6 +55,10 @@ probes = [8, 9, 10, 11, 12, 13, 14]
 # Home switch of the test axis (open-drain, low = pressed). Must be 15; the bench
 # refuses to drive any other pin.
 home_sw = 15
+# Limit switch of the test axis: STEP400 only (14). -1 on the STEP800, where DIO14 is P6.
+limit_sw = -1
+# DIO on the board's 3.3 V, -1 = none (STEP800: 3.3 V on Scope 2 for the power-up test).
+v33 = -1
 
 [ad2.scope]
 # Scope channels (1 or 2).

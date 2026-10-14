@@ -5,16 +5,21 @@ state is judged from:
 - OUT1A of the test axis (Scope 1): energized, HiZ (about 1.8 V) or another level, shown
   as level segments of the 1 ms window medians.
 - the driver registers read first in setup(), before the drivers are reset (HIL_PROBE
-  builds, serial 'D'): CONFIG at its power-on default (0x2E88) means the drivers were
-  reset (standby) while the MCU restarted.
+  builds, serial 'D'): CONFIG at its power-on default (L6470 0x2E88, PowerSTEP01 0x2C88)
+  means the drivers were reset (standby) while the MCU restarted.
 - 'Y' (--how standby): the MCU floats the reset line for 300 ms (P2 high) without
   restarting, so OUT1A can be recorded at the full rate during a known standby.
 
 The MCU reset is the last P0 (loop toggle) edge before the longest gap: P0 stops when
 the MCU resets and resumes in loop() after setup() (a blocking command such as the
 brake wait of /resetDevice makes a shorter gap before it). safeSystemReset() sets P0
-high just before the reset in HIL_PROBE builds. P0 (D1, PA10) is also the UART TX pin,
-which the bootloader drives about 30 ms after the reset, so this time is approximate.
+high just before the reset in HIL_PROBE builds. On the STEP800, P0 (D1, PA10) is also the
+UART TX pin, which the bootloader drives about 30 ms after the reset, so this time is
+approximate (on the STEP400 P0 is D38, and D1 is the brake output EM_4).
+
+Brake outputs during the boot: from the MCU reset to the first P0 edge of loop() the
+firmware does not release a brake, so every brake output must stay low (engaged); a high
+span there comes from the bootloader or the floating pins (`brakes_high_during_boot`).
 
 The driver standby entry is judged on OUT1A: an energized driver going to standby
 makes OUT1A jump to about 6 V and decay to about 0.13 V within 80 ms (bench, 12 V
@@ -34,7 +39,7 @@ from . import scenarios as sc
 from .config import Config
 from .diag import SerialDiag
 
-CONFIG_DEFAULT = 0x2E88  # L6470 CONFIG after power-on / standby
+CONFIG_DEFAULT = 0x2E88  # L6470 CONFIG after power-on / standby (Config.board.config_default)
 BOOT_LINE = re.compile(r"HIL boot driver (\d+): CONFIG 0x([0-9A-F]{4}) STATUS 0x([0-9A-F]{4}) now CONFIG 0x([0-9A-F]{4})")
 
 
@@ -90,6 +95,38 @@ def level_segments(volts: np.ndarray, rate: float, window: float = 1e-3, tol: fl
     return out
 
 
+def high_spans(step, t_from: float, t_to: float, ref: float) -> list[list[float]]:
+    """High (released) spans of a brake output within [t_from, t_to], as [start ms from
+    ref, length ms]."""
+    return [[round((a - ref) * 1e3, 2), round((b - a) * 1e3, 2)]
+            for a, b in analyze.intersect([(t_from, t_to)], step.intervals(True))]
+
+
+def engage_lead(step, t_standby: float, ref: float) -> dict:
+    """Last engage (fall) of a brake output before the drivers' standby entry: ms before the
+    standby, and whether it stays engaged from there to the end."""
+    t = np.asarray(step.times, float)
+    v = np.asarray(step.values, bool)
+    falls = t[1:][(~v[1:]) & (t[1:] <= t_standby)]
+    engaged = not bool(step.at(t_standby))
+    stays = not analyze.intersect([(t_standby, step.t_end)], step.intervals(True))
+    return {"engaged_at_standby": engaged, "stays_engaged": stays,
+            "engage_before_standby_ms": round((t_standby - falls[-1]) * 1e3, 2) if falls.size else None,
+            "engage_ms_from_ref": round((falls[-1] - ref) * 1e3, 2) if falls.size else None}
+
+
+def loop_resume(p0_edges: np.ndarray, t_reset: float, min_edges: int = 10, within: float = 5e-3) -> float | None:
+    """First P0 edge after the reset that starts the loop toggling: followed by at least
+    min_edges edges within `within` seconds (a loop pass takes about 50 us). Single edges
+    of the bootloader (the STEP800 P0 is the UART TX pin) or of the floating pin are not."""
+    t = np.asarray(p0_edges, float)
+    t = t[t > t_reset]
+    for i in range(t.size):
+        if np.sum(t[i:] <= t[i] + within) >= min_edges:
+            return float(t[i])
+    return None
+
+
 def _first_after(t: np.ndarray, after: float) -> float | None:
     t = np.asarray(t, float)
     sel = t > after
@@ -122,17 +159,30 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     res["brake_edges_ms"] = [[round((t - ref) * 1e3, 2), bool(v)] for t, v in zip(released.times[1:], released.values[1:])]
     res["brake_released_at_start"] = bool(released.values[0])
     res["other_brakes_released_after_ref_ms"] = {}
+    steps = {}
     for motor, d in enumerate(cfg.ad2["dio"]["brake"], start=1):
-        high = analyze.Step.from_edges(analyze.bit_edges(seg, int(d))).intervals(True)
+        steps[motor] = analyze.Step.from_edges(analyze.bit_edges(seg, int(d)))
+        high = steps[motor].intervals(True)
         after = [(round((a - ref) * 1e3, 1), round((b - ref) * 1e3, 1)) for a, b in high if b > ref]
         if after:
             res["other_brakes_released_after_ref_ms"][motor] = after
+    if how != "standby" and t_sb is not None:
+        res["brake_engage_vs_standby"] = {m: engage_lead(st, t_sb, ref) for m, st in steps.items()}
     if t_reset is not None:
         nxt = _first_after(p0, t_reset + 0.02)
         res["p0_resumes_ms"] = (nxt - ref) * 1e3 if nxt is not None else None
-        p4 = analyze.bit_edges(seg, probe[4]).rise
-        nxt = _first_after(p4, t_reset)
-        res["first_p4_after_reset_ms"] = (nxt - ref) * 1e3 if nxt is not None else None
+        if cfg.probe(4) is not None:
+            p4 = analyze.bit_edges(seg, probe[4]).rise
+            nxt = _first_after(p4, t_reset)
+            res["first_p4_after_reset_ms"] = (nxt - ref) * 1e3 if nxt is not None else None
+        # From the reset to loop() (loop_resume(); the end of the capture if loop() does not
+        # resume): no brake output may be high.
+        t_loop = loop_resume(p0, t_reset)
+        t_loop = t_loop if t_loop is not None else seg.duration
+        res["loop_resumes_ms"] = round((t_loop - ref) * 1e3, 2)
+        res["boot_window_ms"] = [round((t_reset - ref) * 1e3, 2), round((t_loop - ref) * 1e3, 2)]
+        res["brakes_high_during_boot"] = {m: sp for m, st in steps.items() if (sp := high_spans(st, t_reset, t_loop, ref))}
+        res["p0_edges_during_boot_ms"] = [round((t - ref) * 1e3, 2) for t in p0 if t_reset < t < t_loop]
     if how == "standby":
         # P2 also pulses every servo period; the standby window is the long pulse.
         win = long_pulse(analyze.bit_edges(seg, probe[2]), 0.05)
@@ -145,16 +195,63 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     return res
 
 
+# resetCause of /booted (src/resetCause.h) expected after each restart.
+EXPECTED_RESET_CAUSE = {"R": 5, "resetDevice": 5, "W": 4}
+
+
+def judge_restart(cfg: Config, how: str, res: dict, transition_ms: float, tolerance_ms: tuple = (-1.0, 6.0)) -> dict:
+    """PASS / FAIL items of a restart (STEP400 S4-2; recorded the same way on the STEP800).
+    engage: every brake output engaged before the drivers' standby and engaged from there
+    on; for R / resetDevice the engage comes transition_ms (+tolerance) before the standby
+    (safeSystemReset() waits the longest transition time). boot: no brake output high from
+    the reset to loop(). drivers: CONFIG at the power-on default at boot. cause: resetCause."""
+    items = {}
+    lead = res.get("brake_engage_vs_standby")
+    if how != "standby":
+        if lead is None:
+            items["engage"] = {"ok": False, "detail": "no driver standby entry found"}
+        else:
+            bad = []
+            for m, v in lead.items():
+                if not (v["engaged_at_standby"] and v["stays_engaged"]):
+                    bad.append(f"M{m} not engaged at the standby or released again")
+                elif how in ("R", "resetDevice"):
+                    ms = v["engage_before_standby_ms"]
+                    if ms is None or not transition_ms + tolerance_ms[0] <= ms <= transition_ms + tolerance_ms[1]:
+                        bad.append(f"M{m} engaged {ms} ms before the standby")
+            items["engage"] = {"ok": not bad, "detail": "; ".join(bad) or "all engaged before the standby: " +
+                               ", ".join(f"M{m} {v['engage_before_standby_ms']} ms" for m, v in lead.items())}
+    if "brakes_high_during_boot" in res:
+        high = res["brakes_high_during_boot"]
+        items["boot"] = {"ok": not high, "detail": f"high from the reset to loop(): {high}" if high
+                         else f"all low from the reset to loop() ({res['boot_window_ms']} ms)"}
+    drivers = res.get("boot_drivers_raw", {})
+    if how != "standby":
+        default = cfg.board.config_default
+        n = cfg.num_motors
+        ok = len(drivers) == n and all(d["config"] == default for d in drivers.values())
+        items["drivers"] = {"ok": ok, "detail": f"CONFIG at boot {[f'0x{d['config']:04X}' for d in drivers.values()]}, "
+                                                f"power-on default 0x{default:04X}"}
+    if how in EXPECTED_RESET_CAUSE:
+        causes = res.get("booted_reset_cause", [])
+        items["cause"] = {"ok": causes == [EXPECTED_RESET_CAUSE[how]],
+                          "detail": f"/booted resetCause {causes}, expected {EXPECTED_RESET_CAUSE[how]}"}
+    return items
+
+
 def cmd_reboot(cfg: Config, args) -> int:
     how = args.how
-    out = commands.new_result_dir(f"reboot_{how}")
+    all_motors = getattr(args, "all_motors", False)
+    out = commands.new_result_dir(f"reboot_{how}" + ("_all" if all_motors else ""))
     b = cfg.section("brake")
     values = commands.scenario_values(cfg)
     standby = how == "standby"
+    # The test axis, or every motor (brake enabled on all by COMMON_SETUP), released.
+    activate = (sc.osc("/activate", sc.ALL if all_motors else sc.AXIS, 1), sc.wait(0.5))
     with commands.open_ad2(cfg) as ad2, SerialDiag(cfg.serial_port) as diag, commands.open_link(cfg) as link:
         diag.reboot()
         commands.connect_board(link)
-        commands._run_steps(sc.COMMON_SETUP + (sc.osc("/activate", sc.AXIS, 1), sc.wait(0.5)), values, link, ad2, None)
+        commands._run_steps(sc.COMMON_SETUP + activate, values, link, ad2, None)
         probe = cfg.probe_dio
         brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
         out1a = int(cfg.ad2["scope"]["out1a"])
@@ -170,15 +267,19 @@ def cmd_reboot(cfg: Config, args) -> int:
             diag.send("R")
         elif how == "resetDevice":
             link.send("/resetDevice")
+        elif how == "W":
+            diag.send("W")  # hang: early warning after 2.0 s, reset after 4 s
         else:
             diag.send("Y")
-        time.sleep(1.0 if standby else 4.0)
+        time.sleep(1.0 if standby else 8.0 if how == "W" else 4.0)
         cap = rec.stop()
         cap.save(out / f"reboot_{how}.npz")
         if not standby:
             diag.reconnect()
         time.sleep(0.5)
         boot_text = diag.command("D", until=r"HIL boot drivers (done|: not captured)")
+        if not standby:
+            link.wait_for("/booted", 5.0, t_host)  # sent once the link is up (BOOT_MSG_WAIT_TIME)
     t_cmd = None
     if how == "resetDevice":
         p1 = analyze.bit_edges(cap.digital, probe[1]).rise
@@ -190,9 +291,16 @@ def cmd_reboot(cfg: Config, args) -> int:
         res["scope_minus_digital_s"] = shift
     res.update(analyze_restart(cfg, cap, how, t_cmd) if cap.ok else {})
     res["host_command_ns"] = t_host
+    res["all_motors"] = all_motors
     drivers = parse_boot_drivers(boot_text)
     res["boot_drivers"] = {m: {k: f"0x{v:04X}" for k, v in d.items()} for m, d in drivers.items()}
-    res["drivers_reset_at_boot"] = {m: d["config"] == CONFIG_DEFAULT for m, d in drivers.items()}
+    res["drivers_reset_at_boot"] = {m: d["config"] == cfg.board.config_default for m, d in drivers.items()}
+    # /booted <myId> <resetCause> (src/utils.cpp sendBootMsg())
+    res["booted_reset_cause"] = [int(e.args[1]) for e in link.entries("rx", t_host)
+                                 if e.address == "/booted" and len(e.args) >= 2]
+    res["boot_drivers_raw"] = drivers
+    res["judged"] = judge_restart(cfg, how, res, float(b["transition_ms"]))
+    del res["boot_drivers_raw"]
     commands.write_json(out / "summary.json", res)
     print(f"how: {how}, capture ok: {cap.ok} {'; '.join(cap.problems())}")
     for k in ("t_ref", "command_to_standby_ms", "p0_reset_marker_to_standby_ms", "p0_resumes_ms", "first_p4_after_reset_ms", "standby_window_ms",
@@ -205,5 +313,7 @@ def cmd_reboot(cfg: Config, args) -> int:
             print(f"  {s['from_ms']:9.1f} .. {s['to_ms']:9.1f}  {s['median_v']:6.3f}")
     print(f"excited edges (ms): {res.get('excited_edges_ms')}")
     print(f"boot driver registers: {res['boot_drivers']}")
+    for k, v in res["judged"].items():
+        print(f"{k:8s} {'PASS' if v['ok'] else 'FAIL'}  {v['detail']}")
     print(f"results: {out}")
     return 0

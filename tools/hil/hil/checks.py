@@ -107,13 +107,13 @@ def warning_lines(text: str) -> list[str]:
     return [ln.strip() for ln in text.splitlines() if "Warning:" in ln]
 
 
-def report_flags(config: dict, value: bool) -> dict[str, list[int]]:
+def report_flags(config: dict, value: bool, num_motors: int = NUM_MOTORS) -> dict[str, list[int]]:
     """Report flags of the 'G' JSON that differ from value: {key: [motor, ...]}."""
     ar = config.get("alarmAndReport", {})
     out = {}
     for key in REPORT_KEYS:
         flags = ar.get(key)
-        if not isinstance(flags, list) or len(flags) != NUM_MOTORS:
+        if not isinstance(flags, list) or len(flags) != num_motors:
             out[key] = ["missing"]
             continue
         bad = [m for m, v in enumerate(flags, start=1) if bool(v) != value]
@@ -491,7 +491,7 @@ class Bench:
         self.out = out
         self.args = args
         self.axis = cfg.test_axis
-        self.other = self.axis % NUM_MOTORS + 1
+        self.other = self.axis % cfg.num_motors + 1
         self.commands = commands
         self.t0_ns = time.monotonic_ns()
         self.ad2 = None
@@ -646,10 +646,10 @@ def check_c1(b: Bench) -> list[Item]:
     g2 = b.config_json()
     servo2 = [m["isServoMode"] for m in b.status_json()["motors"]]
     perf = b.perf()
-    off = report_flags(g1, False)
+    off = report_flags(g1, False, b.cfg.num_motors)
     items.append(judged("C1-2", not off, "/enable*Report 255 0: all ten report flags false" if not off
                         else f"not false: {off}", not_false=off))
-    on = report_flags(g2, True)
+    on = report_flags(g2, True, b.cfg.num_motors)
     others = json_diff(g0, g2, ignore=REPORT_KEYS)
     ok = not on and not others and servo0 == servo2
     items.append(judged("C1-3", ok, f"/enable*Report 255 1: flags not true {on or 'none'}; other config "
@@ -700,7 +700,7 @@ def check_c2(b: Bench) -> list[Item]:
     b.send("/setMinSpeed", ot, 5.0)
     time.sleep(0.1)
     s_ax, s_ot, a1 = single(ax), single(ot), all_()
-    ok = (len(a1) == NUM_MOTORS and a1.get(ax) == s_ax and a1.get(ot) == s_ot
+    ok = (len(a1) == b.cfg.num_motors and a1.get(ax) == s_ax and a1.get(ot) == s_ot
           and abs(s_ax - 10.0) <= tol and abs(s_ot - 5.0) <= tol)
     items.append(judged("C2-1", ok, f"set {ax}: 10.0 -> single {s_ax:.4f}, 255 {a1.get(ax)}; "
                         f"set {ot}: 5.0 -> single {s_ot:.4f}, 255 {a1.get(ot)}", all=a1))
@@ -709,7 +709,7 @@ def check_c2(b: Bench) -> list[Item]:
     a2 = all_()
     singles = {m: single(m) for m in (ax, ot)}
     vals = set(a2.values())
-    ok = (len(a2) == NUM_MOTORS and len(vals) == 1 and abs(next(iter(vals)) - 20.0) <= tol
+    ok = (len(a2) == b.cfg.num_motors and len(vals) == 1 and abs(next(iter(vals)) - 20.0) <= tol
           and all(singles[m] == a2[m] for m in singles))
     items.append(judged("C2-2", ok, f"/setMinSpeed 255 20.0 -> 255 values {sorted(vals)}, singles {singles}", all=a2))
     b.send("/enableLowSpeedOptimize", ax, 1)
@@ -731,7 +731,7 @@ def check_c2(b: Bench) -> list[Item]:
     uvlo = b.all_motors("/getUvlo", "/uvlo")
     uvlo_tags = {m: osc_type_tag(a[1]) for m, a in uvlo.items()}
     ok = (len(tags_on) == 3 and tags_on[2] == "i" and lso_on[2] == 1 and tags_off[2] == "i" and lso_off[2] == 0
-          and len(uvlo_tags) == NUM_MOTORS and set(uvlo_tags.values()) == {"i"})
+          and len(uvlo_tags) == b.cfg.num_motors and set(uvlo_tags.values()) == {"i"})
     items.append(judged("C2-4", ok, f"/lowSpeedOptimizeThreshold tags {''.join(tags_on)} args {list(lso_on)} "
                         f"(enabled), {''.join(tags_off)} {list(lso_off)} (disabled); /uvlo arg 2 tags "
                         f"{sorted(set(uvlo_tags.values()))}", uvlo=uvlo_tags))
@@ -821,7 +821,7 @@ def check_c3(b: Bench) -> list[Item]:
     moved = {m: after.get(m, 0) != before.get(m, 0) for m in before}
     errs = [list(e.args) for e in errs5]
     ok = (errs == [["HomeSwActivating", ax]] and not moved.get(ax, True)
-          and all(moved.get(m) for m in range(1, NUM_MOTORS + 1) if m != ax) and exc(t5) == 0.0)
+          and all(moved.get(m) for m in range(1, b.cfg.num_motors + 1) if m != ax) and exc(t5) == 0.0)
     items.append(judged("C3-5", ok, f"/goUntil 255 0 100.0: errors {errs}; moved {moved}; test axis excited "
                         f"{exc(t5):.2f}", before=before, after=after))
     return items
@@ -987,7 +987,7 @@ def check_c5(b: Bench) -> list[Item]:
     d1 = parse_status_dump(s1)
     bad1 = check_status_dump(d1)
     n = len(d1["drivers"])
-    items.append(judged("C5-1", n == NUM_MOTORS and not bad1, f"'s': {n} drivers, mismatches: {bad1 or 'none'}",
+    items.append(judged("C5-1", n == b.cfg.num_motors and not bad1, f"'s': {n} drivers, mismatches: {bad1 or 'none'}",
                         mismatches=bad1, configs={m: f"0x{d['hex'].get('CONFIG', 0):04X}" for m, d in d1['drivers'].items()}))
     old = d1["drivers"].get(ax, {}).get("config_fields", {}).get("SW_MODE")
     new = 0 if old else 1
@@ -2075,7 +2075,7 @@ def check_c12(b: Bench) -> list[Item]:
     thermal = re.findall(r"Thermal status : (.+?)\r?$", s_text, re.M)
     dump = parse_status_dump(s_text)
     bad = check_status_dump(dump)
-    items.append(judged("C12-s", len(thermal) == NUM_MOTORS and set(thermal) <= set(THERMAL_TEXT) and not bad,
+    items.append(judged("C12-s", len(thermal) == b.cfg.num_motors and set(thermal) <= set(THERMAL_TEXT) and not bad,
                         f"'s': thermal status {sorted(set(thermal))} ({len(thermal)} drivers), mismatches "
                         f"{bad or 'none'}"))
     b.reboot()
@@ -2103,6 +2103,14 @@ TESTS = {
     "C12": ("config from '{' keeps the running address; 's' / 'c' output", check_c12),
 }
 AUTO_TESTS = ("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C12")
+# Checks that cannot run on a board model, with the reason (hil.py refuses them).
+UNSUPPORTED = {
+    "step400": {
+        "C3": "uses P5", "C6": "uses P5", "C6e": "uses P5", "C8": "uses P5", "C11": "uses P4",
+        "C5": "L6470 bit layout of CONFIG / STATUS", "C12": "L6470 status texts",
+        "C10": "8 brake outputs of the STEP800", "C10boot": "not adapted to the STEP400",
+    },
+}
 
 
 def run_test(cfg: Config, test: str, args) -> dict:

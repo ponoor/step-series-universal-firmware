@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hardware-in-the-loop test bench for the STEP800 with a Digilent Analog Discovery 2.
+"""Hardware-in-the-loop test bench for the STEP800 / STEP400 with a Digilent Analog Discovery 2.
 
 Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp> [--id N] ...
 See README.md.
@@ -56,8 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--duration", type=float, default=10.0, help="seconds after the 3.3 V rise")
 
     s = sub.add_parser("reboot", parents=[common], help="brake outputs and driver state across a restart")
-    s.add_argument("--how", choices=["R", "resetDevice", "standby"], required=True,
-                   help="R: serial reboot, resetDevice: OSC, standby: 'Y' (driver reset line floating)")
+    s.add_argument("--how", choices=["R", "resetDevice", "W", "standby"], required=True,
+                   help="R: serial reboot, resetDevice: OSC, W: watchdog (serial 'W', hang), "
+                        "standby: 'Y' (driver reset line floating)")
+    s.add_argument("--all-motors", action="store_true",
+                   help="release the brakes of all motors (/activate 255 1) instead of the test axis only")
 
     s = sub.add_parser("compare", parents=[common], help="compare two timing results")
     s.add_argument("result_dirs", nargs=2)
@@ -98,6 +101,33 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "id", None) is not None:
         cfg.override_board_id(args.id)
     from hil import arp, checks, commands, restart
+
+    if args.command == "arp" and cfg.model != "step800":
+        print(f"error: arp needs P5 (UDP send), which {cfg.model} has no pin for")
+        return 2
+    if args.command == "check":
+        skip = checks.UNSUPPORTED.get(cfg.model, {})
+        if args.all_auto and skip:
+            # --all-auto: the checks this board supports.
+            args.test, args.all_auto = [t for t in checks.AUTO_TESTS if t not in skip], False
+            print(f"--all-auto on {cfg.model}: {' '.join(args.test)} (not: "
+                  f"{', '.join(t for t in checks.AUTO_TESTS if t in skip)})")
+        tests = list(checks.AUTO_TESTS) if args.all_auto else (args.test or [])
+        unsupported = [t for t in tests if t in skip]
+        if unsupported:
+            print("error: not on " + cfg.model + ": " +
+                  "; ".join(f"{t} ({checks.UNSUPPORTED[cfg.model][t]})" for t in unsupported))
+            return 2
+    # The board must be the one of board.model, with its HIL_PROBE build. Not for compare
+    # (no board), nor for the STEP800 power-up (its USB cable is unplugged then).
+    if args.command != "compare" and not (args.command == "powerup" and cfg.model == "step800"):
+        try:
+            board = commands.preflight(cfg)
+        except (commands.BoardMismatch, commands.DiagError, OSError) as ex:
+            print(f"error: {ex}")
+            return 2
+        print(f"board: {board['firmware_name']}, HIL probes " +
+              " ".join(f"P{ch}={v}" for ch, v in board["probe_map"].items()))
 
     handler = {
         "selftest": commands.cmd_selftest,

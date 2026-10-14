@@ -52,6 +52,7 @@ class Step:
     seconds: float = 0.0
     label: str = ""
     edge: str = ""  # serial: how its AD2 time is found (EXCITATION_OFF)
+    switch: str = "home"  # press / release: "home" (DIO 15) or "limit" (DIO 14, STEP400)
 
 
 def osc(address: str, *args, label: str = "") -> Step:
@@ -67,12 +68,14 @@ def wait(seconds: float) -> Step:
     return Step("wait", seconds=seconds)
 
 
-def press(label: str = "") -> Step:
-    return Step("press", label=label)
+def press(label: str = "", switch: str = "home") -> Step:
+    """Pulls the switch input of the test axis low (pressed)."""
+    return Step("press", label=label, switch=switch)
 
 
-def release(label: str = "") -> Step:
-    return Step("release", label=label)
+def release(label: str = "", switch: str = "home") -> Step:
+    """Releases the switch input of the test axis (high impedance)."""
+    return Step("release", label=label, switch=switch)
 
 
 @dataclass(frozen=True)

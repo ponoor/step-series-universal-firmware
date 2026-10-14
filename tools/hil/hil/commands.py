@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import re
 import subprocess
 import sys
 import threading
@@ -18,14 +19,15 @@ import numpy as np
 from . import analyze, plots
 from . import scenarios as sc
 from .ad2 import AD2, Capture
-from .config import HIL_DIR, NUM_MOTORS, Config
-from .diag import REPORT_CLOCK_COUNTER, SLOT_LATE_COUNTER, SerialDiag, parse_probe_map
+from .config import HIL_DIR, Config
+from .config import BOARDS
+from .diag import REPORT_CLOCK_COUNTER, SLOT_LATE_COUNTER, DiagError, SerialDiag, parse_probe_map
 from .osc import OscError, OscLink
 
 RESULTS_DIR = HIL_DIR / "results"
 PROBE_NAMES = ("loop", "oscReceive", "updateServo", "checkStatus", "getMyId", "udpSend", "brakeWrite")
-EXPECTED_PROBE_MAP = {0: "D1(PA10)", 1: "A1(PB08)", 2: "D8(PA06)", 3: "D9(PA07)",
-                      4: "D38(PA13)", 5: "SCL(PA23)", 6: "SDA(PA22)"}
+EXPECTED_PROBE_MAP = BOARDS["step800"].probe_map
+FIRMWARE_NAME_LINE = re.compile(r"Firmware name : (\S+)")
 
 
 # --------------------------------------------------------------------------------------
@@ -97,9 +99,11 @@ def prompt(message: str) -> None:
 
 
 def mask_of(dios) -> int:
+    """Bit mask of the DIOs; negative entries (probe channels without a pin) are left out."""
     m = 0
     for d in dios:
-        m |= 1 << int(d)
+        if int(d) >= 0:
+            m |= 1 << int(d)
     return m
 
 
@@ -107,11 +111,48 @@ def open_ad2(cfg: Config) -> AD2:
     a = cfg.ad2
     conf = a.get("configuration", -1)
     return AD2(a.get("dwf_library", ""), a.get("serial_number", ""), float(a["scope"]["range_vpp"]),
-               None if conf is None or int(conf) < 0 else int(conf))
+               None if conf is None or int(conf) < 0 else int(conf), switches=cfg.switch_dios,
+               v33_dio=cfg.v33_dio)
 
 
 def open_link(cfg: Config) -> OscLink:
     return OscLink(cfg.board_ip, cfg.board_in_port, cfg.board_out_port)
+
+
+class BoardMismatch(RuntimeError):
+    """The board is not the one of board.model, or not its HIL_PROBE build."""
+
+
+def check_board_identity(cfg: Config, status_text: str, probe_map: dict | None) -> dict:
+    """Firmware name of 's' and the HIL probe map of 'P' against board.model. Raises
+    BoardMismatch: the wiring of one board on the other could drive a pin against an output
+    (e.g. a STEP800 probe pin is a STEP400 DIP switch)."""
+    model = cfg.board
+    m = FIRMWARE_NAME_LINE.search(status_text)
+    name = m.group(1) if m else None
+    if name != model.firmware_name:
+        raise BoardMismatch(f"board.model {model.name} expects firmware {model.firmware_name}, "
+                            f"the board reports {name or 'no firmware name'}")
+    if probe_map != model.probe_map:
+        raise BoardMismatch(f"no HIL probe map of {model.name} from 'P' (got {probe_map}): flash the "
+                            f"HIL_PROBE build ({model.name}_devlib_probe)")
+    return {"firmware_name": name, "probe_map": probe_map}
+
+
+def verify_board(cfg: Config, diag: SerialDiag) -> dict:
+    """'s' and 'P' over the USB serial, then check_board_identity()."""
+    status = diag.status()
+    try:
+        pmap, _ = diag.probe_selftest()
+    except DiagError:  # 'P' is not a command of builds without HIL_PROBE
+        pmap = None
+    return check_board_identity(cfg, status, pmap)
+
+
+def preflight(cfg: Config) -> dict:
+    """Run before a subcommand: checks the board against board.model (verify_board)."""
+    with SerialDiag(cfg.serial_port) as diag:
+        return verify_board(cfg, diag)
 
 
 def connect_board(link: OscLink, timeout: float = 15.0) -> str:
@@ -217,6 +258,10 @@ def cmd_selftest(cfg: Config, args) -> int:
 
         steps = [("probes", _selftest_probes), ("brake_map", _selftest_brake_map),
                  ("home_sw", _selftest_home_sw), ("excitation", _selftest_excitation)]
+        if cfg.v33_dio is not None:
+            steps.insert(0, ("v33", _selftest_v33))
+        if "limit" in cfg.switch_dios:
+            steps.insert(-1, ("limit_sw", _selftest_limit_sw))
         if args.sync:
             steps.append(("sync", _selftest_sync))
         for name, fn in steps:
@@ -236,33 +281,54 @@ def cmd_selftest(cfg: Config, args) -> int:
     return 0 if all(r[1] == "OK" for r in rows) else 1
 
 
+# DIO of the probe block (DIO 8-14) that a board leaves unwired: nothing may appear on them.
+PROBE_BLOCK_DIO = range(8, 15)
+
+
 def _selftest_probes(cfg, ad2, diag, link, out, boot) -> dict:
-    probe_dio = cfg.probe_dio
-    rec = ad2.start_recording(0.8, digital_rate=1e6, sensible_mask=mask_of(probe_dio))
+    probe_dio = cfg.probe_dios
+    quiet = [d for d in PROBE_BLOCK_DIO if d not in probe_dio and d not in cfg.switch_dios.values()]
+    rec = ad2.start_recording(0.8, digital_rate=1e6, sensible_mask=mask_of(probe_dio + quiet))
     time.sleep(0.2)
     pmap, text = diag.probe_selftest()
     cap = rec.wait()
     check_capture(cap)
     cap.save(out / "probes_capture.npz")
     pulses = {d: analyze.pulse_widths(analyze.bit_edges(cap.digital, d)) for d in probe_dio}
-    found = analyze.find_selftest(pulses)
+    found = analyze.find_selftest(pulses, n_probes=len(probe_dio))
     expected = {ch: d for ch, d in enumerate(probe_dio)}
-    ok = found == expected and pmap == EXPECTED_PROBE_MAP
-    summary = ("P0-P6 on DIO " + ",".join(str(found[c]) for c in range(7))) if found else "self-test pattern not found"
-    if pmap != EXPECTED_PROBE_MAP:
+    noisy = {d: int(analyze.bit_edges(cap.digital, d).all.size) for d in quiet}
+    noisy = {d: n for d, n in noisy.items() if n}
+    expected_map = cfg.board.probe_map
+    ok = found == expected and pmap == expected_map and not noisy
+    last = len(probe_dio) - 1
+    summary = (f"P0-P{last} on DIO " + ",".join(str(found[c]) for c in range(len(probe_dio)))) if found \
+        else "self-test pattern not found"
+    if pmap != expected_map:
         summary += f"; firmware pin map {pmap}"
+    if quiet:
+        summary += f"; edges on unwired DIO {noisy}" if noisy else f"; DIO {','.join(map(str, quiet))} quiet"
     return {"ok": ok, "summary": summary, "found": found, "expected": expected,
-            "boot_map": parse_probe_map(boot), "serial_map": pmap}
+            "boot_map": parse_probe_map(boot), "serial_map": pmap, "quiet_dio": quiet, "edges_on_quiet_dio": noisy}
+
+
+def _selftest_v33(cfg, ad2, diag, link, out, boot) -> dict:
+    """The board's 3.3 V on ad2.dio.v33 reads high (wiring)."""
+    level = (ad2.read_dio() >> cfg.v33_dio) & 1
+    return {"ok": level == 1, "summary": f"DIO {cfg.v33_dio} (3.3 V) {'high' if level else 'LOW'}"}
 
 
 def _selftest_brake_map(cfg, ad2, diag, link, out, boot) -> dict:
-    """'b' x 8: which DIO 0-7 goes high for each motor, and the delay against P4."""
-    p4 = cfg.probe_dio[4]
-    brake_dios = list(range(8))
-    rec = ad2.start_recording(None, digital_rate=1e6, sensible_mask=mask_of(brake_dios + [p4]))
+    """'b' x motors: which DIO 0-(motors - 1) goes high for each motor, and on the STEP800
+    the delay against P4 (the shift register transfer). The STEP400 writes the brake pins
+    directly ('b' has no probe pulse: only the delay from the host time is recorded)."""
+    n_motors = cfg.num_motors
+    p4 = cfg.probe(4)
+    brake_dios = list(range(n_motors))
+    rec = ad2.start_recording(None, digital_rate=1e6, sensible_mask=mask_of(brake_dios + ([p4] if p4 is not None else [])))
     time.sleep(0.3)
     log = []
-    for _ in range(NUM_MOTORS):
+    for _ in range(n_motors):
         t = time.monotonic_ns()
         off, on = diag.brake_step()
         log.append((t, off, on))
@@ -271,7 +337,7 @@ def _selftest_brake_map(cfg, ad2, diag, link, out, boot) -> dict:
     check_capture(cap)
     cap.save(out / "brake_map_capture.npz")
     edges = {d: analyze.bit_edges(cap.digital, d) for d in brake_dios}
-    p4_rise = analyze.bit_edges(cap.digital, p4).rise
+    p4_rise = analyze.bit_edges(cap.digital, p4).rise if p4 is not None else np.zeros(0)
     mapping: dict[int, int] = {}
     details = []
     for t_ns, off, on in log:
@@ -284,49 +350,66 @@ def _selftest_brake_map(cfg, ad2, diag, link, out, boot) -> dict:
         t_rise, dio = risen[0]
         mapping[on] = dio
         before = p4_rise[p4_rise <= t_rise + 5e-5]
-        n_p4 = int(np.sum((p4_rise > t_cmd) & (p4_rise <= t_rise + 5e-5)))
+        n_p4 = int(np.sum((p4_rise > t_cmd) & (p4_rise <= t_rise + 5e-5))) if p4 is not None else None
         details.append({"motor": on, "dio": dio, "delay_from_command_ms": (t_rise - t_cmd) * 1e3,
                         "p4_rises_between": n_p4,
                         "from_last_p4_rise_us": (t_rise - before[-1]) * 1e6 if before.size else None})
     write_csv(out / "brake_map.csv", ["motor", "dio", "delay_ms", "p4_rises_between", "from_last_p4_rise_us"],
               [[d.get("motor"), d.get("dio"), d.get("delay_from_command_ms"), d.get("p4_rises_between"),
                 d.get("from_last_p4_rise_us")] for d in details])
-    ok = len(mapping) == NUM_MOTORS and len(set(mapping.values())) == NUM_MOTORS
-    configured = {m: int(cfg.ad2["dio"]["brake"][m - 1]) for m in range(1, NUM_MOTORS + 1)}
-    summary = "motor->DIO " + ",".join(f"{m}:{mapping.get(m, '?')}" for m in range(1, NUM_MOTORS + 1))
+    ok = len(mapping) == n_motors and len(set(mapping.values())) == n_motors
+    configured = {m: int(cfg.ad2["dio"]["brake"][m - 1]) for m in range(1, n_motors + 1)}
+    summary = "motor->DIO " + ",".join(f"{m}:{mapping.get(m, '?')}" for m in range(1, n_motors + 1))
     if ok and mapping != configured:
         summary += " (differs from bench.toml)"
     return {"ok": ok, "summary": summary, "mapping": mapping, "configured": configured, "details": details,
             "note": "delay_from_command includes the USB serial latency"}
 
 
-def _selftest_home_sw(cfg, ad2, diag, link, out, boot) -> dict:
+# Switch inputs of the test axis: report enable, getter and reply of the firmware.
+SWITCH_OSC = {"home": ("/enableHomeSwReport", "/getHomeSw", "/homeSw"),
+              "limit": ("/enableLimitSwReport", "/getLimitSw", "/limitSw")}
+
+
+def _selftest_switch(cfg, ad2, link, switch: str) -> dict:
+    """Presses / releases the switch (DIO 15 home, DIO 14 limit) and checks the reports
+    (/homeSw, /limitSw: axis, state, ...) and the getter, and the DIO level."""
     axis = cfg.test_axis
+    enable, getter, reply = SWITCH_OSC[switch]
+    dio = ad2.switch_dio(switch)
     is_axis = lambda a: int(a[0]) == axis  # noqa: E731
-    link.send("/enableHomeSwReport", axis, 1)
-    ad2.release()
+    link.send(enable, axis, 1)
+    ad2.release(switch)
     time.sleep(0.1)
-    s0 = link.request("/getHomeSw", axis, reply="/homeSw", predicate=is_axis).args
-    dio_released = (ad2.read_dio() >> 15) & 1
+    s0 = link.request(getter, axis, reply=reply, predicate=is_axis).args
+    dio_released = (ad2.read_dio() >> dio) & 1
     t = time.monotonic_ns()
-    ad2.press()
-    rep1 = link.wait_for("/homeSw", 1.0, t, is_axis)
+    ad2.press(switch)
+    rep1 = link.wait_for(reply, 1.0, t, is_axis)
     time.sleep(0.1)
-    dio_pressed = (ad2.read_dio() >> 15) & 1
-    s1 = link.request("/getHomeSw", axis, reply="/homeSw", predicate=is_axis).args
+    dio_pressed = (ad2.read_dio() >> dio) & 1
+    s1 = link.request(getter, axis, reply=reply, predicate=is_axis).args
     t = time.monotonic_ns()
-    ad2.release()
-    rep2 = link.wait_for("/homeSw", 1.0, t, is_axis)
+    ad2.release(switch)
+    rep2 = link.wait_for(reply, 1.0, t, is_axis)
     time.sleep(0.1)
-    s2 = link.request("/getHomeSw", axis, reply="/homeSw", predicate=is_axis).args
-    link.send("/enableHomeSwReport", axis, 0)
+    s2 = link.request(getter, axis, reply=reply, predicate=is_axis).args
+    link.send(enable, axis, 0)
     states = {"get_released": int(s0[1]), "report_pressed": int(rep1.args[1]) if rep1 else None,
               "get_pressed": int(s1[1]), "report_released": int(rep2.args[1]) if rep2 else None,
-              "get_released_again": int(s2[1]), "dio15_released": dio_released, "dio15_pressed": dio_pressed}
+              "get_released_again": int(s2[1]), f"dio{dio}_released": dio_released, f"dio{dio}_pressed": dio_pressed}
     ok = (states["get_released"] == 0 and states["report_pressed"] == 1 and states["get_pressed"] == 1
           and states["report_released"] == 0 and states["get_released_again"] == 0
           and dio_released == 1 and dio_pressed == 0)
     return {"ok": ok, "summary": " ".join(f"{k}={v}" for k, v in states.items()), "states": states}
+
+
+def _selftest_home_sw(cfg, ad2, diag, link, out, boot) -> dict:
+    return _selftest_switch(cfg, ad2, link, "home")
+
+
+def _selftest_limit_sw(cfg, ad2, diag, link, out, boot) -> dict:
+    return _selftest_switch(cfg, ad2, link, "limit")
 
 
 def _selftest_excitation(cfg, ad2, diag, link, out, boot) -> dict:
@@ -381,7 +464,7 @@ def _selftest_sync(cfg, ad2, diag, link, out, boot) -> dict:
     if not ref:
         return {"ok": False, "summary": "ad2.scope.p0_ref is 0"}
     b = cfg.section("brake")
-    p0 = cfg.probe_dio[0]
+    p0 = cfg.probe(0)
     runs = []
     for i in range(5):
         cap = ad2.record(0.3, digital_rate=float(b["digital_rate"]), sensible_mask=mask_of([p0]),
@@ -402,23 +485,27 @@ def _selftest_sync(cfg, ad2, diag, link, out, boot) -> dict:
 
 
 def timing_series(cfg: Config, seg: analyze.Segments) -> dict[str, np.ndarray]:
-    """Durations in microseconds from the probes."""
-    d = cfg.probe_dio
-    e = [analyze.bit_edges(seg, d[ch]) for ch in range(7)]
-    widths = [analyze.pulse_widths(x)[1] * 1e6 for x in e]
-    return {
-        "loop": analyze.intervals(e[0].all) * 1e6,
-        "oscReceive": widths[1],
-        "updateServo": widths[2],
-        "checkStatus": widths[3],
-        "getMyId": widths[4],
-        "udpSend": widths[5],
-        "servoInterval": analyze.intervals(e[2].rise) * 1e6,
-        "slotInterval": analyze.intervals(e[3].rise) * 1e6,
-        "pollInterval": analyze.intervals(e[4].rise) * 1e6,
-        "servoDelay": servo_delays(e[3].rise, e[2].rise) * 1e6,
-        "reportInterval": analyze.intervals(report_bursts(e[2], e[4].rise, e[5].rise)[0]) * 1e6,
+    """Durations in microseconds from the probes. Metrics of probe channels the board has no
+    pin for (STEP400: P3-P6) are left out."""
+    e = [analyze.bit_edges(seg, cfg.probe(ch)) if cfg.probe(ch) is not None else None for ch in range(7)]
+    widths = [analyze.pulse_widths(x)[1] * 1e6 if x is not None else None for x in e]
+    series = {
+        "loop": lambda: analyze.intervals(e[0].all) * 1e6,
+        "oscReceive": lambda: widths[1],
+        "updateServo": lambda: widths[2],
+        "checkStatus": lambda: widths[3],
+        "getMyId": lambda: widths[4],
+        "udpSend": lambda: widths[5],
+        "servoInterval": lambda: analyze.intervals(e[2].rise) * 1e6,
+        "slotInterval": lambda: analyze.intervals(e[3].rise) * 1e6,
+        "pollInterval": lambda: analyze.intervals(e[4].rise) * 1e6,
+        "servoDelay": lambda: servo_delays(e[3].rise, e[2].rise) * 1e6,
+        "reportInterval": lambda: analyze.intervals(report_bursts(e[2], e[4].rise, e[5].rise)[0]) * 1e6,
     }
+    needs = {"loop": (0,), "oscReceive": (1,), "updateServo": (2,), "checkStatus": (3,), "getMyId": (4,),
+             "udpSend": (5,), "servoInterval": (2,), "slotInterval": (3,), "pollInterval": (4,),
+             "servoDelay": (2, 3), "reportInterval": (2, 4, 5)}
+    return {k: f() for k, f in series.items() if all(e[ch] is not None for ch in needs[k])}
 
 
 def report_bursts(p2: analyze.Edges, p4_rise: np.ndarray, p5_rise: np.ndarray,
@@ -497,11 +584,11 @@ PERF_OF_SERIES = {"loop": "loop", "oscReceive": "oscReceive", "updateServo": "up
 SERVO_SETTLE_S = 1.0
 
 
-def servo_settle(link: OscLink, axis: int, pos0: int) -> dict:
+def servo_settle(link: OscLink, axis: int, pos0: int, num_motors: int = 8) -> dict:
     """Record only (no pass / fail): sets the target of the test axis back to pos0 (the
     other motors stay at 0, as during the load), waits SERVO_SETTLE_S and reads the
     position. Checks that the servo still follows."""
-    targets = [0] * NUM_MOTORS
+    targets = [0] * num_motors
     targets[axis - 1] = pos0
     link.send("/setTargetPositionList", *targets)
     time.sleep(SERVO_SETTLE_S)
@@ -583,7 +670,7 @@ def cmd_timing(cfg: Config, args) -> int:
             amp, sine_t = float(t["sine_amplitude"]), float(t["sine_period"])
             start = next_t = time.monotonic()
             while not stop.is_set():
-                targets = [0] * NUM_MOTORS
+                targets = [0] * cfg.num_motors
                 targets[axis - 1] = pos0 + int(round(amp * math.sin(2 * math.pi * (next_t - start) / sine_t)))
                 link.send("/setTargetPositionList", *targets)
                 next_t += period
@@ -607,7 +694,7 @@ def cmd_timing(cfg: Config, args) -> int:
             th.start()
         time.sleep(0.5)
         perf_before, text_before = diag.perf()  # resets the statistics
-        rec = ad2.start_recording(duration, digital_rate=rate, sensible_mask=mask_of(cfg.probe_dio))
+        rec = ad2.start_recording(duration, digital_rate=rate, sensible_mask=mask_of(cfg.probe_dios))
         cap = rec.wait()
         perf_after, text_after = diag.perf()
         stop.set()
@@ -616,7 +703,7 @@ def cmd_timing(cfg: Config, args) -> int:
         link.send("/setPositionReportInterval", 255, 0)
         link.send("/setPositionListReportInterval", 0)
         time.sleep(0.2)  # replies of the last bursts
-        summary["servo_settle"] = servo_settle(link, axis, pos0)
+        summary["servo_settle"] = servo_settle(link, axis, pos0, cfg.num_motors)
         link.send("/enableServoMode", 255, 0)
         link.send("/softHiZ", axis)
         time.sleep(0.2)
@@ -637,7 +724,10 @@ def cmd_timing(cfg: Config, args) -> int:
     summary["p1_vs_sent"] = {"sent": len(tx), "p1_pulses": int(p1.size)}
     summary["stats_us"] = {k: analyze.stats(v) for k, v in series.items()}
     summary["cpu"] = cpu_usage(series["loop"])
-    summary["report_interval"] = report_interval_check(series["reportInterval"], summary["load"])
+    # Without P4 / P5 (STEP400) the report intervals come from the host receive times only.
+    summary["report_interval"] = (report_interval_check(series["reportInterval"], summary["load"])
+                                  if "reportInterval" in series else
+                                  {"expected_ms": None, "intervals": 0, "off": None, "note": "no P4 / P5 on this board"})
     # Slots run late by a whole period or more (5 ms slot firmware only; None before).
     summary["slot_late"] = perf_after.get(SLOT_LATE_COUNTER)
     summary["report_clock_realign"] = perf_after.get(REPORT_CLOCK_COUNTER)
@@ -699,7 +789,8 @@ def cmd_compare(cfg: Config, args) -> int:
     cpu = [cpu_usage(s["loop"])["busy_fraction"] for s in series]
     if None not in cpu:
         rows.append(["cpu", "busy [%]", cpu[0] * 100, cpu[1] * 100, (cpu[1] - cpu[0]) * 100, None])
-    off = [report_interval_check(s["reportInterval"], sm.get("load"))["off"] for s, sm in zip(series, sums)]
+    off = [report_interval_check(s["reportInterval"], sm.get("load"))["off"] if "reportInterval" in s else None
+           for s, sm in zip(series, sums)]
     if None not in off:
         rows.append(["reportInterval", f"off >= {REPORT_TOLERANCE_MS:.0f} ms [n]", off[0], off[1], off[1] - off[0], None])
     out = dirs[1] / f"compare_{dirs[0].name}"
@@ -740,7 +831,7 @@ def _run_steps(steps, values: dict, link: OscLink, ad2: AD2 | None, log: list | 
             time.sleep(st.seconds)
         elif st.kind in ("press", "release"):
             t = time.monotonic_ns()
-            (ad2.press if st.kind == "press" else ad2.release)()
+            (ad2.press if st.kind == "press" else ad2.release)(st.switch)
             if log is not None:
                 log.append((st, t, None))
         else:
@@ -771,7 +862,7 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
     out1a = int(cfg.ad2["scope"]["out1a"])
     ref = int(cfg.ad2["scope"].get("p0_ref", 0)) if scenario.p0_ref else 0
     # P0 is recorded only as the time reference of the Scope.
-    mask = mask_of(brake_dios + (probe if ref else probe[1:]) + [15])
+    mask = mask_of(brake_dios + (probe if ref else probe[1:]) + list(cfg.switch_dios.values()))
     rec = ad2.start_recording(None, digital_rate=float(b["digital_rate"]), sensible_mask=mask,
                               analog_channels=(out1a, ref) if ref else (out1a,),
                               analog_rate=float(scenario.analog_rate or b["analog_rate"]))
@@ -856,7 +947,7 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     label_host_ns: dict[str, int] = {}
     commands = []
     timing_notes = []
-    dio15 = analyze.bit_edges(seg, 15)
+    switch_edges = {name: analyze.bit_edges(seg, d) for name, d in cfg.switch_dios.items()}
     t_prev = 0.0
     for st, t_ns, entry in log:
         if entry is not None:
@@ -873,9 +964,10 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
                 t = float(fit.to_ad2(host_s(cap, t_ns)))
                 timing_notes.append(f"{st.label or st.address}: no {st.edge} edge, host time used")
         else:
-            # press / release: the DIO15 edge nearest to the host time.
+            # press / release: the edge of the switch DIO (15 home, 14 limit) nearest to the host time.
             t = float(fit.to_ad2(host_s(cap, t_ns)))
-            edges = dio15.fall if st.kind == "press" else dio15.rise
+            sw = switch_edges[st.switch]
+            edges = sw.fall if st.kind == "press" else sw.rise
             if edges.size:
                 t = float(edges[np.argmin(np.abs(edges - t))])
         t_prev = t
@@ -936,8 +1028,8 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
     res.update(outcome=outcome, as_expected=as_expected, failed=failed, checks=[c.to_dict() for c in checks])
 
     # Characterization: command -> brake output and -> brakeStatus write (P6) delays,
-    # and every engaged + excited overlap.
-    p6 = analyze.bit_edges(seg, probe[6]).rise
+    # and every engaged + excited overlap. Without P6 (STEP400) first_p6_ms is None.
+    p6 = analyze.bit_edges(seg, probe[6]).rise if cfg.probe(6) is not None else np.zeros(0)
     delays = []
     for t, name, st in commands:
         if st.kind not in ("osc", "serial"):
@@ -949,15 +1041,18 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
                        "brake_change_ms": (nxt - t) * 1e3 if nxt is not None and nxt - t < 1.0 else None,
                        "excited_change_ms": (ex_nxt - t) * 1e3 if ex_nxt is not None and ex_nxt - t < 2.0 else None,
                        "first_p6_ms": (p6_after[0] - t) * 1e3 if p6_after.size else None})
+    if cfg.probe(6) is None:
+        for d in delays:
+            del d["first_p6_ms"]
     overlaps = analyze.intersect(released.intervals(False), excited.intervals(True))
     res["reply_loss"] = reply_loss(cfg, cap, tx, p1, req_idx, replies, "/getPosition")
     res["delays"] = delays
     res["overlaps_ms"] = [[round(a, 4), round((b - a) * 1e3, 2)] for a, b in overlaps]
 
-    p4 = analyze.bit_edges(seg, probe[4]).rise
+    pulses = {f"P{ch}": analyze.bit_edges(seg, cfg.probe(ch)).rise for ch in (4, 6) if cfg.probe(ch) is not None}
     plots.timing_diagram(out / f"{scenario.id}_timing.png", f"{scenario.id}: {scenario.title}",
                          [("brake released", released), ("excited", excited)],
-                         [(t, name) for t, name, _ in commands], {"P4": p4, "P6": p6}, (pos_t, pos))
+                         [(t, name) for t, name, _ in commands], pulses, (pos_t, pos))
     events = [[round(t, 6), "cmd", name] for t, name, _ in commands]
     events += [[round(t, 6), "brake", "released" if v else "engaged"] for t, v in zip(released.times, released.values)]
     events += [[round(t, 6), "excited", int(v)] for t, v in zip(excited.times, excited.values)]
@@ -1030,7 +1125,12 @@ def reply_loss(cfg: Config, cap: Capture, tx: list, p1: np.ndarray, idx: list[in
     with no P5 (UDP send) pulse between its P1 rise and the next P1 rise was not answered
     by the board (listed with its time). The rest were sent by the board and lost on the
     way (only their number is known: over Wi-Fi, replies cannot be tied to requests by
-    host time)."""
+    host time). Without P5 (STEP400) the board side is unknown: board_no_reply is None."""
+    missing = sum(r is None for r in replies)
+    if cfg.probe(5) is None:
+        return {"request": request, "requests": len(idx), "missing": missing, "board_no_reply": None,
+                "lost_in_transit": None, "board_no_reply_events": [], "positions_may_be_misaligned": missing > 0,
+                "note": "no P5 on this board"}
     p5_rise = analyze.bit_edges(cap.digital, cfg.probe_dio[5]).rise
     no_reply = []
     for i in idx:
@@ -1038,7 +1138,6 @@ def reply_loss(cfg: Config, cap: Capture, tx: list, p1: np.ndarray, idx: list[in
         a_to = float(p1[i + 1]) if i + 1 < len(p1) else cap.digital.duration
         if not np.any((p5_rise >= a_from) & (p5_rise < a_to)):
             no_reply.append({"t_s": a_from})
-    missing = sum(r is None for r in replies)
     return {"request": request, "requests": len(idx), "missing": missing,
             "board_no_reply": len(no_reply), "lost_in_transit": max(0, missing - len(no_reply)),
             "board_no_reply_events": no_reply,
@@ -1108,6 +1207,8 @@ def wait_rail(ad2: AD2, ch: int, below: float, hold: float = 1.0, timeout: float
 
 
 def cmd_powerup(cfg: Config, args) -> int:
+    if cfg.v33_dio is not None:
+        return _powerup_dio(cfg, args)
     out = new_result_dir("powerup")
     p4 = cfg.probe_dio[4]
     brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
@@ -1178,4 +1279,122 @@ def _analyze_powerup(run: int, cap: Capture, brake_dios: list[int], p4: int, v33
         from .restart import level_segments
         res["out1a_segments"] = [s for s in level_segments(cap.analog[out1a], cap.analog_rate, t0=t_rise)
                                  if s["to_ms"] >= 0 and s["from_ms"] <= (t_p4 - t_rise) * 1e3 + 300]
+    return res
+
+
+# --- power-up with the 3.3 V on a DIO (STEP400) ---------------------------------------
+
+# Across a power-up the USB enumerates: 10 kS/s (200 kS/s lost data at every
+# re-enumeration on the STEP800 bench).
+POWERUP_RATE = 1e4
+
+
+def wait_dio(ad2: AD2, dio: int, level: int, hold: float = 1.0, timeout: float = 600.0) -> bool:
+    """Waits until the DIO stays at `level` for `hold` seconds."""
+    deadline = time.monotonic() + timeout
+    since = None
+    while time.monotonic() < deadline:
+        if (ad2.read_dio() >> dio) & 1 == level:
+            since = since or time.monotonic()
+            if time.monotonic() - since >= hold:
+                return True
+        else:
+            since = None
+        time.sleep(0.05)
+    return False
+
+
+def ask(message: str, choices: dict[str, str]) -> str:
+    """One of the choices from the operator; "unknown" without a terminal."""
+    if not sys.stdin.isatty():
+        return "unknown"
+    while True:
+        a = input(message).strip().lower()
+        if a in choices:
+            return choices[a]
+
+
+def _powerup_dio(cfg: Config, args) -> int:
+    """Power-up with the 3.3 V on ad2.dio.v33 (STEP400): Digital In triggers on its rise and
+    starts the Scope (OUT1A, P0). Both USB and 12 V are switched (USB alone powers the 3.3 V)."""
+    out = new_result_dir("powerup")
+    v33 = cfg.v33_dio
+    brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
+    out1a = int(cfg.ad2["scope"]["out1a"])
+    ref = int(cfg.ad2["scope"].get("p0_ref", 0))
+    runs = []
+    with open_ad2(cfg) as ad2, open_link(cfg) as link:
+        prompt(f"Power-up: the recording starts at the 3.3 V rise (DIO {v33}). Press Enter when ready: ")
+        for i in range(args.repeat):
+            print(f"[{i + 1}/{args.repeat}] Switch OFF both the USB cable and the 12 V supply.", flush=True)
+            if not wait_dio(ad2, v33, 0):
+                runs.append({"run": i + 1, "error": f"DIO {v33} (3.3 V) did not stay low within 10 minutes"})
+                break
+            rec = ad2.start_recording(args.duration, digital_rate=POWERUP_RATE,
+                                      sensible_mask=mask_of(brake_dios + cfg.probe_dios + [v33]),
+                                      analog_channels=(out1a, ref) if ref else (out1a,), analog_rate=POWERUP_RATE,
+                                      digital_trigger=v33, check_v33=False)
+            t_armed = time.monotonic_ns()
+            print(f"[{i + 1}/{args.repeat}] Power is off, armed. Switch ON the USB cable and the 12 V supply, "
+                  "in your usual order (no time limit).", flush=True)
+            cap = rec.wait(timeout=600.0 + args.duration)
+            if rec._thread is not None and rec._thread.is_alive():
+                rec.stop()
+                runs.append({"run": i + 1, "error": "no 3.3 V rising edge within 10 minutes"})
+                continue
+            order = ask("Which did you switch on first? [u] USB, [p] 12 V, [b] both at once: ",
+                        {"u": "USB first", "p": "12 V first", "b": "both"})
+            cap.save(out / f"powerup_{i + 1}.npz")
+            r = analyze_powerup_dio(cfg, cap)
+            booted = [e for e in link.entries("rx", t_armed) if e.address == "/booted"]
+            r.update(run=i + 1, order=order, booted=[list(e.args) for e in booted],
+                     booted_host_after_arm_s=[(e.t_ns - t_armed) / 1e9 for e in booted])
+            runs.append(r)
+            print(f"[{i + 1}/{args.repeat}] recorded: brakes high {r.get('brake_high') or 'never'}", flush=True)
+        link.save_log(out / "osc_log.jsonl")
+    write_json(out / "summary.json", {"runs": runs, "rate": POWERUP_RATE,
+                                      "note": "times from the 3.3 V rise on the DIO (logic threshold, about "
+                                              "1.5 V), not the Scope crossing of the STEP800 power-up runs"})
+    rows = [[r["run"], r.get("order"), "PASS" if r.get("ok") else ("FAIL" if "ok" in r else "-"),
+             ",".join(f"M{m}" for m in r.get("brake_high", {})) or "none", r.get("first_p0_ms"),
+             r.get("hiz_ms"), r.get("error", "")] for r in runs]
+    print_table(["run", "order", "brakes low", "high", "first P0 [ms]", "OUT1A HiZ [ms]", "error"], rows)
+    print(f"results: {out}")
+    return 0 if runs and all(r.get("ok") for r in runs) else 1
+
+
+def analyze_powerup_dio(cfg: Config, cap: Capture, hiz_hold_ms: float = 100.0) -> dict:
+    """Times in ms from the 3.3 V rise (the first rise of ad2.dio.v33, or the start of a
+    capture that starts high: the trigger). PASS: no brake output is ever high after it
+    (brake disabled by default: low before and after setup()). RECORD: the first P0 edge
+    (hilProbeInit(), start of setup()), the first time OUT1A stays in [excitation]
+    hiz_median_v for hiz_hold_ms (the drivers set up, HiZ)."""
+    if not cap.ok:
+        return {"error": "; ".join(cap.problems())}
+    seg = cap.digital
+    v = analyze.bit_edges(seg, cfg.v33_dio)
+    t_rise = float(v.rise[0]) if v.rise.size else 0.0
+    res: dict = {"rise_in_capture_ms": t_rise * 1e3, "brake_high": {}}
+    for motor, d in enumerate(cfg.ad2["dio"]["brake"], start=1):
+        step = analyze.Step.from_edges(analyze.bit_edges(seg, int(d)))
+        high = analyze.intersect([(t_rise, seg.duration)], step.intervals(True))
+        if high:
+            res["brake_high"][motor] = [[round((a - t_rise) * 1e3, 2), round((b - a) * 1e3, 2)] for a, b in high]
+    res["ok"] = not res["brake_high"]
+    p0 = analyze.bit_edges(seg, cfg.probe(0)).all
+    p0 = p0[p0 >= t_rise]
+    res["first_p0_ms"] = round(float(p0[0] - t_rise) * 1e3, 2) if p0.size else None
+    ch = int(cfg.ad2["scope"]["out1a"])
+    if ch in cap.analog and cap.analog_rate:
+        try:
+            shift, res["scope_alignment"] = scope_offset(cfg, cap)
+        except ScopeGapError as ex:  # P0 runs only after setup(): few edges, or a gap
+            shift, res["scope_alignment"] = 0.0, {"method": "none", "error": str(ex)}
+        from .restart import level_segments
+        segs = level_segments(cap.analog[ch], cap.analog_rate, t0=t_rise - shift)
+        lo, hi = (float(x) for x in cfg.section("excitation")["hiz_median_v"])
+        hiz = [g for g in segs if lo <= g["median_v"] <= hi and g["to_ms"] - g["from_ms"] >= hiz_hold_ms
+               and g["to_ms"] >= 0]
+        res["hiz_ms"] = max(0.0, hiz[0]["from_ms"]) if hiz else None
+        res["out1a_segments"] = [g for g in segs if g["to_ms"] >= 0][:50]
     return res

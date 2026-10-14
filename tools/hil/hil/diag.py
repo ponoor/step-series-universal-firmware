@@ -30,7 +30,7 @@ class DiagError(Exception):
 def find_port(pattern: str = "/dev/cu.usbmodem*") -> str:
     ports = sorted(glob.glob(pattern))
     if not ports:
-        raise DiagError(f"no USB serial port matches {pattern}; is the STEP800 connected?")
+        raise DiagError(f"no USB serial port matches {pattern}; is the board connected?")
     if len(ports) > 1:
         raise DiagError(f"several ports match {pattern}: {', '.join(ports)}; set serial.port in bench.toml")
     return ports[0]

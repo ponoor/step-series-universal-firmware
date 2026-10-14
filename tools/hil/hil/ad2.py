@@ -1,14 +1,15 @@
 """Analog Discovery 2: open/close, synchronized Digital In + Scope recording, and the
-open-drain home switch output on DIO15.
+open-drain switch outputs (home switch DIO15, limit switch DIO14).
 
 The device is opened with dwfpy. Recording uses the low-level WaveForms API through
 dwfpy.bindings, because dwfpy has no wrapper for the compressed record
 (FDwfDigitalInStatusCompress / FDwfDigitalInStatusCompressed) or for a Scope and
 Digital In recording started together by FDwfDeviceTriggerPC.
 
-Output safety: the only pin this module drives is DIO15, and only low (open-drain).
-The waveform generators (W1/W2), the power supplies (V+/V-) and the pattern generator
-are never enabled.
+Output safety: the only pins this module drives are DIO14 and DIO15 (SWITCH_DIO), only
+those the AD2 object was given (the board model's switches), and only low (open-drain:
+output value 0, then output enable). The waveform generators (W1/W2), the power supplies
+(V+/V-) and the pattern generator are never enabled.
 """
 
 from __future__ import annotations
@@ -23,11 +24,16 @@ from pathlib import Path
 import numpy as np
 
 from . import analyze
-from .config import HOME_SW_DIO
+from .config import HOME_SW_DIO, SWITCH_DIO
 
 DWFPY_LIBRARY = "/Library/Frameworks/dwf.framework/dwf"
 APP_BUNDLE_LIBRARY = "/Applications/WaveForms.app/Contents/Frameworks/dwf.framework/dwf"
-HOME_SW_MASK = 1 << HOME_SW_DIO
+# Every pin the bench may ever drive.
+DRIVABLE_MASK = sum(1 << d for d in SWITCH_DIO.values())
+
+
+class V33Error(RuntimeError):
+    """The board's 3.3 V (ad2.dio.v33) is low at the start of a recording."""
 
 _dwfpy = None
 
@@ -235,11 +241,24 @@ class Recording:
 
 
 class AD2:
-    """Analog Discovery 2. Use as a context manager: the home switch output is always
-    released before the device is closed, also on exceptions."""
+    """Analog Discovery 2. Use as a context manager: the switch outputs are always
+    released before the device is closed, also on exceptions.
+
+    switches: the switch inputs this object may drive, {"home": 15} (default) or
+    {"home": 15, "limit": 14}; any other pin is refused. v33_dio: DIO on the board's 3.3 V,
+    checked high before each recording (None: not checked)."""
 
     def __init__(self, library: str = "", serial_number: str = "", range_vpp: float = 50.0,
-                 configuration: int | None = None):
+                 configuration: int | None = None, switches: dict[str, int] | None = None,
+                 v33_dio: int | None = None):
+        switches = dict(switches if switches is not None else {"home": HOME_SW_DIO})
+        for name, dio in switches.items():
+            if SWITCH_DIO.get(name) != dio:
+                raise ValueError(f"switch {name!r} on DIO {dio}: the bench drives only "
+                                 + ", ".join(f"{k} on DIO {v}" for k, v in SWITCH_DIO.items()))
+        self._switches = switches
+        self._driven = 0  # output enable mask of the pressed switches
+        self.v33_dio = v33_dio
         self._library = library
         self._serial = serial_number or None
         self._configuration = configuration
@@ -299,22 +318,43 @@ class AD2:
         """True if the power supplies (V+/V-) are on. The bench never turns them on."""
         return bool(_api().dwf_analog_io_enable_get(self.handle))
 
-    # --- home switch (DIO15, open-drain) ---
-    def press(self) -> None:
-        """Pulls the home switch input low: output value 0 first, then output enable."""
-        api = _api()
-        with self._lock:
-            api.dwf_digital_io_output_set(self.handle, 0)
-            api.dwf_digital_io_output_enable_set(self.handle, HOME_SW_MASK)
-            api.dwf_digital_io_configure(self.handle)
+    # --- switches (DIO15 home, DIO14 limit; open-drain) ---
+    @property
+    def switches(self) -> dict[str, int]:
+        return dict(self._switches)
 
-    def release(self) -> None:
-        """Output disabled (high impedance); the L6470 pulls the input up."""
+    def _switch_mask(self, switch: str) -> int:
+        if switch not in self._switches:
+            raise ValueError(f"switch {switch!r} is not wired on this bench ({', '.join(self._switches) or 'none'})")
+        return 1 << self._switches[switch]
+
+    def _set_outputs(self, enable: int) -> None:
+        """Output value 0 on every pin, outputs enabled only on `enable` (a subset of the
+        switch pins). The value is written before the enable, so no pin is ever high."""
+        if enable & ~DRIVABLE_MASK:
+            raise ValueError(f"refusing to drive DIO mask 0x{enable:04X}")
         api = _api()
+        api.dwf_digital_io_output_set(self.handle, 0)
+        api.dwf_digital_io_output_enable_set(self.handle, enable)
+        api.dwf_digital_io_output_set(self.handle, 0)
+        api.dwf_digital_io_configure(self.handle)
+        self._driven = enable
+
+    def press(self, switch: str = "home") -> None:
+        """Pulls the switch input low (open-drain). The other pressed switches stay pressed."""
+        bit = self._switch_mask(switch)
         with self._lock:
-            api.dwf_digital_io_output_enable_set(self.handle, 0)
-            api.dwf_digital_io_output_set(self.handle, 0)
-            api.dwf_digital_io_configure(self.handle)
+            self._set_outputs(self._driven | bit)
+
+    def release(self, switch: str | None = None) -> None:
+        """Output disabled (high impedance): the board pulls the input up. None: all switches."""
+        bit = self._switch_mask(switch) if switch is not None else ~0
+        with self._lock:
+            self._set_outputs(self._driven & ~bit & DRIVABLE_MASK)
+
+    def switch_dio(self, switch: str = "home") -> int:
+        self._switch_mask(switch)
+        return self._switches[switch]
 
     def read_dio(self) -> int:
         api = _api()
@@ -326,13 +366,23 @@ class AD2:
     def start_recording(self, duration: float | None, digital_rate: float | None = None,
                         sensible_mask: int = 0xFFFF, compress: bool = True,
                         analog_channels: tuple[int, ...] = (), analog_rate: float | None = None,
-                        analog_trigger: tuple[int, float] | None = None) -> Recording:
+                        analog_trigger: tuple[int, float] | None = None,
+                        digital_trigger: int | None = None, check_v33: bool = True) -> Recording:
         """Starts Digital In and/or Scope in record mode and returns the running recording.
 
         Trigger: by default both instruments wait for the PC trigger and are started
         together with FDwfDeviceTriggerPC. With analog_trigger = (channel, level), the
         Scope triggers on a rising edge of that channel and Digital In is triggered by
-        the Scope trigger. duration None records until Recording.stop()."""
+        the Scope trigger. With digital_trigger = DIO, Digital In triggers on a rising edge
+        of that DIO and the Scope is triggered by Digital In. duration None records until
+        Recording.stop().
+
+        With v33_dio set, the board's 3.3 V must be high first (V33Error otherwise: the
+        wiring); check_v33 False skips this (power-up recordings)."""
+        if analog_trigger and digital_trigger is not None:
+            raise ValueError("analog_trigger and digital_trigger cannot be used together")
+        if check_v33 and self.v33_dio is not None and not (self.read_dio() >> self.v33_dio) & 1:
+            raise V33Error(f"the board's 3.3 V (DIO {self.v33_dio}) is low: check the wiring and the power")
         api = _api()
         h = self.handle
         self._dig = self._ana = None
@@ -344,8 +394,12 @@ class AD2:
             api.dwf_digital_in_divider_set(h, div)
             api.dwf_digital_in_sample_format_set(h, 32)
             api.dwf_digital_in_sample_sensible_set(h, sensible_mask if compress else 0)
-            api.dwf_digital_in_trigger_source_set(
-                h, api.TRIGSRC_ANALOG_IN if analog_trigger else api.TRIGSRC_PC)
+            if digital_trigger is not None:
+                api.dwf_digital_in_trigger_source_set(h, api.TRIGSRC_DETECTOR_DIGITAL_IN)
+                api.dwf_digital_in_trigger_set(h, 0, 0, 1 << int(digital_trigger), 0)
+            else:
+                api.dwf_digital_in_trigger_source_set(
+                    h, api.TRIGSRC_ANALOG_IN if analog_trigger else api.TRIGSRC_PC)
             api.dwf_digital_in_trigger_position_set(h, 0)  # record until stopped
             api.dwf_digital_in_buffer_size_set(h, api.dwf_digital_in_buffer_size_info(h))
             api.dwf_digital_in_configure(h, 1, 0)
@@ -362,7 +416,9 @@ class AD2:
             api.dwf_analog_in_frequency_set(h, analog_rate)
             api.dwf_analog_in_record_length_set(h, 0.0)  # record until stopped
             api.dwf_analog_in_buffer_size_set(h, api.dwf_analog_in_buffer_size_info(h)[1])
-            if analog_trigger:
+            if digital_trigger is not None:
+                api.dwf_analog_in_trigger_source_set(h, api.TRIGSRC_DETECTOR_DIGITAL_IN)
+            elif analog_trigger:
                 ch, level = analog_trigger
                 api.dwf_analog_in_trigger_source_set(h, api.TRIGSRC_DETECTOR_ANALOG_IN)
                 api.dwf_analog_in_trigger_type_set(h, api.TRIGTYPE_EDGE)
@@ -375,17 +431,23 @@ class AD2:
             self._ana = {"rate": api.dwf_analog_in_frequency_get(h), "channels": tuple(analog_channels)}
         if self._dig is None and self._ana is None:
             raise ValueError("nothing to record")
+        if digital_trigger is not None and self._dig is None:
+            raise ValueError("digital_trigger needs Digital In")
 
         time.sleep(0.1)  # let the Scope offsets and relays settle
-        # Arm: Digital In first, so it is ready when the Scope (trigger source) starts.
+        # Arm the follower first, so it is ready when the trigger source starts: Digital In
+        # before the Scope, or with a digital trigger the Scope before Digital In.
+        if digital_trigger is not None and self._ana is not None:
+            api.dwf_analog_in_configure(h, 0, 1)
         if self._dig is not None:
             api.dwf_digital_in_configure(h, 0, 1)
-        if self._ana is not None:
+        if self._ana is not None and digital_trigger is None:
             api.dwf_analog_in_configure(h, 0, 1)
-        self._wait_armed(api, h, already_triggered_ok=analog_trigger is not None)
+        signal_trigger = analog_trigger is not None or digital_trigger is not None
+        self._wait_armed(api, h, already_triggered_ok=signal_trigger)
 
         rec = Recording(self, duration)
-        if analog_trigger is None:
+        if not signal_trigger:
             t0 = time.monotonic_ns()
             api.dwf_device_trigger_pc(h)
             t1 = time.monotonic_ns()

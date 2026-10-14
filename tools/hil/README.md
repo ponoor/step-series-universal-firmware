@@ -260,6 +260,7 @@ While a step runs the bench
 | `e2b` | e1 1-5, then `R` and `/setDestIp` from NIC B, the reports again, `--observe` s, e1 6 |
 | `c1`, `c2` | HIL_PROBE builds with the candidate fixes (`N`: reopen the UDP socket; `U`: 1 byte to 255.255.255.255:9). e1 1-5, then a new AD2 recording and the serial command while `/getVersion` is sent from NIC B 20 times every 2 ms, `--observe` s; e1 6 and the command again (back on NIC A the board keeps the MAC address of NIC B) |
 | `n1`, `n2` | The command of `c1` / `c2` three times while the client is reachable (e1 1, reports every 20 ms, 3 s apart), no swap |
+| `gap` | The ARP refresh of the product firmware (`src/arpRefresh.h`), NIC A only, no human. `R`, `G` (initial `destIp`, `canSendMsgBeforeDestIp`), 0: `/setDestIp`, reports `[arp] report_ms`; a: `/setDestIp` every 1.0 s x 30 (heartbeat); b: `/getVersion` every 2.0 s x 10; c: 3 s silence, `/getVersion` every 10 ms x 10; d: 3 s silence, one `/getVersion` (the part "another source first" is left out: the Mac has no other address that reaches the board). `p` is read at the end of each pattern |
 
 `summary.json` has, per phase (each step above starts one): the board's ARP requests
 (time from the phase start, the address asked for), its frames by destination MAC
@@ -268,7 +269,13 @@ address, replies, gratuitous ARP), what NIC B received, P1 / P5 counts and P5 wi
 P5 pulses paired with the captured frames of the board (within 5 ms after the clock
 offset, only within the AD2 recordings), and the OSC messages received per socket. `arp
 H1` merges the phases 3-5: H1 is observed when the board sent no ARP request for the
-client address and no frame to NIC B. All items are RECORD.
+client address and no frame to NIC B. All items are RECORD, except for `gap`:
+
+| Item | Judged |
+|---|---|
+| `arp gap 0`, `a` - `d` | the board's dummy broadcasts (UDP to 255.255.255.255:9) in the capture per pattern equal the count the firmware rule gives for the packets actually sent (from the capture, so a shifted interval is taken into account; nominal 0, 0, 10, 1, 1), and the `arpRefresh` counter of `p` equals them |
+| `arp gap-order` | every refresh: the packet to the board, the dummy, the board's ARP request for the client, the ARP reply, the board's reply, in this order, no other board frame between the dummy and the ARP request |
+| `arp gap-p5` (RECORD) | P5 width of the dummy and of the next send (with the ARP) |
 
 ## How it works
 

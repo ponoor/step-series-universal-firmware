@@ -44,7 +44,7 @@ from .osc import OscLink
 BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 ETH_ARP, ETH_IPV4 = 0x0806, 0x0800
 ARP_REQUEST, ARP_REPLY = 1, 2
-STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2", "n1", "n2")
+STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2", "n1", "n2", "gap")
 # USB serial commands of the candidate fixes (HIL_PROBE builds, src/diagnosis.cpp).
 FIX_COMMANDS = {"c1": "N", "c2": "U"}
 FIX_DONE = re.compile(r"HIL: (.+?) in (\d+) us")
@@ -281,6 +281,71 @@ def h1_verdict(after: dict, client_ip: str) -> dict:
             "h1": len(arp) == 0 and to_b == 0}
 
 
+ARP_REFRESH_GAP_S = 1.5  # src/arpRefresh.h
+DISCARD_PORT = 9
+
+
+def is_refresh_dummy(f: Frame, board_mac: str) -> bool:
+    """The board's dummy broadcast of the ARP refresh (1 byte to 255.255.255.255:9)."""
+    return f.src == board_mac and f.ip_dst == "255.255.255.255" and f.udp_dport == DISCARD_PORT
+
+
+def expected_refreshes(packets: list[tuple[float, str, str | None]], dest: str | None = None,
+                       dest_set: bool = False) -> list[float]:
+    """The firmware rule (src/arpRefresh.cpp) applied to the packets received by the board,
+    (time s, source IP, OSC address) in time order. /setDestIp sets destIp and
+    isDestIpSet after the rule is applied. Returns the times of the packets that refresh."""
+    out = []
+    rec_ip, rec_t = None, None
+    for t, src, osc in packets:
+        if src == dest:
+            gap = rec_ip != src or t - rec_t >= ARP_REFRESH_GAP_S
+            rec_ip, rec_t = src, t
+            if gap and dest_set:
+                out.append(t)
+        if osc == "/setDestIp":
+            dest, dest_set = src, True
+    return out
+
+
+def refresh_sequences(frames: list[Frame], board_mac: str, board_ip: str, client_ip: str) -> list[dict]:
+    """For each dummy broadcast of the board: the packet to the board just before it (the
+    trigger) and the times (ms from the trigger) of the dummy, the board's next ARP
+    request for client_ip, the ARP reply to the board and the board's next unicast frame
+    to client_ip (the reply). order_ok: trigger < dummy < ARP request < ARP reply < reply,
+    with no other board frame between the dummy and the ARP request."""
+    out = []
+    for i, f in enumerate(frames):
+        if not is_refresh_dummy(f, board_mac):
+            continue
+        trig = next((g for g in reversed(frames[:i]) if g.dst == board_mac and g.ip_dst == board_ip
+                     and g.udp_dport is not None), None)
+        rest = frames[i + 1:]
+        req = next((k for k, g in enumerate(rest) if g.src == board_mac and g.arp_op == ARP_REQUEST
+                    and g.arp_tpa == client_ip), None)
+        rep = next((g for g in rest if g.arp_op == ARP_REPLY and g.arp_tha == board_mac
+                    and g.arp_spa == client_ip), None)
+        uni = next((g for g in rest if g.src == board_mac and g.ip_dst == client_ip), None)
+        t0 = trig.t if trig else f.t
+        ms = lambda g: None if g is None else round((g.t - t0) * 1e3, 3)  # noqa: E731
+        between = [] if req is None else [g for g in rest[:req] if g.src == board_mac]
+        times = [t0 if trig else None, f.t, None if req is None else rest[req].t,
+                 None if rep is None else rep.t, None if uni is None else uni.t]
+        ok = None not in times and all(a < b for a, b in zip(times, times[1:])) and not between
+        out.append({"t": f.t, "trigger": trig.osc if trig else None, "dummy_ms": ms(f),
+                    "arp_request_ms": ms(rest[req]) if req is not None else None, "arp_reply_ms": ms(rep),
+                    "reply_ms": ms(uni), "reply": uni.osc if uni else None, "order_ok": ok})
+    return out
+
+
+def nearest_pulse(rise: np.ndarray, width: np.ndarray, t: float, tol: float = 0.003) -> tuple[int | None, float | None]:
+    """Index and width of the P5 pulse nearest to t (within tol)."""
+    if rise.size == 0:
+        return None, None
+    k = int(np.argmin(np.abs(rise - t)))
+    return (k, float(width[k])) if abs(rise[k] - t) <= tol else (None, None)
+
+
 def merge_summaries(parts: list[dict]) -> dict:
     out: dict = {"board_ipv4_by_dst": {}, "board_osc_by_dst": {}, "board_arp_requests": []}
     for p in parts:
@@ -508,8 +573,11 @@ class ArpRun:
         return lk
 
     def read_perf(self, key: str) -> dict:
-        text = self.b.ser.command("p", until=r"udpSendDropped\s+\d+")
-        self.perf[key] = parse_perf(text)
+        t = self.b.ser.write("p")
+        if self.b.ser.wait_for(r"udpSendDropped\s+\d+", t, 5.0) is None:
+            raise DiagError("no 'p' output")
+        self.b.ser.wait_for(r"arpRefreshFailed\s+\d+", t, 0.3)  # firmware with the ARP refresh
+        self.perf[key] = parse_perf(self.b.ser.text(t))
         return self.perf[key]
 
     def wait_link(self, active: str) -> bool:
@@ -646,6 +714,53 @@ class ArpRun:
         time.sleep(self.args.observe)
         self.back_to_a()
 
+    def run_gap(self) -> None:
+        """Task 3 of the ARP refresh: packets from the client with and without gaps of
+        1.5 s, NIC A only. 'p' is read (and reset) at the end of each pattern."""
+        if not self.wait_link("A"):
+            raise DiagError("NIC A must be the only active adapter")
+        self.wait_address("A")
+        lk = self.link("A")
+        self.b.link = lk
+        self.event("restart ('R')", phase="restart")
+        self.rec.stop()
+        self.b.reboot(connect=False)
+        self.rec.start()
+        time.sleep(1.0)
+        self.read_perf("restart")
+        net = self.b.config_json()["network"]
+        self.initial = {"destIp": ".".join(str(int(x)) for x in net["destIp"]),
+                        "canSendMsgBeforeDestIp": bool(net.get("canSendMsgBeforeDestIp", False))}
+        self.event("0 /setDestIp (first)", phase="gap 0")
+        self.b.connect()
+        lk.send("/setPositionListReportInterval", self.report_ms)
+        self.read_perf("gap 0")
+
+        def every(address: str, period: float, n: int, first_after: float) -> None:
+            t = time.monotonic() + first_after
+            for _ in range(n):
+                time.sleep(max(0.0, t - time.monotonic()))
+                lk.send(address)
+                t += period
+
+        self.event("a /setDestIp every 1.0 s for 30 s", phase="gap a")
+        every("/setDestIp", 1.0, 30, 0.5)
+        time.sleep(0.5)
+        self.read_perf("gap a")
+        self.event("b /getVersion every 2.0 s for 20 s", phase="gap b")
+        every("/getVersion", 2.0, 10, 1.5)
+        time.sleep(0.5)
+        self.read_perf("gap b")
+        self.event("c 3 s silence, then /getVersion every 10 ms x 10", phase="gap c")
+        every("/getVersion", 0.01, 10, 3.0)
+        time.sleep(0.5)
+        self.read_perf("gap c")
+        self.event("d 3 s silence, then /getVersion (another source: none on this Mac)", phase="gap d")
+        every("/getVersion", 0.0, 1, 3.0)
+        time.sleep(0.5)
+        self.read_perf("gap d")
+        lk.send("/setPositionListReportInterval", 0)
+
     def fix_command(self, cmd: str, step: str, lk: OscLink | None, burst: bool) -> dict:
         """Sends the serial command; with burst, /getVersion 20 times every 2 ms around it."""
         res: dict = {}
@@ -774,6 +889,60 @@ def phase_line(name: str, ph: dict) -> str:
             f"matched {m['matched']} of {m['a']} frames seen in the AD2 time); app {ph['app_rx']}")
 
 
+GAP_NOMINAL = {"gap 0": 0, "gap a": 0, "gap b": 10, "gap c": 1, "gap d": 1}
+
+
+def gap_items(res: dict, frames: list[Frame], rec: SegmentRecorder) -> list[Item]:
+    """Judges the gap step: per pattern, the dummy broadcasts in the capture against the
+    rule applied to the packets actually sent (and the nominal count), and 'p'."""
+    board_mac, board_ip, client = res["board_mac"], res["board_ip"], res["client_ip"]
+    packets = [(f.t, f.ip_src, f.osc) for f in frames
+               if f.dst == board_mac and f.ip_dst == board_ip and f.udp_dport is not None]
+    init = res.get("gap_initial") or {}
+    expected = np.array(expected_refreshes(packets, init.get("destIp"), init.get("canSendMsgBeforeDestIp", False)))
+    dummies = np.array([f.t for f in frames if is_refresh_dummy(f, board_mac)])
+    seqs = refresh_sequences(frames, board_mac, board_ip, client)
+    _, p5r, p5w = rec.arrays()
+    tx = board_send_times(frames, board_mac)
+    off = (match_times(tx[covered(tx, rec.coverage)], p5r).get("offset_ms") or 0.0) / 1e3
+    for sq in seqs:
+        k, w = nearest_pulse(p5r, p5w, sq["t"] + off)
+        sq["dummy_p5_ms"] = None if w is None else round(w * 1e3, 3)
+        sq["next_p5_ms"] = round(float(p5w[k + 1]) * 1e3, 3) if k is not None and k + 1 < p5w.size else None
+    res["refresh_sequences"] = seqs
+    items = []
+    ev = {e["phase"]: e["t"] for e in res["events"] if e.get("phase")}
+    names = [n for n in GAP_NOMINAL if n in ev]
+    bounds = [ev[n] for n in names] + [np.inf]
+    for i, n in enumerate(names):
+        t0, t1 = bounds[i], bounds[i + 1]
+        n_cap = int(np.sum((dummies >= t0) & (dummies < t1)))
+        n_exp = int(np.sum((expected >= t0) & (expected < t1)))
+        n_p = res["perf"].get(n, {}).get("arpRefresh")
+        sent = [p for p in packets if t0 <= p[0] < t1]
+        gaps = np.diff([p[0] for p in sent]) if len(sent) > 1 else np.zeros(0)
+        ok = n_cap == n_exp and n_p == n_cap
+        items.append(Item(f"arp {n}", "PASS" if ok else "FAIL", (
+            f"dummies in the capture {n_cap}, expected from the packets sent {n_exp} (nominal {GAP_NOMINAL[n]}), "
+            f"'p' arpRefresh {n_p}; {len(sent)} packets to the board, intervals "
+            f"{'-' if gaps.size == 0 else f'{gaps.min():.3f}-{gaps.max():.3f} s'}"),
+            {"capture": n_cap, "expected": n_exp, "nominal": GAP_NOMINAL[n], "p": n_p}))
+    bad = [sq for sq in seqs if not sq["order_ok"]]
+    items.append(Item("arp gap-order", "PASS" if seqs and not bad else "FAIL", (
+        f"{len(seqs)} refreshes, order trigger < dummy < ARP request < ARP reply < reply in "
+        f"{len(seqs) - len(bad)}; ms from the trigger: dummy "
+        f"{rng([sq['dummy_ms'] for sq in seqs])}, ARP request {rng([sq['arp_request_ms'] for sq in seqs])}, reply "
+        f"{rng([sq['reply_ms'] for sq in seqs])}" + (f"; out of order: {bad[:3]}" if bad else ""))))
+    items.append(recorded("arp gap-p5", f"P5 of the dummy {rng([sq['dummy_p5_ms'] for sq in seqs])} ms, of the "
+                          f"next send {rng([sq['next_p5_ms'] for sq in seqs])} ms"))
+    return items
+
+
+def rng(values) -> str:
+    v = [x for x in values if x is not None]
+    return "-" if not v else f"{min(v):.2f}-{max(v):.2f}"
+
+
 def cmd_arp(cfg: Config, args) -> int:
     from . import commands
 
@@ -804,7 +973,8 @@ def cmd_arp(cfg: Config, args) -> int:
             try:
                 {"check": run.run_check, "e1": run.run_e1, "e2a": run.run_e2a, "e2b": run.run_e2b,
                  "c1": lambda: run.run_fix("c1"), "c2": lambda: run.run_fix("c2"),
-                 "n1": lambda: run.run_normal("c1"), "n2": lambda: run.run_normal("c2")}[args.step]()
+                 "n1": lambda: run.run_normal("c1"), "n2": lambda: run.run_normal("c2"),
+                 "gap": run.run_gap}[args.step]()
             except Exception as ex:  # keep the logs and summarize what was recorded
                 items.append(Item(f"arp-{args.step}-error", "FAIL", f"{type(ex).__name__}: {ex}"))
             t_end = time.monotonic()
@@ -827,9 +997,11 @@ def cmd_arp(cfg: Config, args) -> int:
         frames.sort(key=lambda f: f.t)
         res.update(summarize(run, frames, names, res["board_mac"], rec, t_end))
         res["events"] = run.events
-        res["perf"] = {k: {kk: v.get(kk) for kk in ("udpSendFailed", "udpSendDropped", "slotLate")}
+        res["perf"] = {k: {kk: v.get(kk) for kk in ("udpSendFailed", "udpSendDropped", "slotLate", "arpRefresh",
+                                                    "arpRefreshFailed")}
                        for k, v in run.perf.items()}
         res["serial_fix"] = run.serial_out
+        res["gap_initial"] = getattr(run, "initial", None)
         res["ad2_problems"] = rec.problems + ([f"recorder: {rec.error!r}"] if rec.error else [])
         res["frames_captured"] = {c.iface: sum(1 for f in frames if f.iface == c.iface) for c in caps}
     for name, ph in res["phases"].items():
@@ -843,6 +1015,8 @@ def cmd_arp(cfg: Config, args) -> int:
                               f"{v['board_arp_requests_for_client']}, board frames to NIC B {v['frames_to_nic_b']}, "
                               f"to NIC A (seen) {v['frames_to_nic_a_seen']}; H1 {'observed' if v['h1'] else 'not observed'}; "
                               f"udpSendFailed {res['perf']}"))
+    if args.step == "gap":
+        items += gap_items(res, frames, rec)
     items.append(recorded("arp AD2", "; ".join(
         f"{g['name']} {g['duration_s']:.0f} s: P1 {g['p1_vs_osc_tx']['b']} for {g['p1_vs_osc_tx']['a']} OSC sent, "
         f"matched {g['p1_vs_osc_tx']['matched']}" for g in res["ad2_segments"]) + (

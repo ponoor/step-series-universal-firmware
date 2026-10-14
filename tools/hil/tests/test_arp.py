@@ -164,3 +164,78 @@ def test_to_monotonic():
     f = [arp.Frame(990.0, BOARD, NIC_A, 0x0800), arp.Frame(995.005, BOARD, NIC_A, 0x0800)]
     t = [x.t for x in arp.to_monotonic(f, clock)]
     assert abs(t[0] - 0.0) < 1e-9 and abs(t[1] - 5.0) < 1e-6
+
+
+# --- ARP refresh (gap step) ---
+
+C = "10.0.0.10"
+
+
+def test_expected_refreshes_follows_the_firmware_rule():
+    # initial destIp 10.0.0.10 (firmware default) = the client: the first /setDestIp
+    # (isDestIpSet false) is recorded, no refresh
+    pk = [(0.0, C, "/setDestIp"), (0.1, C, "/setPositionListReportInterval")]
+    pk += [(1.0 + i, C, "/setDestIp") for i in range(30)]  # heartbeat 1.0 s
+    assert arp.expected_refreshes(pk, dest=C) == []
+    pk2 = pk + [(32.0 + 2 * i, C, "/getVersion") for i in range(10)]  # every 2 s
+    assert len(arp.expected_refreshes(pk2, dest=C)) == 10
+    # initial destIp another address: the first /setDestIp is not recorded, the next
+    # packet refreshes once
+    assert arp.expected_refreshes(pk, dest="10.0.0.20") == [0.1]
+    # boundary: 1.5 s counts, 1.499 s does not
+    assert arp.expected_refreshes([(0, C, "/setDestIp"), (1.499, C, "/x"), (2.998, C, "/x")], dest=C) == []
+    assert arp.expected_refreshes([(0, C, "/setDestIp"), (1.5, C, "/x")], dest=C) == [1.5]
+    # another source: no refresh, record kept; a burst refreshes once
+    pk3 = [(0, C, "/setDestIp"), (3.0, "10.0.0.11", "/getVersion"), (3.1, C, "/x"), (3.11, C, "/x")]
+    assert arp.expected_refreshes(pk3, dest=C) == [3.1]
+    # set by the config (canSendMsgBeforeDestIp): the first packet refreshes
+    assert arp.expected_refreshes([(0, C, "/getVersion")], dest=C, dest_set=True) == [0]
+    # /setDestIp from another address: the next packet from it refreshes once
+    pk4 = [(0, C, "/setDestIp"), (0.5, "10.0.0.11", "/setDestIp"), (0.6, "10.0.0.11", "/x"), (0.7, "10.0.0.11", "/x")]
+    assert arp.expected_refreshes(pk4, dest=C) == [0.6]
+
+
+def udp(t, src, dst, ip_src, ip_dst, dport, osc_addr=None):
+    return arp.Frame(t, src, dst, 0x0800, "en9", ip_src=ip_src, ip_dst=ip_dst, udp_sport=50000, udp_dport=dport,
+                     osc=osc_addr)
+
+
+def arpf(t, op, sha, spa, tha, tpa, dst="ff:ff:ff:ff:ff:ff"):
+    return arp.Frame(t, sha, dst, 0x0806, "en9", arp_op=op, arp_sha=sha, arp_spa=spa, arp_tha=tha, arp_tpa=tpa)
+
+
+def refresh_frames(swap_reply_and_arp=False):
+    fr = [
+        udp(1.0000, NIC_A, BOARD, C, "10.0.0.100", 50000, "/getVersion"),
+        udp(1.0006, BOARD, "ff:ff:ff:ff:ff:ff", "10.0.0.100", "255.255.255.255", 9),
+        arpf(1.0010, 1, BOARD, "10.0.0.100", "00:00:00:00:00:00", C),
+        arpf(1.0011, 2, NIC_A, C, BOARD, "10.0.0.100", dst=BOARD),
+        udp(1.0020, BOARD, NIC_A, "10.0.0.100", C, 50100, "/version"),
+        udp(1.0500, BOARD, NIC_A, "10.0.0.100", C, 50100, "/positionList"),
+    ]
+    if swap_reply_and_arp:
+        fr[2], fr[4] = fr[4], fr[2]
+        fr[2].t, fr[4].t = 1.0010, 1.0020
+    return fr
+
+
+def test_refresh_sequences_order():
+    sq = arp.refresh_sequences(refresh_frames(), BOARD, "10.0.0.100", C)
+    assert len(sq) == 1
+    s0 = sq[0]
+    assert s0["trigger"] == "/getVersion" and s0["reply"] == "/version" and s0["order_ok"] is True
+    assert s0["dummy_ms"] == 0.6 and s0["arp_request_ms"] == 1.0 and s0["arp_reply_ms"] == 1.1 and s0["reply_ms"] == 2.0
+    assert arp.is_refresh_dummy(refresh_frames()[1], BOARD) and not arp.is_refresh_dummy(refresh_frames()[4], BOARD)
+
+
+def test_refresh_sequences_reply_before_arp_is_out_of_order():
+    sq = arp.refresh_sequences(refresh_frames(swap_reply_and_arp=True), BOARD, "10.0.0.100", C)
+    assert sq[0]["order_ok"] is False
+
+
+def test_nearest_pulse():
+    rise = np.array([1.0, 1.0006, 1.002])
+    width = np.array([0.0003, 0.0002, 0.0012])
+    assert arp.nearest_pulse(rise, width, 1.0007) == (1, 0.0002)
+    assert arp.nearest_pulse(rise, width, 1.5) == (None, None)
+    assert arp.nearest_pulse(np.zeros(0), np.zeros(0), 1.0) == (None, None)

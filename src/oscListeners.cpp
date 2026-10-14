@@ -39,6 +39,7 @@ bool OSCMsgReceive()
     {
         PROBE_HIGH(1);
         sendBackoffOnReceive(Udp.remoteIP()); // before any reply
+        arpRefreshOnReceive(Udp.remoteIP());  // before any reply (arpRefresh.h)
         if (size > OSC_RX_BUFFER_SIZE)
         {
             // Too large: the rest of the packet is discarded by the next parsePacket().

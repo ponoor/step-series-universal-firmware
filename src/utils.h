@@ -87,6 +87,13 @@ constexpr uint16_t OSC_TX_BUFFER_SIZE = 640;
 void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port);
 // A packet was received from ip: resumes the sends to it if they were paused.
 void sendBackoffOnReceive(const IPAddress &ip);
+// Sends one byte to 255.255.255.255:9 (discard), P5 high: the next send to destIp goes
+// to another destination IP than the send before, so the W5500 resolves its MAC address
+// again (arpRefresh.h). Returns the result of endPacket().
+bool sendArpRefreshDummy();
+// A packet was received from ip (before any reply): after a gap of 1.5 s or more in the
+// packets from destIp, sends the dummy broadcast (arpRefresh.h).
+void arpRefreshOnReceive(const IPAddress &ip);
 
 template <class T>
 void sendOneDatum(const char *address, T data) {

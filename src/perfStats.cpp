@@ -33,4 +33,6 @@ void perfStatsPrint()
     dbgPrint("reportClockRealign %lu\n", (unsigned long)s.reportClockRealignCount);
     dbgPrint("udpSendFailed  %lu\n", (unsigned long)s.udpSendFailedCount);
     dbgPrint("udpSendDropped %lu\n", (unsigned long)s.udpSendDroppedCount);
+    dbgPrint("arpRefresh     %lu\n", (unsigned long)s.arpRefreshCount);
+    dbgPrint("arpRefreshFailed %lu\n", (unsigned long)s.arpRefreshFailedCount);
 }

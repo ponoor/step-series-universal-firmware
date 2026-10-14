@@ -34,6 +34,8 @@ struct PerfStats
     uint32_t reportClockRealignCount; // position report clock more than 20 ms off millis() (realigned)
     uint32_t udpSendFailedCount;  // UDP sends that failed (destination did not answer ARP)
     uint32_t udpSendDroppedCount; // messages dropped while the sends to the destination were paused
+    uint32_t arpRefreshCount;       // dummy broadcasts sent to resolve the MAC address of destIp again (arpRefresh.h)
+    uint32_t arpRefreshFailedCount; // of these, sends that failed (endPacket() 0)
 };
 
 extern PerfStats perfStats;

@@ -157,15 +157,8 @@ void hilReopenUdp()
 
 void hilSendOtherDest()
 {
-    // 1 byte, not 0: a SEND of an empty datagram is not defined for the W5500 (WIZnet's
-    // ioLibrary refuses it), and socketSendUDP() waits for SEND_OK or TIMEOUT forever.
-    static const uint8_t dummy = 0;
     const uint32_t start = micros();
-    PROBE_HIGH(5);
-    Udp.beginPacket(broadcastIp, 9);
-    Udp.write(&dummy, 1);
-    const bool ok = Udp.endPacket();
-    PROBE_LOW(5);
+    const bool ok = sendArpRefreshDummy();
     dbgPrint("HIL: broadcast to port 9 (ok %d) in %lu us\n", ok, (unsigned long)(micros() - start));
 }
 

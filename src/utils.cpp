@@ -8,6 +8,7 @@
 #include "resetCause.h"
 #include "perfStats.h"
 #include "sendBackoff.h"
+#include "arpRefresh.h"
 #include "idOffset.h"
 #include <stdarg.h>
 #include <utility/w5100.h>
@@ -556,6 +557,29 @@ void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
 
 void sendBackoffOnReceive(const IPAddress &ip) {
     printSendBackoffEvent(sendBackoffReceived(sendBackoff, (uint32_t)ip), ip);
+}
+
+bool sendArpRefreshDummy() {
+    // 1 byte, not 0: a SEND of an empty datagram is not defined for the W5500 (WIZnet's
+    // ioLibrary refuses it), and socketSendUDP() would wait for SEND_OK or TIMEOUT
+    // forever. Not through sendBackoff: the broadcast needs no ARP.
+    static const uint8_t dummy = 0;
+    PROBE_HIGH(5);
+    Udp.beginPacket(broadcastIp, 9);
+    Udp.write(&dummy, 1);
+    const bool ok = Udp.endPacket();
+    PROBE_LOW(5);
+    return ok;
+}
+
+static ArpRefresh arpRefresh;
+
+void arpRefreshOnReceive(const IPAddress &ip) {
+    if (!arpRefreshReceived(arpRefresh, (uint32_t)ip, (uint32_t)destIp, isDestIpSet, millis()))
+        return;
+    perfStats.arpRefreshCount++;
+    if (!sendArpRefreshDummy())
+        perfStats.arpRefreshFailedCount++;
 }
 
 void sendThreeInt(const char *address, int32_t data1, int32_t data2, int32_t data3) {

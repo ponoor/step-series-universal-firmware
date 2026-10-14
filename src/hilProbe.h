@@ -47,11 +47,10 @@ void hilPrintDriversAtBoot(); // 'D'
 void hilDriverStandbyTest();
 
 // Candidate fixes for a client replaced by another MAC address with the same IP
-// (tools/hil "arp"). The W5500 resolves the MAC address again only when a send goes to
-// another destination IP than the send before; it keeps it across link changes and
-// ignores ARP from the client. Each prints "HIL: ... in <us> us".
+// (tools/hil "arp"; C2 is the product fix, arpRefresh.h). Each prints
+// "HIL: ... in <us> us".
 void hilReopenUdp();      // 'N' (C1): Udp.stop(), Udp.begin(inPort)
-void hilSendOtherDest();  // 'U' (C2): 1 byte to 255.255.255.255:9 (discard), P5 high
+void hilSendOtherDest();  // 'U' (C2): sendArpRefreshDummy(), 1 byte to 255.255.255.255:9
 
 // OUTSET / OUTCLR / OUTTGL only (no read-modify-write), so the probes can be used
 // from interrupt handlers.

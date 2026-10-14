@@ -260,6 +260,7 @@ While a step runs the bench
 | `e2b` | e1 1-5, then `R` and `/setDestIp` from NIC B, the reports again, `--observe` s, e1 6 |
 | `c1`, `c2` | HIL_PROBE builds with the candidate fixes (`N`: reopen the UDP socket; `U`: 1 byte to 255.255.255.255:9). e1 1-5, then a new AD2 recording and the serial command while `/getVersion` is sent from NIC B 20 times every 2 ms, `--observe` s; e1 6 and the command again (back on NIC A the board keeps the MAC address of NIC B) |
 | `n1`, `n2` | The command of `c1` / `c2` three times while the client is reachable (e1 1, reports every 20 ms, 3 s apart), no swap |
+| `fix` | The ARP refresh with the client swapped (T1, human). `--heartbeat` (F1): `/setDestIp` every 1.0 s from the connected adapter (paused during a swap, resumed from the new adapter once it has the address), 30 s on NIC A, swap to NIC B, 30 s, swap back, 30 s, the destination MAC (`s`, `T`) after each 30 s. Without (F2): one `/setDestIp`; after each swap 10 s without a packet, the destination MAC, `/getVersion` from the new adapter, 10 s, the destination MAC |
 | `gap` | The ARP refresh of the product firmware (`src/arpRefresh.h`), NIC A only, no human. `R`, `G` (initial `destIp`, `canSendMsgBeforeDestIp`), 0: `/setDestIp`, reports `[arp] report_ms`; a: `/setDestIp` every 1.0 s x 30 (heartbeat); b: `/getVersion` every 2.0 s x 10; c: 3 s silence, `/getVersion` every 10 ms x 10; d: 3 s silence, one `/getVersion` (the part "another source first" is left out: the Mac has no other address that reaches the board). `p` is read at the end of each pattern |
 
 `summary.json` has, per phase (each step above starts one): the board's ARP requests
@@ -276,6 +277,15 @@ client address and no frame to NIC B. All items are RECORD, except for `gap`:
 | `arp gap 0`, `a` - `d` | the board's dummy broadcasts (UDP to 255.255.255.255:9) in the capture per pattern equal the count the firmware rule gives for the packets actually sent (from the capture, so a shifted interval is taken into account; nominal 0, 0, 10, 1, 1), and the `arpRefresh` counter of `p` equals them |
 | `arp gap-order` | every refresh: the packet to the board, the dummy, the board's ARP request for the client, the ARP reply, the board's reply, in this order, no other board frame between the dummy and the ARP request |
 | `arp gap-p5` (RECORD) | P5 width of the dummy and of the next send (with the ARP) |
+| `arp fix-heartbeat` | F1: no dummy and `arpRefresh` 0 while the heartbeat runs on NIC A |
+| `arp F1/F2 to NIC A/B` | after each swap (from the new adapter having the address to the next swap request or the last event): one dummy and `arpRefresh` 1, the board's reply (`/destIp`, F1; `/version`, F2) and `/positionList` sent to the new MAC address, no `udpSendFailed`; recorded: the times from the first packet of the new adapter to the dummy, the ARP request and the first frame to the new MAC address |
+| `arp F1/F2 on ...` | the destination MAC address of `s` and `T`: the old adapter before the first packet (F2), the new one afterwards |
+
+A heartbeat socket of the unplugged adapter sent through the other adapter while it was
+still probing its address (no ARP reply yet): the refresh then fails (41 ms, the send
+pause) and the board reaches the client 1-2 s later, with one more refresh. So the
+heartbeat sends only from the connected adapter. Each run saves the wall clock samples
+(`clock_wall_minus_mono.npy`) used to move the pcap times to `time.monotonic()`.
 
 ## How it works
 

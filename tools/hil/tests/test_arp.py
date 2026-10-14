@@ -239,3 +239,24 @@ def test_nearest_pulse():
     assert arp.nearest_pulse(rise, width, 1.0007) == (1, 0.0002)
     assert arp.nearest_pulse(rise, width, 1.5) == (None, None)
     assert arp.nearest_pulse(np.zeros(0), np.zeros(0), 1.0) == (None, None)
+
+
+def test_swap_recovery():
+    B10 = "10.0.0.100"
+    fr = [
+        udp(0.5, BOARD, NIC_A, B10, C, 50100, "/positionList"),  # old MAC, before the first packet
+        udp(2.0, NIC_B, BOARD, C, B10, 50000, "/getVersion"),
+        udp(2.0005, BOARD, "ff:ff:ff:ff:ff:ff", B10, "255.255.255.255", 9),
+        arpf(2.0009, 1, BOARD, B10, "00:00:00:00:00:00", C),
+        arpf(2.0010, 2, NIC_B, C, BOARD, B10, dst=BOARD),
+        udp(2.0020, BOARD, NIC_B, B10, C, 50100, "/version"),
+        udp(2.0500, BOARD, NIC_B, B10, C, 50100, "/positionList"),
+        udp(9.0, BOARD, NIC_B, B10, C, 50100, "/positionList"),  # after the window
+    ]
+    r = arp.swap_recovery(fr, BOARD, B10, C, NIC_B, 0.0, 5.0)
+    assert r["first_rx"] == "/getVersion" and r["first_rx_s"] == 2.0
+    assert r["dummy_ms"] == 0.5 and r["arp_request_ms"] == 0.9 and r["first_to_new_ms"] == 2.0
+    assert r["first_to_new"] == "/version" and r["dummies"] == 1
+    assert r["osc_to_new"] == {"/version": 1, "/positionList": 1}
+    none = arp.swap_recovery(fr[:1], BOARD, B10, C, NIC_B, 0.0, 5.0)
+    assert none["first_rx"] is None and none["dummy_ms"] is None and none["dummies"] == 0

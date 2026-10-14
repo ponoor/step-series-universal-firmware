@@ -84,9 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="T1: board and both NICs at a switch, T2: board cabled directly to one NIC")
     s.add_argument("--step", choices=list(ARP_STEPS), required=True,
                    help="check: NIC A only; e1: E1 1-6; e2a / e2b: E2; c1 / c2: candidate fixes (HIL_PROBE); "
-                        "n1 / n2: the fix commands while the client is reachable")
+                        "n1 / n2: the fix commands while the client is reachable; gap / fix: the ARP refresh")
     s.add_argument("--wait", type=float, help="E1 3: seconds on NIC B before /getVersion (e1: 300, others: 30)")
     s.add_argument("--observe", type=float, default=30.0, help="seconds after /setDestIp from NIC B (E1 5)")
+    s.add_argument("--heartbeat", action="store_true", help="fix: /setDestIp every 1.0 s (F1); without: F2")
     s.add_argument("--label", help="suffix of the result directory")
     return p
 

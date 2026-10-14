@@ -44,7 +44,7 @@ from .osc import OscLink
 BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 ETH_ARP, ETH_IPV4 = 0x0806, 0x0800
 ARP_REQUEST, ARP_REPLY = 1, 2
-STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2", "n1", "n2", "gap")
+STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2", "n1", "n2", "gap", "fix")
 # USB serial commands of the candidate fixes (HIL_PROBE builds, src/diagnosis.cpp).
 FIX_COMMANDS = {"c1": "N", "c2": "U"}
 FIX_DONE = re.compile(r"HIL: (.+?) in (\d+) us")
@@ -338,6 +338,34 @@ def refresh_sequences(frames: list[Frame], board_mac: str, board_ip: str, client
     return out
 
 
+def swap_recovery(frames: list[Frame], board_mac: str, board_ip: str, client_ip: str, new_mac: str,
+                  t0: float, t1: float) -> dict:
+    """After a swap to the adapter new_mac (from t0, when it has the address, to t1): the
+    first packet from it to the board, then (ms from that packet) the board's first dummy
+    broadcast, ARP request for client_ip and IPv4 frame to new_mac; the dummies in the
+    window and the board's OSC frames to new_mac by address."""
+    sel = [f for f in frames if t0 <= f.t < t1]
+    rx = next((f for f in sel if f.src == new_mac and f.dst == board_mac and f.ip_dst == board_ip
+               and f.udp_dport is not None), None)
+    out: dict = {"first_rx": rx.osc if rx else None, "first_rx_s": None if rx is None else round(rx.t - t0, 3),
+                 "dummies": sum(1 for f in sel if is_refresh_dummy(f, board_mac)), "osc_to_new": {}}
+    for f in sel:
+        if f.src == board_mac and f.dst == new_mac and f.ethertype == ETH_IPV4:
+            out["osc_to_new"][f.osc] = out["osc_to_new"].get(f.osc, 0) + 1
+    if rx is None:
+        out.update(dummy_ms=None, arp_request_ms=None, first_to_new_ms=None, first_to_new=None)
+        return out
+    after = [f for f in sel if f.t >= rx.t]
+    ms = lambda f: None if f is None else round((f.t - rx.t) * 1e3, 3)  # noqa: E731
+    out["dummy_ms"] = ms(next((f for f in after if is_refresh_dummy(f, board_mac)), None))
+    out["arp_request_ms"] = ms(next((f for f in after if f.src == board_mac and f.arp_op == ARP_REQUEST
+                                     and f.arp_tpa == client_ip), None))
+    first = next((f for f in after if f.src == board_mac and f.dst == new_mac and f.ethertype == ETH_IPV4), None)
+    out["first_to_new_ms"] = ms(first)
+    out["first_to_new"] = first.osc if first else None
+    return out
+
+
 def nearest_pulse(rise: np.ndarray, width: np.ndarray, t: float, tol: float = 0.003) -> tuple[int | None, float | None]:
     """Index and width of the P5 pulse nearest to t (within tol)."""
     if rise.size == 0:
@@ -528,6 +556,39 @@ class SegmentRecorder:
 # --------------------------------------------------------------------------------------
 
 
+class Heartbeat:
+    """/setDestIp every `period` s through `lk` (replaced by the run when the adapters are
+    swapped). Sends that fail (adapter unplugged, socket closed) are ignored."""
+
+    def __init__(self, lk: OscLink, period: float = 1.0):
+        self.lk, self.period = lk, period
+        self.sent: list[tuple[float, str]] = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="heartbeat", daemon=True)
+
+    def start(self) -> "Heartbeat":
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(2.0)
+
+    def _run(self) -> None:
+        t = time.monotonic()
+        while not self._stop.is_set():
+            lk = self.lk
+            try:
+                if lk is None:
+                    raise RuntimeError("paused")
+                lk.send("/setDestIp")
+                self.sent.append((time.monotonic(), lk.bound_if))
+            except Exception:
+                pass
+            t += self.period
+            self._stop.wait(max(0.0, t - time.monotonic()))
+
+
 class ArpBench(Bench):
     """Bench with the OSC links scoped to NIC A / NIC B instead of the default link."""
 
@@ -625,8 +686,9 @@ class ArpRun:
         return res
 
     # --- E1 1-6 ---
-    def establish(self) -> OscLink:
-        """E1 1: NIC A connected, restart, /setDestIp and position list reports from NIC A."""
+    def establish(self, heartbeat: bool = False) -> OscLink:
+        """E1 1: NIC A connected, restart, /setDestIp and position list reports from NIC A.
+        heartbeat: starts self.hb (/setDestIp every 1 s) right after the /setDestIp."""
         if not self.wait_link("A"):
             if not self.b.operator(f"connect NIC A ({self.nic['A']}) only (NIC B unplugged)",
                                    done=lambda: self.wait_link("A"), timeout=600.0):
@@ -638,6 +700,8 @@ class ArpRun:
         self.rec.stop()
         self.b.reboot(connect=False)
         self.b.connect()
+        if heartbeat:
+            self.hb = Heartbeat(lk).start()
         self.rec.start()
         time.sleep(0.5)
         self.event("1 /setDestIp from NIC A answered; position list reports on", phase="1 NIC A")
@@ -760,6 +824,59 @@ class ArpRun:
         time.sleep(0.5)
         self.read_perf("gap d")
         lk.send("/setPositionListReportInterval", 0)
+
+    def read_dest_mac(self, label: str) -> dict:
+        """Destination MAC address from 's' and 'T' (firmware with destMac)."""
+        text = self.b.ser.command("s", until=r"Destination MAC address : ([0-9A-Fa-f:]{17})")
+        m = re.search(r"Destination MAC address : ([0-9A-Fa-f:]{17})", text).group(1).lower()
+        j = self.b.status_json()["board"].get("destMac")
+        t = ":".join(f"{int(x):02x}" for x in j) if j else None
+        d = {"label": label, "s": m, "T": t, "t_s": round(time.monotonic() - self.mono0, 3)}
+        self.dest_macs.append(d)
+        self.event(f"{label}: destination MAC s {m}, T {t}")
+        return d
+
+    def run_fix_swap(self, heartbeat: bool) -> None:
+        """Task 4 of the ARP refresh (T1). F1 (heartbeat): /setDestIp every 1.0 s from the
+        connected adapter, 30 s on NIC A, swap to NIC B, 30 s, swap back, 30 s. F2: no
+        heartbeat; after each swap 10 s without a command, the destination MAC, /getVersion
+        from the new adapter, 10 s, the destination MAC."""
+        tag = "F1" if heartbeat else "F2"
+        self.dest_macs = []
+        self.hb = None
+        self.establish(heartbeat)
+        hb = self.hb
+        self.read_perf(f"{tag} start")
+        if heartbeat:
+            self.event(f"{tag} heartbeat on NIC A, 30 s", phase=f"{tag} heartbeat on A")
+            time.sleep(30.0)
+            self.read_perf(f"{tag} heartbeat on A")
+        try:
+            for to in ("B", "A"):
+                if hb is not None:
+                    # Sent only from the connected adapter: a socket of the unplugged one
+                    # sent through the other adapter before it had its address (no ARP
+                    # reply yet: failed send, send pause).
+                    hb.lk = None
+                self.swap(to, f"{tag} {to}")
+                new = self.link(to)
+                self.b.link = new
+                if hb is not None:
+                    hb.lk = new
+                    self.event(f"{tag} heartbeat on NIC {to}, 30 s", phase=f"{tag} on {to}")
+                    time.sleep(30.0)
+                    self.read_dest_mac(f"{tag} on {to} after 30 s")
+                else:
+                    self.event(f"{tag} on NIC {to}, no command for 10 s", phase=f"{tag} on {to}")
+                    time.sleep(10.0)
+                    self.read_dest_mac(f"{tag} on {to} before the first packet")
+                    self.query(new, "/getVersion", "/version", f"{tag} {to}", window=10.0)
+                    self.read_dest_mac(f"{tag} on {to} after /getVersion")
+                self.read_perf(f"{tag} on {to}")
+        finally:
+            if hb is not None:
+                hb.stop()
+        self.b.link.send("/setPositionListReportInterval", 0)
 
     def fix_command(self, cmd: str, step: str, lk: OscLink | None, burst: bool) -> dict:
         """Sends the serial command; with burst, /getVersion 20 times every 2 ms around it."""
@@ -938,6 +1055,54 @@ def gap_items(res: dict, frames: list[Frame], rec: SegmentRecorder) -> list[Item
     return items
 
 
+def fix_items(res: dict, frames: list[Frame], names: dict[str, str]) -> list[Item]:
+    """Judges the fix step: each swap is repaired by the first packet from the new adapter
+    (one refresh, the board's frames go to the new MAC address), none while the heartbeat
+    runs on one adapter, no failed send; the destination MAC of 's' / 'T'."""
+    board_mac, board_ip, client = res["board_mac"], res["board_ip"], res["client_ip"]
+    mac_of = {n: m for m, n in names.items()}
+    ev = res["events"]
+    # up to the last event: the command that turns the reports off comes after it (and
+    # refreshes once more after the 10 s without a packet of F2)
+    t_end = ev[-1]["t"] + 0.01
+    items = []
+    hb = next((e for e in ev if e.get("phase", "") and "heartbeat on A" in e["phase"]), None)
+    if hb is not None:
+        nxt = next(e["t"] for e in ev if e["t"] > hb["t"] and e.get("phase"))
+        n = sum(1 for f in frames if hb["t"] <= f.t < nxt and is_refresh_dummy(f, board_mac))
+        p = res["perf"].get(next(k for k in res["perf"] if k.endswith("heartbeat on A")), {}).get("arpRefresh")
+        items.append(Item("arp fix-heartbeat", "PASS" if n == 0 and p == 0 else "FAIL",
+                          f"heartbeat on NIC A for 30 s: dummies {n}, 'p' arpRefresh {p}"))
+    done = [e for e in ev if re.search(r" 10\.0\.0\.\d+ on NIC [AB]$", e["name"])]
+    res["swaps"] = []
+    for e in done:
+        to = e["name"][-1]
+        # up to the next swap request
+        nxt = next((x["t"] for x in ev if x["t"] > e["t"] and "swap to NIC" in x["name"]), t_end)
+        r = swap_recovery(frames, board_mac, board_ip, client, mac_of[f"NIC {to}"], e["t"], nxt)
+        tag = e["name"].split(" ")[0]
+        perf = res["perf"].get(f"{tag} on {to}", {})
+        r.update(swap=f"{tag} to NIC {to}", arpRefresh=perf.get("arpRefresh"), udpSendFailed=perf.get("udpSendFailed"))
+        res["swaps"].append(r)
+        reply = "/destIp" if tag == "F1" else "/version"
+        ok = (r["dummies"] == 1 and r["arpRefresh"] == 1 and r["osc_to_new"].get(reply, 0) > 0
+              and r["osc_to_new"].get("/positionList", 0) > 0 and r["dummy_ms"] is not None
+              and r["arp_request_ms"] is not None and r["first_to_new_ms"] is not None and not r["udpSendFailed"])
+        items.append(Item(f"arp {r['swap']}", "PASS" if ok else "FAIL", (
+            f"first packet from NIC {to} ({r['first_rx']}) {r['first_rx_s']} s after it had the address; from it: "
+            f"dummy {r['dummy_ms']} ms, ARP request {r['arp_request_ms']} ms, first frame to NIC {to} "
+            f"{r['first_to_new_ms']} ms ({r['first_to_new']}); dummies {r['dummies']}, 'p' arpRefresh "
+            f"{r['arpRefresh']}, udpSendFailed {r['udpSendFailed']}; board OSC to NIC {to} {r['osc_to_new']}")))
+    for d in res.get("dest_macs", []):
+        to = d["label"].split(" ")[2]
+        old = mac_of["NIC B" if to == "A" else "NIC A"]
+        want = old if "before" in d["label"] else mac_of[f"NIC {to}"]
+        ok = d["s"] == want and d["T"] == want
+        items.append(Item(f"arp {d['label']}", "PASS" if ok else "FAIL",
+                          f"s {d['s']}, T {d['T']}, expected {want} ({names.get(want)})"))
+    return items
+
+
 def rng(values) -> str:
     v = [x for x in values if x is not None]
     return "-" if not v else f"{min(v):.2f}-{max(v):.2f}"
@@ -974,7 +1139,8 @@ def cmd_arp(cfg: Config, args) -> int:
                 {"check": run.run_check, "e1": run.run_e1, "e2a": run.run_e2a, "e2b": run.run_e2b,
                  "c1": lambda: run.run_fix("c1"), "c2": lambda: run.run_fix("c2"),
                  "n1": lambda: run.run_normal("c1"), "n2": lambda: run.run_normal("c2"),
-                 "gap": run.run_gap}[args.step]()
+                 "gap": run.run_gap,
+                 "fix": lambda: run.run_fix_swap(args.heartbeat)}[args.step]()
             except Exception as ex:  # keep the logs and summarize what was recorded
                 items.append(Item(f"arp-{args.step}-error", "FAIL", f"{type(ex).__name__}: {ex}"))
             t_end = time.monotonic()
@@ -993,6 +1159,7 @@ def cmd_arp(cfg: Config, args) -> int:
             frames += c.frames()
         res["clock_wall_minus_mono_s"] = {"first": run.mon.clock[0][1], "last": run.mon.clock[-1][1],
                                           "samples": len(run.mon.clock)}
+        np.save(out / "clock_wall_minus_mono.npy", np.array(run.mon.clock))  # for a new analysis of the pcaps
         to_monotonic(frames, run.mon.clock)
         frames.sort(key=lambda f: f.t)
         res.update(summarize(run, frames, names, res["board_mac"], rec, t_end))
@@ -1002,6 +1169,7 @@ def cmd_arp(cfg: Config, args) -> int:
                        for k, v in run.perf.items()}
         res["serial_fix"] = run.serial_out
         res["gap_initial"] = getattr(run, "initial", None)
+        res["dest_macs"] = getattr(run, "dest_macs", [])
         res["ad2_problems"] = rec.problems + ([f"recorder: {rec.error!r}"] if rec.error else [])
         res["frames_captured"] = {c.iface: sum(1 for f in frames if f.iface == c.iface) for c in caps}
     for name, ph in res["phases"].items():
@@ -1017,6 +1185,8 @@ def cmd_arp(cfg: Config, args) -> int:
                               f"udpSendFailed {res['perf']}"))
     if args.step == "gap":
         items += gap_items(res, frames, rec)
+    if args.step == "fix":
+        items += fix_items(res, frames, names)
     items.append(recorded("arp AD2", "; ".join(
         f"{g['name']} {g['duration_s']:.0f} s: P1 {g['p1_vs_osc_tx']['b']} for {g['p1_vs_osc_tx']['a']} OSC sent, "
         f"matched {g['p1_vs_osc_tx']['matched']}" for g in res["ad2_segments"]) + (

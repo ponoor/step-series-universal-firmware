@@ -110,7 +110,7 @@ void printMenu() {
 	dbgPrint("R: reboot board\n");
 	dbgPrint("p: print timing stats [us] and reset them\n");
 #ifdef HIL_PROBE
-	dbgPrint("P: HIL probe self-test (ch + 1 pulses on P0-P6)\n");
+	dbgPrint("P: HIL probe self-test (ch + 1 pulses on each probe with a pin)\n");
 	dbgPrint("Z: HIL test, hardHiZ to all drivers (bypasses the brake)\n");
 	dbgPrint("D: HIL test, driver CONFIG / STATUS read at boot before the reset\n");
 	dbgPrint("Y: HIL test, driver reset line floating for 300 ms (standby), then setup\n");

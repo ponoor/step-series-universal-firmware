@@ -152,6 +152,8 @@ def test_covered_and_phase_windows():
     assert list(arp.covered(np.array([0.5, 1.5, 2.5]), [(0, 1), (2, 3)])) == [True, False, True]
     ev = [{"t": 1.0, "phase": "1"}, {"t": 1.5, "phase": None}, {"t": 2.0, "phase": "2"}]
     assert arp.phase_windows(ev, 5.0) == [("1", 1.0, 2.0), ("2", 2.0, 5.0)]
+    ev = [{"t": 1.0, "phase": "a"}, {"t": 2.0, "phase": "a"}, {"t": 3.0, "phase": "a"}]
+    assert [w[0] for w in arp.phase_windows(ev, 5.0)] == ["a", "a #2", "a #3"]
 
 
 def test_to_monotonic():

@@ -147,4 +147,26 @@ void hilDriverStandbyTest()
     dbgPrint("HIL standby test done\n");
 }
 
+void hilReopenUdp()
+{
+    const uint32_t start = micros();
+    Udp.stop();
+    Udp.begin(inPort);
+    dbgPrint("HIL: UDP socket reopened in %lu us\n", (unsigned long)(micros() - start));
+}
+
+void hilSendOtherDest()
+{
+    // 1 byte, not 0: a SEND of an empty datagram is not defined for the W5500 (WIZnet's
+    // ioLibrary refuses it), and socketSendUDP() waits for SEND_OK or TIMEOUT forever.
+    static const uint8_t dummy = 0;
+    const uint32_t start = micros();
+    PROBE_HIGH(5);
+    Udp.beginPacket(broadcastIp, 9);
+    Udp.write(&dummy, 1);
+    const bool ok = Udp.endPacket();
+    PROBE_LOW(5);
+    dbgPrint("HIL: broadcast to port 9 (ok %d) in %lu us\n", ok, (unsigned long)(micros() - start));
+}
+
 #endif // HIL_PROBE

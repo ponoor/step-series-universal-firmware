@@ -256,10 +256,15 @@ def covered(t: np.ndarray, coverage: list[tuple[float, float]]) -> np.ndarray:
 
 
 def phase_windows(events: list[dict], t_end: float) -> list[tuple[str, float, float]]:
-    """Phases: each event with "phase" starts one, until the next one (or t_end)."""
+    """Phases: each event with "phase" starts one, until the next one (or t_end). A
+    repeated name gets " #2", " #3", ... (the phases are keyed by name)."""
     marks = [(e["t"], e["phase"]) for e in events if e.get("phase")]
     out = []
+    seen: dict[str, int] = {}
     for i, (t, name) in enumerate(marks):
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] > 1:
+            name = f"{name} #{seen[name]}"
         out.append((name, t, marks[i + 1][0] if i + 1 < len(marks) else t_end))
     return out
 

@@ -83,6 +83,12 @@ void diagnosisCommand(uint8_t inByte) {
 	case 'Y':
 		hilDriverStandbyTest();
 		break;
+	case 'N':
+		hilReopenUdp();
+		break;
+	case 'U':
+		hilSendOtherDest();
+		break;
 #endif
 	default:
 		break;
@@ -109,6 +115,8 @@ void printMenu() {
 	dbgPrint("D: HIL test, driver CONFIG / STATUS read at boot before the reset\n");
 	dbgPrint("Y: HIL test, driver reset line floating for 300 ms (standby), then setup\n");
 	dbgPrint("W: HIL test, hang until the watchdog resets the board\n");
+	dbgPrint("N: HIL test, reopen the UDP socket (ARP refresh candidate C1)\n");
+	dbgPrint("U: HIL test, 1 byte to 255.255.255.255:9 (ARP refresh candidate C2)\n");
 #endif
 }
 

@@ -16,8 +16,10 @@ Steps (--step):
   e2a    E1 1-5, then /setDestIp from an alias address of NIC B, then from client_ip
   e2b    E1 1-5, then restart ('R') and /setDestIp from NIC B
   c1/c2  E1 1-5, then the HIL serial command of the candidate fix (HIL_PROBE builds),
-         a /getVersion burst during it, then the same command while the client is
-         reachable (position list reports every 20 ms)
+         a /getVersion burst during it; E1 6 and the command again (back on NIC A the
+         board keeps the MAC address of NIC B)
+  n1/n2  E1 1 and the command three times while the client is reachable (position
+         list reports every 20 ms), no swap
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ from .osc import OscLink
 BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 ETH_ARP, ETH_IPV4 = 0x0806, 0x0800
 ARP_REQUEST, ARP_REPLY = 1, 2
-STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2")
+STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2", "n1", "n2")
 # USB serial commands of the candidate fixes (HIL_PROBE builds, src/diagnosis.cpp).
 FIX_COMMANDS = {"c1": "N", "c2": "U"}
 FIX_DONE = re.compile(r"HIL: (.+?) in (\d+) us")
@@ -675,18 +677,36 @@ class ArpRun:
         cmd = FIX_COMMANDS[which]
         self.establish()
         lk_b = self.old_state(self.args.wait if self.args.wait is not None else 30.0)
+        # A new AD2 recording, so that the command is not in the gap between two (0.3 s).
+        self.rec.stop()
+        self.rec.start()
+        time.sleep(1.0)
         self.event(f"{which} '{cmd}' with the old MAC, /getVersion burst", phase=f"{which} fix")
         self.serial_out["fix"] = self.fix_command(cmd, which, lk_b, burst=True)
         self.events[-2]["result"] = {k: v for k, v in self.serial_out["fix"].items() if k != "serial"}
         time.sleep(self.args.observe)
         self.back_to_a()
-        lk_a = self.b.link
+        # Back on NIC A the board keeps the MAC address of NIC B: the command again.
+        self.b.link.send("/setPositionListReportInterval", self.report_ms)
+        self.event(f"{which} '{cmd}' back on NIC A", phase=f"{which} fix on A")
+        self.serial_out["fix_on_a"] = self.fix_command(cmd, which, None, burst=False)
+        time.sleep(5.0)
+        self.b.link.send("/setPositionListReportInterval", 0)
+
+    def run_normal(self, which: str) -> None:
+        """The command while the client is reachable (no swap): reports every 20 ms."""
+        cmd = FIX_COMMANDS[which]
+        lk_a = self.establish()
         lk_a.send("/setPositionListReportInterval", 20)
         self.event(f"{which} reachable, reports every 20 ms", phase=f"{which} normal before")
         time.sleep(3.0)
-        self.event(f"{which} '{cmd}' while reachable", phase=f"{which} normal")
-        self.serial_out["normal"] = self.fix_command(cmd, which, None, burst=False)
-        time.sleep(3.0)
+        self.rec.stop()
+        self.rec.start()
+        time.sleep(1.0)
+        for k in range(3):
+            self.event(f"{which} '{cmd}' while reachable", phase=f"{which} normal")
+            self.serial_out[f"normal_{k}"] = self.fix_command(cmd, which, None, burst=False)
+            time.sleep(3.0)
         lk_a.send("/setPositionListReportInterval", 0)
 
 
@@ -696,7 +716,8 @@ class ArpRun:
 
 
 def report_intervals(entries, t0: float, t1: float) -> dict:
-    t = np.array([e.t_ns / 1e9 for e in entries if e.address == "/positionList" and t0 <= e.t_ns / 1e9 < t1])
+    """Intervals (ms) between the /positionList messages received from t0 to t1."""
+    t = np.sort([e.t_ns / 1e9 for e in entries if e.address == "/positionList" and t0 <= e.t_ns / 1e9 < t1])
     return analyze.stats(np.diff(t), 1e3) if t.size > 1 else analyze.stats(np.zeros(0))
 
 
@@ -729,6 +750,7 @@ def summarize(run: ArpRun, frames: list[Frame], names: dict[str, str], board_mac
             "capture": fs,
             "p5_vs_capture": match_times(tx_cov, p5r[sel5]),
             "app_rx": app,
+            "app_report_ms": report_intervals([e for _, e in rx], t0, t1),
         }
     links = [{"t_s": round(t - run.mono0, 3), "iface": i, "status": s} for t, i, s in run.mon.transitions()]
     # Time mapping check: the n-th OSC packet sent to the board starts a P1 pulse.
@@ -781,7 +803,8 @@ def cmd_arp(cfg: Config, args) -> int:
             rec = run.rec = SegmentRecorder(b, float(a["segment_s"]))  # started by establish()
             try:
                 {"check": run.run_check, "e1": run.run_e1, "e2a": run.run_e2a, "e2b": run.run_e2b,
-                 "c1": lambda: run.run_fix("c1"), "c2": lambda: run.run_fix("c2")}[args.step]()
+                 "c1": lambda: run.run_fix("c1"), "c2": lambda: run.run_fix("c2"),
+                 "n1": lambda: run.run_normal("c1"), "n2": lambda: run.run_normal("c2")}[args.step]()
             except Exception as ex:  # keep the logs and summarize what was recorded
                 items.append(Item(f"arp-{args.step}-error", "FAIL", f"{type(ex).__name__}: {ex}"))
             t_end = time.monotonic()

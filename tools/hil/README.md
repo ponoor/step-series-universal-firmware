@@ -237,7 +237,13 @@ While a step runs the bench
   time by more than 5 ms is reported and not used. P1 is checked against the OSC packets
   sent (`ad2_segments` in `summary.json`).
 - sends and receives OSC through sockets scoped to one adapter (`IP_BOUND_IF`) and bound
-  to the client address, one log per socket (`osc_log_<k>_<NIC>_<address>.jsonl`).
+  to the client address, one log per socket (`osc_log_<k>_<NIC>_<address>.jsonl`). Only
+  one socket per address is open; the previous one is closed when the other adapter takes
+  over. `IP_BOUND_IF` does not filter what a receive socket gets: a socket of NIC B still
+  open just after NIC A came back received two messages through NIC A. Judge from the
+  capture, not from these logs.
+- consecutive AD2 recordings leave a gap of about 0.3 s between them; `c1` / `c2` start a
+  new recording before the command.
 
 | Step | What is done |
 |---|---|
@@ -245,7 +251,8 @@ While a step runs the bench
 | `e1` | 1: NIC A (asked for if not the only active adapter), `R`, `/setDestIp` from NIC A, `/setPositionListReportInterval` `[arp] report_ms` (100). 2: swap to NIC B (human). 3: wait `--wait` s (300). 4: `/getVersion` from NIC B (2 s). 5: `/setDestIp` from NIC B, observe `--observe` s (30). 6: swap back to NIC A (human), 10 s without a command, `/getVersion` from NIC A. `p` before the swap, after 3 and after 5 |
 | `e2a` | e1 1-5 (`--wait` 30), then the operator adds `[arp] alias_ip` to NIC B, `/setDestIp` from it (10 s), `/setDestIp` from the client address (`--observe`), the alias is removed, e1 6 |
 | `e2b` | e1 1-5, then `R` and `/setDestIp` from NIC B, the reports again, `--observe` s, e1 6 |
-| `c1`, `c2` | HIL_PROBE builds with the candidate fixes. e1 1-5, then the serial command (`N` / `U`) while `/getVersion` is sent from NIC B 20 times every 2 ms, `--observe` s, e1 6; then the command again while the client is reachable (reports every 20 ms, 3 s before and after) |
+| `c1`, `c2` | HIL_PROBE builds with the candidate fixes (`N`: reopen the UDP socket; `U`: 1 byte to 255.255.255.255:9). e1 1-5, then a new AD2 recording and the serial command while `/getVersion` is sent from NIC B 20 times every 2 ms, `--observe` s; e1 6 and the command again (back on NIC A the board keeps the MAC address of NIC B) |
+| `n1`, `n2` | The command of `c1` / `c2` three times while the client is reachable (e1 1, reports every 20 ms, 3 s apart), no swap |
 
 `summary.json` has, per phase (each step above starts one): the board's ARP requests
 (time from the phase start, the address asked for), its frames by destination MAC

@@ -43,6 +43,13 @@ Hardware-in-the-loop tests of the STEP800 firmware with a Digilent Analog Discov
    port 50000 and sends to port `50100 + id`. The Mac needs an address in `10.0.0.x/24`.
    The bench sends `/setDestIp` at start and checks that the reply names the Mac.
    Allow incoming UDP for Python in the macOS firewall if no reply arrives.
+
+   Standard network (since the `arp` investigation, 2026-10-14): the board and the Mac's
+   USB-LAN adapter (NIC A, `en9`, 10.0.0.10) at an unmanaged switch without uplink, as in
+   the field (topology T1 of `hil.py arp`). No router on 10.0.0.x; the Mac reaches the
+   internet over Wi-Fi through another router. A second adapter (NIC B, `en7`) is kept for
+   `hil.py arp`, its cable unplugged at the switch. With a direct cable instead, the Mac's
+   link also goes down at every restart of the board.
 5. Firmware: build and upload `step800_devlib_probe` (defined in `platformio_local.ini`,
    which is not committed):
 

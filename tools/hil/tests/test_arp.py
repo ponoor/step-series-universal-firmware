@@ -157,3 +157,8 @@ def test_covered_and_phase_windows():
 def test_to_monotonic():
     f = [arp.Frame(1000.5, BOARD, NIC_A, 0x0800)]
     assert arp.to_monotonic(f, 990.0)[0].t == 10.5
+    # wall clock slewed by 1 ms/s: offset 990.000 at mono 0, 990.010 at mono 10
+    clock = [(0.0, 990.0), (10.0, 990.01)]
+    f = [arp.Frame(990.0, BOARD, NIC_A, 0x0800), arp.Frame(995.005, BOARD, NIC_A, 0x0800)]
+    t = [x.t for x in arp.to_monotonic(f, clock)]
+    assert abs(t[0] - 0.0) < 1e-9 and abs(t[1] - 5.0) < 1e-6

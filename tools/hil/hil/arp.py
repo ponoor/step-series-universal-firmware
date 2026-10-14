@@ -129,10 +129,19 @@ def parse_ethernet(pkt: bytes, t: float, iface: str = "") -> Frame:
     return f
 
 
-def to_monotonic(frames: list[Frame], wall_minus_mono_s: float) -> list[Frame]:
-    """Frame times moved from the wall clock (pcap) to time.monotonic() seconds."""
+def to_monotonic(frames: list[Frame], clock: list[tuple[float, float]] | float) -> list[Frame]:
+    """Frame times moved from the wall clock (pcap) to time.monotonic() seconds. clock:
+    (monotonic s, wall - monotonic s) samples taken during the capture, interpolated
+    (the wall clock is slewed by NTP: seen 0.9 ms/s after the Mac changed networks),
+    or one constant offset."""
+    if not isinstance(clock, list):
+        clock = [(0.0, float(clock))]
+    mono = np.array([c[0] for c in clock])
+    off = np.array([c[1] for c in clock])
     for f in frames:
-        f.t -= wall_minus_mono_s
+        # the offset at the frame's time; mono ~ wall - offset, refined once
+        o = float(np.interp(f.t - off[0], mono, off))
+        f.t -= float(np.interp(f.t - o, mono, off))
     return frames
 
 
@@ -336,11 +345,13 @@ class Tcpdump:
 
 
 class LinkMonitor:
-    """Polls the link status of the interfaces every `period` s."""
+    """Polls the link status of the interfaces every `period` s, and samples the wall
+    clock against the monotonic clock (for the pcap time stamps)."""
 
     def __init__(self, ifaces: list[str], period: float = 0.1):
         self.ifaces, self.period = ifaces, period
         self.samples: list[tuple[float, str, str]] = []
+        self.clock: list[tuple[float, float]] = []
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="link-monitor", daemon=True)
         self._lock = threading.Lock()
@@ -355,6 +366,8 @@ class LinkMonitor:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            with self._lock:
+                self.clock.append((time.monotonic(), wall_minus_mono()))
             for i in self.ifaces:
                 st = ifconfig(i)["status"] or "?"
                 with self._lock:
@@ -475,7 +488,12 @@ class ArpRun:
         return t
 
     def link(self, nic: str, local_ip: str | None = None) -> OscLink:
+        """Opens a socket pair scoped to the NIC; earlier ones on the same address are
+        closed first (one receive socket per address and port; their logs are kept)."""
         cfg = self.b.cfg
+        for _, old in self.links:
+            if old.local_ip == (local_ip or self.client_ip):
+                old.close()
         lk = OscLink(cfg.board_ip, cfg.board_in_port, cfg.board_out_port, local_ip=local_ip or self.client_ip,
                      bound_if=self.nic[nic]).open()
         self.links.append((f"{nic}_{local_ip or self.client_ip}", lk))
@@ -511,6 +529,16 @@ class ArpRun:
         if not self.wait_link(to):
             raise DiagError(f"NIC {to} is not the only active adapter: A {self.mon.status(self.nic['A'])}, "
                             f"B {self.mon.status(self.nic['B'])}")
+        self.wait_address(to)
+        self.event(f"{step} {self.client_ip} on NIC {to}")
+
+    def wait_address(self, nic: str) -> None:
+        """macOS assigns the address some time after the link comes up."""
+        deadline = time.monotonic() + 30.0
+        while self.client_ip not in ifconfig(self.nic[nic])["inet"]:
+            if time.monotonic() > deadline:
+                raise DiagError(f"{self.client_ip} not on {self.nic[nic]} 30 s after its link came up")
+            time.sleep(0.1)
 
     def query(self, lk: OscLink, address: str, reply: str, step: str, *args, window: float = 2.0) -> dict:
         t = self.event(f"{step} {address} from {lk.bound_if} {lk.local_ip}", phase=f"{step} {address}")
@@ -528,6 +556,7 @@ class ArpRun:
             if not self.b.operator(f"connect NIC A ({self.nic['A']}) only (NIC B unplugged)",
                                    done=lambda: self.wait_link("A"), timeout=600.0):
                 raise DiagError("NIC A is not the only active adapter")
+        self.wait_address("A")
         lk = self.link("A")
         self.b.link = lk
         self.event("1 restart ('R')", phase="1 restart")
@@ -764,7 +793,9 @@ def cmd_arp(cfg: Config, args) -> int:
         frames = []
         for c in caps:
             frames += c.frames()
-        to_monotonic(frames, res["wall_minus_mono_s"])
+        res["clock_wall_minus_mono_s"] = {"first": run.mon.clock[0][1], "last": run.mon.clock[-1][1],
+                                          "samples": len(run.mon.clock)}
+        to_monotonic(frames, run.mon.clock)
         frames.sort(key=lambda f: f.t)
         res.update(summarize(run, frames, names, res["board_mac"], rec, t_end))
         res["events"] = run.events

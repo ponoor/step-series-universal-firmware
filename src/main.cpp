@@ -21,6 +21,7 @@
 #include "perfStats.h"
 #include "packedTransfer.h"
 #include "resetCause.h"
+#include "homingTimeout.h"
 #include "hilProbe.h"
 
 const String productName = PRODUCT_NAME;
@@ -314,9 +315,10 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
 {
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        if ((homingStatus[i] == HOMING_GOUNTIL) && (goUntilTimeout[i] > 0))
+        // homingStartTime can be later than the slot time (step started in this slot).
+        if (homingStatus[i] == HOMING_GOUNTIL)
         {
-            if ((uint32_t)(_currentTimeMillis - homingStartTime[i]) >= goUntilTimeout[i])
+            if (homingTimeoutElapsed(homingStartTime[i], _currentTimeMillis, goUntilTimeout[i]))
             {
                 if (!HiZ[i]) // HardStop would energize a HiZ motor
                     stepper[i].hardStop();
@@ -329,9 +331,9 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
                 }
             }
         }
-        else if ((homingStatus[i] == HOMING_RELEASESW) && (releaseSwTimeout[i] > 0))
+        else if (homingStatus[i] == HOMING_RELEASESW)
         {
-            if ((uint32_t)(_currentTimeMillis - homingStartTime[i]) >= releaseSwTimeout[i])
+            if (homingTimeoutElapsed(homingStartTime[i], _currentTimeMillis, releaseSwTimeout[i]))
             {
                 if (!HiZ[i]) // HardStop would energize a HiZ motor
                     stepper[i].hardStop();

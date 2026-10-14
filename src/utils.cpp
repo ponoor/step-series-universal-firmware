@@ -10,6 +10,7 @@
 #include "sendBackoff.h"
 #include "arpRefresh.h"
 #include "idOffset.h"
+#include "elapsedMs.h"
 #include <stdarg.h>
 #include <utility/w5100.h>
 
@@ -41,9 +42,11 @@ void turnOnTXL() {
 }
 
 void updateRxTxLed(uint32_t _currentTimeMillis) {
+    // A blink can start after the slot time: a UDP send of this slot (e.g. a position
+    // report) before this call.
     if (rxLedEnabled)
     {
-        if ((uint32_t)(_currentTimeMillis - RXL_blinkStartTime) >= RXL_TXL_BLINK_DURATION)
+        if (millisElapsed(RXL_blinkStartTime, _currentTimeMillis, RXL_TXL_BLINK_DURATION))
         {
             rxLedEnabled = false;
             fastDigitalWriteHIGH(PIN_LED_RXL); // turn off
@@ -51,7 +54,7 @@ void updateRxTxLed(uint32_t _currentTimeMillis) {
     }
     if (txLedEnabled)
     {
-        if ((uint32_t)(_currentTimeMillis - TXL_blinkStartTime) >= RXL_TXL_BLINK_DURATION)
+        if (millisElapsed(TXL_blinkStartTime, _currentTimeMillis, RXL_TXL_BLINK_DURATION))
         {
             txLedEnabled = false;
             fastDigitalWriteHIGH(PIN_LED_TXL); // turn off
@@ -407,7 +410,9 @@ void updateBrake(uint32_t _currentTimeMillis) {
         in.hiz = HiZ[i];
         in.stopped = (motorStatus[i] == 0);
         in.statusFresh = brakeStatusFresh[i];
-        in.elapsed = (uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i];
+        // The timer start can be later than the slot time if a future change starts it in
+        // this slot before here; it then elapses from the next slot on, not at once.
+        in.elapsed = millisElapsed(brakeTransitionTrigTime[i], _currentTimeMillis, brakeTransitionDuration[i]);
         const BrakeAction action = brakeOnPoll(brakeStatus[i], in);
         if (action.warn && !warned[i]) {
             warned[i] = true;

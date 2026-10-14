@@ -7,7 +7,8 @@
 // sets the start time with a new millis(). If millis() ticked in between, the start time is
 // later than nowMs, and the unsigned difference nowMs - startMs is about 0xFFFFFFFF: the
 // timeout fired at once. A start time later than nowMs (up to 2^31 ms) counts as 0 ms
-// elapsed. Times are millis() values; the test is correct across the wrap of millis().
+// elapsed (millisElapsed(), elapsedMs.h). Times are millis() values; the test is correct
+// across the wrap of millis().
 
 #ifndef _HOMINGTIMEOUT_h
 #define _HOMINGTIMEOUT_h

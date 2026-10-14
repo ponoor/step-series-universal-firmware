@@ -56,7 +56,7 @@ IPAddress
     subnet(255, 255, 255, 0);
 unsigned int outPort, outPort_from_config;
 unsigned int inPort;
-EthernetUDP Udp;
+StepUdp Udp;
 boolean
     isDestIpSet,
     isMyIpAddId,

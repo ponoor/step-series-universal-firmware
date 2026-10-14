@@ -572,6 +572,20 @@ bool sendArpRefreshDummy() {
     return ok;
 }
 
+bool readDestMac(uint8_t out[6]) {
+    const uint8_t s = Udp.socketIndex();
+    if (s >= MAX_SOCK_NUM) {
+        memset(out, 0, 6);
+        return false;
+    }
+    // As the Ethernet library does: the W5500 is on SPI (SERCOM4), shared with the SD card
+    // only; both are used from loop() only.
+    SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+    W5100.readSnDHAR(s, out);
+    SPI.endTransaction();
+    return true;
+}
+
 static ArpRefresh arpRefresh;
 
 void arpRefreshOnReceive(const IPAddress &ip) {

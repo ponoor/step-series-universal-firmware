@@ -191,6 +191,12 @@ void printCurrentState() {
 	printIpAddress(F("Destination Ip"), destIp);
 	printIpAddress(F("Current My Ip"), myIp);
 	dbgPrint("Current MAC address : %02X:%02X:%02X:%02X:%02X:%02X\n",mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+	{
+		// The MAC address the last send went to (readDestMac(): FF:...:FF after a broadcast).
+		uint8_t dm[6];
+		readDestMac(dm);
+		dbgPrint("Destination MAC address : %02X:%02X:%02X:%02X:%02X:%02X\n", dm[0], dm[1], dm[2], dm[3], dm[4], dm[5]);
+	}
 	dbgPrint("Current outPort : %d\n", outPort);
 
 #ifdef HAVE_SD
@@ -848,6 +854,12 @@ void printStatusAsJson() {
 		for (uint8_t i = 0; i < 4; i++) boardMyIp.add(myIp[i]);
 		board["myId"] = getMyId();
 		board["linkStatus"] = Ethernet.linkStatus();
+		// MAC address the last send went to (readDestMac(): 255 x 6 after a broadcast,
+		// 0 x 6 if the socket is not open).
+		uint8_t dm[6];
+		readDestMac(dm);
+		JsonArray destMac = board["destMac"].to<JsonArray>();
+		for (uint8_t i = 0; i < 6; i++) destMac.add(dm[i]);
 #ifdef HAVE_SD
 		board["sdInitialized"] = sdInitializeSucceeded;
 		board["configLoaded"] = configFileParseSucceeded;

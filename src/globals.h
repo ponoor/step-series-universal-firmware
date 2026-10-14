@@ -82,7 +82,14 @@ extern IPAddress
     subnet;
 const IPAddress broadcastIp(255, 255, 255, 255);
 extern unsigned int inPort, outPort, outPort_from_config;
-extern EthernetUDP Udp;
+// EthernetUDP that gives the socket number (protected in the library), for reading the
+// socket registers of the W5500 (readDestMac()). Otherwise the same as EthernetUDP.
+class StepUdp : public EthernetUDP
+{
+public:
+    uint8_t socketIndex() const { return sockindex; } // MAX_SOCK_NUM: not open
+};
+extern StepUdp Udp;
 extern bool
     isDestIpSet,
     isMyIpAddId,

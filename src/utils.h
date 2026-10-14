@@ -94,6 +94,12 @@ bool sendArpRefreshDummy();
 // A packet was received from ip (before any reply): after a gap of 1.5 s or more in the
 // packets from destIp, sends the dummy broadcast (arpRefresh.h).
 void arpRefreshOnReceive(const IPAddress &ip);
+// Reads Sn_DHAR of the UDP socket: the MAC address the last send went to. After a send to
+// destIp it is the MAC address the W5500 resolved by ARP for destIp; after a broadcast
+// (/booted, the ARP refresh dummy) and before the first send ff:ff:ff:ff:ff:ff (measured).
+// Returns false and all zeros if the socket is not open. For the diagnosis only (s, T):
+// one SPI transfer to the W5500, not to be called from loop().
+bool readDestMac(uint8_t out[6]);
 
 template <class T>
 void sendOneDatum(const char *address, T data) {

@@ -466,13 +466,14 @@ STEP400 Brake Board is connected to J7.
 
 | Command | STEP400 difference |
 |---|---|
-| `selftest` | adds `v33` (DIO 4 high) first and `limit_sw` (as `home_sw`, with `/enableLimitSwReport`, `/getLimitSw`, `/limitSw`, DIO 14); `probes` checks P0-P2 on DIO 8-10 and no edge on DIO 11-13; `brake_map` sends `b` 4 times (no P4: the delay is from the host time of `b`, USB latency included) |
+| `selftest` | with `motor.motor_connected = true` the `excitation` item is left out, and `brake_map` releases each brake while the motor is HiZ (a loaded axis can turn); `--only` also takes `v33` and `limit_sw`. Adds `v33` (DIO 4 high) first and `limit_sw` (as `home_sw`, with `/enableLimitSwReport`, `/getLimitSw`, `/limitSw`, DIO 14); `probes` checks P0-P2 on DIO 8-10 and no edge on DIO 11-13; `brake_map` sends `b` 4 times (no P4: the delay is from the host time of `b`, USB latency included) |
 | `timing` | the P0-P2 metrics only (`loop`, `oscReceive`, `updateServo`, `servoInterval`), `p` as before |
 | `brake` | the same scenarios (they use the test axis and 255 only); the brake output delay of a command is from its P1 rise (`delays[].brake_change_ms`); no P4 / P6 rows |
-| `reboot` | as the STEP800, plus `--how W` (watchdog), `--how button` (reset button: prints `OPERATOR:` and records until `/booted`, up to 10 minutes) and `--all-motors`; judged items below |
+| `reboot` | as the STEP800, plus `--how W` (watchdog), `--how button` (reset button: prints `OPERATOR:` and records until `/booted`, up to 10 minutes) and `--all-motors`; judged items below. **The judged items need `--all-motors --move 64`** (e.g. `reboot --how R --all-motors --move 64`): every brake released, and OUT1A moved off EL_POS 0, where it stays at 0 V also while energized, so that the driver standby shows as the end of the PWM |
 | `powerup` | 10 kS/s, both USB and 12 V are switched. No trigger: with the board off the AD2 inputs float and toggle, so the rail counts as off when 25 % of the reads over 1 s are low, the recording starts before the power-on and runs to 8 s after `/booted`, and the 3.3 V rise is the start of the last high span of DIO 4. The operator is asked which came on first; judged below |
 | `check` | C1, C2, C4, C7, C9 (`--all-auto`: C1, C2, C4, C7). The others use P3-P6, the L6470 bit layout or the STEP800 brake outputs and are refused |
 | `arp` | refused (needs P5) |
+| `motor` | tests with a motor, brake and load, record only; see [Motor tests](#motor-tests-hilpy-motor) |
 
 Scenario steps can press / release either switch: `press(label, switch="limit")`
 (default `"home"`); the step's AD2 time is the edge on that switch's DIO.
@@ -510,6 +511,70 @@ motor, [ms from the rise, length ms]. RECORD: the first P0 edge (`hilProbeInit()
 (drivers set up, HiZ), the OUT1A level segments, `/booted` and its host time after arming
 (no AD2 time: the trigger time is not known on the host).
 
+### Motor tests (`hil.py motor`)
+
+With a motor (and its brake) connected to the test axis, OUT1A is not on the Scope (Scope 1
+disconnected: at 24 V the HiZ output floats near the +/-25 V input range, and a turning motor
+makes the excitation detection meaningless). Set `motor.motor_connected = true`: `brake`,
+`reboot` and `powerup` then refuse to run (they judge the excitation on OUT1A), and the motor
+tests record only.
+
+```bash
+.venv/bin/python hil.py --config bench.step400.toml motor --step m1-12
+.venv/bin/python hil.py --config bench.step400.toml motor --note results/<dir> drop_mm=0 "clicks=two per cycle"
+```
+
+`[motor]` keys used by `motor` (in `bench.step400.toml`), applied before the recording and
+again after every restart (`/setDestIp` included); nothing is saved on the board:
+
+| Key | Message | Use |
+|---|---|---|
+| `bemf_param = [int_spd, st_slp, fn_slp_acc, fn_slp_dec]` | `/setBemfParam` | match the back-EMF compensation to the motor and supply (the defaults over-compensate a 42 mm motor at 24 V several times) |
+| `kval = [hold, run, acc, dec]` | `/setKval` | |
+| `speed_profile = [acc, dec, max_speed]` | `/setSpeedProfile` | a slow profile for a load the motor can just lift |
+| `brake_transition_ms` (100) | `/enableElectromagnetBrake`, `/setBrakeTransitionDuration` | the brake of the test axis is enabled for every step |
+| `position_report_ms` (20) | `/setPositionReportInterval` | positions in `positions.csv` |
+
+The HiZ, overcurrent, stall and UVLO reports of the test axis and `/reportError` are enabled.
+
+Each step (`hil/motor.py`, `STEPS`) is a list of actions: OSC messages, USB serial commands,
+waits, `/getBusy` polling, waiting for a message (`/booted`) or for a polled value
+(`/getUvlo`, `/getHomingStatus`), switch press / release on DIO 14 / 15, `/getXxx` queries
+stored in `summary.json`, operator requests, an OCD_TH sweep and a `/setTargetPositionList`
+sine. Before the run the console shows `OBSERVE:` (what the operator watches) and `expect:`.
+Operator requests print `OPERATOR: ...`; without a terminal the step goes on and the next
+action waits for the effect (e.g. `/booted` for at most 3 minutes; the motor stays energized
+meanwhile). The AD2 records the brake outputs, P0-P2, both switches and the 3.3 V (Digital
+In only) at 100 kS/s, 10 kS/s for steps with a restart.
+
+| Step | What |
+|---|---|
+| `m0` | brake on, `/activate 1`, +/-200 full steps, `/activate 0` |
+| `m1-12`, `m1-3`, `m1-4`, `m1-5`, `m1-6`, `m1-7`, `m1-8` | brake hand-over: `/activate 1` / `0`, `/softHiZ`, `/softHiZ` and `/hardHiZ` while turning, `/activate 1` during the engage wait, `/free` then `/activate 1`, transition time 0 |
+| `m2-R`, `m2-resetDevice`, `m2-W`, `m2-button`, `m2-power` | restarts, 3 each (button and power by the operator); the brake state before the setup is read after each restart |
+| `usb-open`, `usb-closed` | USB unplugged by the operator, with the serial port open / closed on the host |
+| `m3-1`, `m3-1s` | real overcurrent: OCD_TH lowered one step at a time until `/overCurrent` or `/HiZ`, then restored and `/activate 1` (also in the servo mode) |
+| `m3-2a`, `m3-2b` | 24 V off and on by the operator (both inlets / STEP400 only), USB connected |
+| `m4-a`, `m4-b2`, `m4-b1` | `/run` with STALL_TH default, raw 2, raw 1 |
+| `m5-1` to `m5-4` | servo mode: target steps, 100 Hz sine, limit switch blocking, `/goUntil` and `/releaseSw` refused |
+| `m6` | current mode: the hold value raised at `/activate 1` and after `/free`, back to voltage mode by `R` |
+| `m7-home`, `m7-timeout` | startup homing with the brake from `config.txt` on the SD card (the file is written beforehand with `F` and `{`) |
+
+Most steps start from the horizontal rod (`HORIZONTAL`: `/free`, the rod falls to hanging
+down, +50 full steps, brake engaged, position 0); the direction is that of the bench.
+
+Output in `results/<time>_<sha>_motor_<step>[_label]/`: `summary.json` (setup, state before /
+after, queries, notifications counted, brake output delays, errors, `observations`),
+`timeline.csv`, `positions.csv`, `capture.npz`, `osc_log.jsonl`. The timeline puts on the AD2
+time base: OSC commands at their P1 rise (the n-th message to the n-th rise, or, when the
+counts differ because of a restart, each to the first rise 0-20 ms after it), brake output,
+switch and 3.3 V edges, MCU stops (P0 gaps over 50 ms) and the restart of `loop()`. OSC
+messages received and the host-side actions (serial commands, switch operations, operator
+requests) have host times mapped with the command fit (`source` `host`: network and host
+latency included). `/position`, `/busy` and `/brakeStatus` are left out, `/uvlo` is listed
+only when it changes. `brake_delays`: each brake output change of the test axis with the
+last command before it.
+
 ## Tests
 
 ```bash
@@ -537,3 +602,4 @@ The tests use synthetic data and run without the hardware.
 | `hil/plots.py` | PNG output |
 | `hil/arp.py` | `arp`: pcap parsing, capture, link status, AD2 segments, client replacement steps |
 | `hil/checks.py` | `check`: C1-C11, the logged USB serial (`SerialLog`) and their judgement helpers |
+| `hil/motor.py` | `motor`: tests with a motor, brake and load (steps as data, timeline, observations) |

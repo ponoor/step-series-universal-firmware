@@ -15,6 +15,14 @@ id = 1
 # DIO 14 / 15.
 test_axis = 1
 motor_connected = false
+# With a motor connected (motor_connected = true, Scope 1 off OUT1A): settings applied by
+# hil.py motor, not saved on the board (see README, Motor tests). Example for a PKP243D23M2
+# at 24 V with a rod and 30 g at 15 cm:
+# bemf_param = [1032, 9, 9, 9]
+# kval = [16, 16, 16, 16]
+# speed_profile = [100, 100, 30]
+# brake_transition_ms = 100
+# position_report_ms = 20
 
 [ad2.dio]
 # Brake outputs EM_1-EM_4 (J7-1 to J7-4, in parallel with the Brake Board), motor n on

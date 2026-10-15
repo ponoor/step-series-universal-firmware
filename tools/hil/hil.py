@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hardware-in-the-loop test bench for the STEP800 / STEP400 with a Digilent Analog Discovery 2.
 
-Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp> [--id N] ...
+Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp|motor> [--id N] ...
 See README.md.
 """
 
@@ -13,6 +13,7 @@ import sys
 from hil import config
 from hil.arp import STEPS as ARP_STEPS
 from hil.checks import TESTS as CHECKS
+from hil.motor import STEPS as MOTOR_STEPS
 from hil.scenarios import SCENARIOS
 
 
@@ -28,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("selftest", parents=[common], help="check wiring, probes, brake outputs, home switch and excitation")
-    s.add_argument("--only", nargs="+", choices=["probes", "brake_map", "home_sw", "excitation", "sync"],
+    s.add_argument("--only", nargs="+", choices=["v33", "probes", "brake_map", "home_sw", "limit_sw", "excitation", "sync"],
                    help="run only these checks")
     s.add_argument("--sync", action="store_true",
                    help="also measure the Scope / Digital In start offset (Scope 2 must be moved to P0)")
@@ -98,7 +99,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--observe", type=float, default=30.0, help="seconds after /setDestIp from NIC B (E1 5)")
     s.add_argument("--heartbeat", action="store_true", help="fix: /setDestIp every 1.0 s (F1); without: F2")
     s.add_argument("--label", help="suffix of the result directory")
+
+    s = sub.add_parser("motor", parents=[common], help="tests with a real motor and brake, record only (STEP400)")
+    s.add_argument("--step", choices=list(MOTOR_STEPS), help="step to run (see hil/motor.py)")
+    s.add_argument("--note", nargs="+", metavar=("RESULT_DIR", "KEY=VALUE"),
+                   help="store operator observations in summary.json of a result, no board access")
+    s.add_argument("--label", help="suffix of the result directory")
+    s.add_argument("--rate", type=float, help="digital sample rate (default 100 kS/s, 10 kS/s with a restart)")
+    s.add_argument("--reboot", action="store_true", help="reboot the board (R) before the setup")
     return p
+
+
+# Subcommands that judge the excitation on OUT1A: not with a motor connected.
+OUT1A_COMMANDS = ("brake", "reboot", "powerup")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -106,10 +119,15 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.load(args.config)
     if getattr(args, "id", None) is not None:
         cfg.override_board_id(args.id)
-    from hil import arp, checks, commands, restart
+    from hil import arp, checks, commands, motor, restart
 
     if args.command == "arp" and cfg.model != "step800":
         print(f"error: arp needs P5 (UDP send), which {cfg.model} has no pin for")
+        return 2
+    motor_connected = bool(cfg.raw["motor"].get("motor_connected", False))
+    if motor_connected and args.command in OUT1A_COMMANDS:
+        print(f"error: motor.motor_connected = true: {args.command} judges the excitation on OUT1A, which "
+              "is set up without a motor. Use hil.py motor (record only).")
         return 2
     if args.command == "check":
         skip = checks.UNSUPPORTED.get(cfg.model, {})
@@ -126,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     # The board must be the one of board.model, with its HIL_PROBE build. Not for compare
     # (no board), nor for the STEP800 power-up (its USB cable is unplugged then).
+    if args.command == "motor" and args.note:
+        return motor.cmd_motor(cfg, args)
     if args.command != "compare" and not (args.command == "powerup" and cfg.model == "step800"):
         try:
             board = commands.preflight(cfg)
@@ -144,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         "reboot": restart.cmd_reboot,
         "check": checks.cmd_check,
         "arp": arp.cmd_arp,
+        "motor": motor.cmd_motor,
     }[args.command]
     return handler(cfg, args)
 

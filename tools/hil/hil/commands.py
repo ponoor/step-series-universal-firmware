@@ -258,6 +258,12 @@ def cmd_selftest(cfg: Config, args) -> int:
 
         steps = [("probes", _selftest_probes), ("brake_map", _selftest_brake_map),
                  ("home_sw", _selftest_home_sw), ("excitation", _selftest_excitation)]
+        if cfg.raw["motor"].get("motor_connected", False):
+            # OUT1A is not on the Scope with a motor connected; brake_map releases the brakes
+            # of HiZ motors (a loaded axis can turn).
+            steps.remove(("excitation", _selftest_excitation))
+            print("motor.motor_connected = true: excitation left out; brake_map releases each brake "
+                  "while the motor is HiZ")
         if cfg.v33_dio is not None:
             steps.insert(0, ("v33", _selftest_v33))
         if "limit" in cfg.switch_dios:

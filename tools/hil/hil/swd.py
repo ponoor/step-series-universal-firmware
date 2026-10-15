@@ -425,7 +425,9 @@ def cmd_swd(cfg: Config, args) -> int:
                                   + (f"_{args.label}" if args.label else ""))
     res: dict = {"elf": str(elf) if elf else None}
     with OpenOcd(log_path=out / "openocd.log") as ocd:
-        res["before"] = info(ocd, image)
+        # The whole image only with --info: a long read once made the Atmel-ICE time out and
+        # re-enumerate (2026-10-16); before a halt the vector table and startup code suffice.
+        res["before"] = info(ocd, image, None if args.info else 256)
         print(json.dumps(res["before"], indent=2))
         if args.info:
             commands.write_json(out / "summary.json", res)

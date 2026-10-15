@@ -116,6 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="store operator observations in summary.json of a result, no board access")
     s.add_argument("--label", help="suffix of the result directory")
     s.add_argument("--rate", type=float, help="digital sample rate (default 10 kS/s: across a restart)")
+    s.add_argument("--no-probe", action="store_true",
+                   help="firmware without the HIL probes (e.g. main): no board check, judged from the heartbeat "
+                        "gaps, J7 and /booted only")
     return p
 
 
@@ -158,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "usb" and not args.step:
         print("error: --step or --note is needed")
         return 2
-    if args.command != "compare" and not (args.command == "powerup" and cfg.model == "step800"):
+    no_board_check = (args.command == "powerup" and cfg.model == "step800") or \
+        (args.command == "usb" and args.no_probe)
+    if args.command != "compare" and not no_board_check:
         try:
             board = commands.preflight(cfg)
         except (commands.BoardMismatch, commands.DiagError, OSError) as ex:

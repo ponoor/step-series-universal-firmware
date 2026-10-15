@@ -623,6 +623,11 @@ to engaged), `loop_resumes_ms`, `booted_ms` and `resetCause` (host times mapped 
 time), `heartbeat_last_ms` / `heartbeat_next_ms`, and with VBUS the unplug before the stop.
 Without VBUS the unplug time is not known; the stop is the last P0 edge.
 
+`--no-probe`, for a firmware without the HIL probes (e.g. `main`, TASK_usb_unplug Task 4):
+no board check before the run, no P0-P2 and no fault record; `heartbeat_stops` lists each
+gap of the `/getVersion` replies (0.3 s or more) with the J7 changes in it and the `/booted`
+after it, in ms from the last reply (host times: judge with a window of about 300 ms).
+
 ## Tests
 
 ```bash

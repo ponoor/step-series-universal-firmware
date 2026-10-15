@@ -282,10 +282,32 @@ def booted_causes(rx: list) -> list[dict]:
              "resetCause": e.args[1] if len(e.args) > 1 else None} for e in rx if e.address == "/booted"]
 
 
-def analyze_usb(cfg: Config, cap, rx: list, fit, vbus_dio: int | None) -> dict:
+def heartbeat_stops(gaps: list[tuple[float, float]], brakes: dict[int, analyze.Edges], boots: list[dict],
+                    to_s) -> list[dict]:
+    """--no-probe (a firmware without the HIL probes, e.g. main): each heartbeat gap with the
+    J7 changes in it, times in ms from the last reply (host times mapped to the AD2 time;
+    network and host latency included, so judged with a wide window)."""
+    out = []
+    for a, b in gaps:
+        ms = lambda t: round((t - a) * 1e3, 1)  # noqa: E731
+        res: dict = {"last_reply_s": round(a, 3), "next_reply_ms": ms(b), "brake_changes_ms": {}}
+        for m, e in brakes.items():
+            ch = [[ms(t), "engaged"] for t in e.fall if a < t < b] + [[ms(t), "released"] for t in e.rise if a < t < b]
+            lvl = int(level_at(e, a))
+            if ch or lvl:
+                res["brake_changes_ms"][m] = {"at_last_reply": "released" if lvl else "engaged", "changes": sorted(ch)}
+        bt = [x for x in boots if to_s(x["t_ns"]) > a]
+        if bt:
+            res["booted_ms"] = ms(to_s(bt[0]["t_ns"]))
+            res["resetCause"] = bt[0]["resetCause"]
+        out.append(res)
+    return out
+
+
+def analyze_usb(cfg: Config, cap, rx: list, fit, vbus_dio: int | None, probes: bool = True) -> dict:
     seg = cap.digital
     probe = cfg.probe_dio
-    p0 = analyze.bit_edges(seg, probe[0]).all
+    p0 = analyze.bit_edges(seg, probe[0]).all if probes else np.zeros(0)
     p2 = analyze.bit_edges(seg, probe[2])
     brakes = {m: analyze.bit_edges(seg, int(d)) for m, d in enumerate(cfg.ad2["dio"]["brake"], start=1)}
     vbus = analyze.bit_edges(seg, vbus_dio) if vbus_dio is not None else None
@@ -307,6 +329,7 @@ def analyze_usb(cfg: Config, cap, rx: list, fit, vbus_dio: int | None) -> dict:
             s["resetCause"] = b[0]["resetCause"]
         s["kind"] = classify(s)
     return {"stops": stops,
+            "heartbeat_stops": None if probes else heartbeat_stops(gaps, brakes, boots, lambda t_ns: to_ad2(host(t_ns))),
             "heartbeat_gaps_ms": [[round(a * 1e3, 1), round((b - a) * 1e3, 1)] for a, b in gaps],
             "booted": [{"host_s": round(host(x["t_ns"]), 3), "resetCause": x["resetCause"]} for x in boots],
             "vbus": None if vbus is None else {"fall_s": vbus.fall.round(6).tolist(),
@@ -361,7 +384,9 @@ def cmd_usb(cfg: Config, args) -> int:
     if vbus_dio is None:
         print("note: no usb.vbus_dio: the unplug time is not recorded (the stop is the last P0 edge)")
     probe = cfg.probe_dio
-    dios = [int(d) for d in cfg.ad2["dio"]["brake"]] + probe[:3] + ([cfg.v33_dio] if cfg.v33_dio is not None else [])
+    probes = not args.no_probe
+    dios = ([int(d) for d in cfg.ad2["dio"]["brake"]] + (probe[:3] if probes else [])
+            + ([cfg.v33_dio] if cfg.v33_dio is not None else []))
     if vbus_dio is not None:
         dios.append(vbus_dio)
     mask = commands.mask_of(dios)
@@ -400,17 +425,17 @@ def cmd_usb(cfg: Config, args) -> int:
     motor._write_rows(out / "timeline.csv", rows)
     fit, _, _ = motor.clock_fit(np.array([commands.host_s(cap, e.t_ns) for e in tx]),
                                 analyze.bit_edges(cap.digital, probe[1]).rise)
-    res = analyze_usb(cfg, cap, rx, fit, vbus_dio)
+    res = analyze_usb(cfg, cap, rx, fit if probes else None, vbus_dio, probes)
     commands.prompt("OPERATOR: plug the USB cable of the board back in (if it is out), then press Enter ")
     try:
         diag.reconnect(30.0)
-        record = read_fault_record(diag)
+        record = read_fault_record(diag) if probes else None
     except (DiagError, OSError) as ex:
         record = f"error: serial reconnect: {ex}"
     finally:
         _safe_close(diag)
     summary = {"step": step.id, "title": step.title, "observe": step.observe, "expect": step.expect,
-               "firmware": version, "axis": cfg.test_axis, "digital_rate": rate, "vbus_dio": vbus_dio,
+               "firmware": version, "probes": probes, "axis": cfg.test_axis, "digital_rate": rate, "vbus_dio": vbus_dio,
                "capture_ok": cap.ok, "problems": cap.problems(), "setup": [list(m) for m in setup_actions(cfg, step)],
                "before": before, "after": after, "clock": info, **res, "fault_record": record,
                "queries": runner.queries, "errors": runner.errors, "observations": {}}
@@ -422,7 +447,10 @@ def cmd_usb(cfg: Config, args) -> int:
     for s in res["stops"]:
         print(f"stop at {s['stop_s']:.3f} s: {s['kind']}; early warning {s['early_warning_ms']} ms, loop resumes "
               f"{s['loop_resumes_ms']} ms, brakes {s['brake_changes_ms']}, resetCause {s.get('resetCause')}")
-    if not res["stops"]:
+    for s in res["heartbeat_stops"] or []:
+        print(f"no reply from {s['last_reply_s']:.3f} s for {s['next_reply_ms']} ms: brakes {s['brake_changes_ms']}, "
+              f"/booted {s.get('booted_ms')} ms resetCause {s.get('resetCause')}")
+    if probes and not res["stops"]:
         print("no MCU stop (no P0 gap of 0.2 s or more)")
     if record:
         print(record)

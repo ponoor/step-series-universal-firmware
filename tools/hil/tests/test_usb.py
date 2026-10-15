@@ -158,3 +158,26 @@ def test_hardfault_marker(tmp_path):
     (s,) = usb.analyze_usb(cfg, cap, [], None, None)["stops"]
     assert s["early_warning_ms"] is None and s["p2_edges_in_stop"] > 1000
     assert s["kind"].startswith("HardFault")
+
+
+def test_no_probe_heartbeat_stops(tmp_path):
+    cfg = usb_cfg(tmp_path)
+    # main: a 62 ms watchdog, so a hang is a short reset; J7 engaged when the pins float.
+    cap = capture(4.0, 10.0, None, j7_fall=2.05)
+    rx = [LogEntry(int(1e9 * t), "rx", "/version", ("x",)) for t in np.arange(0.1, 2.01, 0.1)]
+    rx += [LogEntry(int(1e9 * t), "rx", "/version", ("x",)) for t in np.arange(3.0, 4.0, 0.1)]
+    rx.append(LogEntry(int(2.9e9), "rx", "/booted", (0,)))
+    res = usb.analyze_usb(cfg, cap, rx, None, None, probes=False)
+    assert res["stops"] == []
+    (h,) = res["heartbeat_stops"]
+    assert abs(h["last_reply_s"] - 2.0) < 1e-3 and abs(h["next_reply_ms"] - 1000) < 1
+    assert h["brake_changes_ms"][1]["changes"] == [[50.0, "engaged"]]
+    assert abs(h["booted_ms"] - 900) < 1 and h["resetCause"] is None
+
+
+def test_cli_no_probe_flag():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("hil_cli", config.HIL_DIR / "hil.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.build_parser().parse_args(["usb", "--step", "u1", "--no-probe"]).no_probe

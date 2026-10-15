@@ -334,3 +334,24 @@ def test_reset_before_loop_skips_the_hang():
     p0 = np.concatenate((loop1, hang_end, reset, loop2))
     assert restart.reset_before_loop(p0) == pytest.approx(4.5001)
     assert restart.mcu_reset_time(p0) == pytest.approx(loop1[-1])  # the longest gap is the hang
+
+
+def test_host_report_intervals():
+    from hil.osc import LogEntry
+
+    class Link:
+        def __init__(self, log):
+            self.log = log
+
+        def entries(self, direction=None, t_from_ns=0, t_to_ns=None):
+            return [e for e in self.log if e.direction == direction and t_from_ns <= e.t_ns <= t_to_ns]
+
+    t0 = 10**12
+    log = []
+    for k in range(50):
+        for m in (1, 2):
+            jitter = 3_000_000 if (m == 2 and k == 20) else 0
+            log.append(LogEntry(t0 + k * 20_000_000 + m * 100_000 + jitter, "rx", "/position", (m, k)))
+    cap = Capture(host_trigger_ns=t0 - 1, host_stop_ns=t0 + 10**9)
+    r = commands.host_report_intervals(Link(log), cap, {"position_report_ms": 20}, 2)
+    assert r["per"][1]["off"] == 0 and r["per"][2]["off"] == 2 and r["intervals"] == 98

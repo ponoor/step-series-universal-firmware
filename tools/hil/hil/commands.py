@@ -532,6 +532,31 @@ def report_bursts(p2: analyze.Edges, p4_rise: np.ndarray, p5_rise: np.ndarray,
 REPORT_TOLERANCE_MS = 2.0
 
 
+def host_report_intervals(link, cap: Capture, load: dict, num_motors: int) -> dict:
+    """Position report intervals from the host receive times within the recording (network
+    and host jitter included): per motor for /position, or of /positionList. Off by
+    REPORT_TOLERANCE_MS or more from the configured interval."""
+    list_ms = int(load.get("position_list_report_ms") or 0)
+    rx = link.entries("rx", cap.host_trigger_ns, cap.host_stop_ns)
+    if list_ms:
+        groups = {"list": [e.t_ns for e in rx if e.address == "/positionList"]}
+        expected = list_ms
+    else:
+        expected = int(load.get("position_report_ms") or 0)
+        groups = {m: [e.t_ns for e in rx if e.address == "/position" and e.args and int(e.args[0]) == m]
+                  for m in range(1, num_motors + 1)}
+    if not expected:
+        return {"expected_ms": None}
+    out: dict = {"expected_ms": expected, "tolerance_ms": REPORT_TOLERANCE_MS, "per": {}}
+    for k, t in groups.items():
+        v = np.diff(np.array(sorted(t), dtype=np.int64)) / 1e6
+        off = np.abs(v - expected) >= REPORT_TOLERANCE_MS
+        out["per"][k] = {"intervals": int(v.size), "off": int(off.sum()), "stats_ms": analyze.stats(v)}
+    out["intervals"] = sum(x["intervals"] for x in out["per"].values())
+    out["off"] = sum(x["off"] for x in out["per"].values())
+    return out
+
+
 def report_interval_check(intervals_us: np.ndarray, load: dict | None,
                           tolerance_ms: float = REPORT_TOLERANCE_MS) -> dict:
     """Report intervals off the configured interval by tolerance_ms or more."""
@@ -728,6 +753,7 @@ def cmd_timing(cfg: Config, args) -> int:
     summary["report_interval"] = (report_interval_check(series["reportInterval"], summary["load"])
                                   if "reportInterval" in series else
                                   {"expected_ms": None, "intervals": 0, "off": None, "note": "no P4 / P5 on this board"})
+    summary["report_interval_host"] = host_report_intervals(link, cap, summary["load"], cfg.num_motors)
     # Slots run late by a whole period or more (5 ms slot firmware only; None before).
     summary["slot_late"] = perf_after.get(SLOT_LATE_COUNTER)
     summary["report_clock_realign"] = perf_after.get(REPORT_CLOCK_COUNTER)
@@ -755,6 +781,10 @@ def cmd_timing(cfg: Config, args) -> int:
     for key in REALIGN_COUNTERS:
         if key in perf_after:
             print(f"{key} (p): {perf_after[key]}")
+    rh = summary["report_interval_host"]
+    if rh.get("expected_ms"):
+        print(f"reportInterval (host receive times): {rh['off']} of {rh['intervals']} off {rh['expected_ms']} ms by "
+              f"{REPORT_TOLERANCE_MS:.0f} ms or more")
     ri = summary["report_interval"]
     if ri["off"] is not None:
         print(f"reportInterval: {ri['off']} of {ri['intervals']} off {ri['expected_ms']} ms by "

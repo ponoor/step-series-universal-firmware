@@ -763,7 +763,7 @@ def cmd_timing(cfg: Config, args) -> int:
         k: {"perf_max_us": perf_after.get(p, {}).get("max_us"), "probe_max_us": summary["stats_us"][k]["max"],
             "perf_avg_us": perf_after.get(p, {}).get("avg_us"), "probe_mean_us": summary["stats_us"][k]["mean"],
             "perf_n": perf_after.get(p, {}).get("n"), "probe_n": summary["stats_us"][k]["count"]}
-        for k, p in PERF_OF_SERIES.items()}
+        for k, p in PERF_OF_SERIES.items() if k in summary["stats_us"]}
     write_json(out / "summary.json", summary)
     rows = [[k] + [s[x] for x in analyze.STAT_KEYS] for k, s in summary["stats_us"].items()]
     write_csv(out / "stats_us.csv", ["metric"] + list(analyze.STAT_KEYS), rows)

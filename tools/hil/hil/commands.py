@@ -1327,21 +1327,31 @@ def _analyze_powerup(run: int, cap: Capture, brake_dios: list[int], p4: int, v33
 # Across a power-up the USB enumerates: 10 kS/s (200 kS/s lost data at every
 # re-enumeration on the STEP800 bench).
 POWERUP_RATE = 1e4
+POWERUP_AFTER_BOOTED_S = 8.0  # recorded after /booted (the drivers are set up well before)
 
 
-def wait_dio(ad2: AD2, dio: int, level: int, hold: float = 1.0, timeout: float = 600.0) -> bool:
-    """Waits until the DIO stays at `level` for `hold` seconds."""
+def wait_rail_off(ad2: AD2, dio: int, hold: float = 1.0, min_low: float = 0.25, timeout: float = 600.0) -> bool:
+    """Waits until the 3.3 V DIO is not steadily high: at least min_low of the reads over
+    `hold` seconds low. With the board off the AD2 inputs float and read random levels."""
     deadline = time.monotonic() + timeout
-    since = None
     while time.monotonic() < deadline:
-        if (ad2.read_dio() >> dio) & 1 == level:
-            since = since or time.monotonic()
-            if time.monotonic() - since >= hold:
-                return True
-        else:
-            since = None
-        time.sleep(0.05)
+        reads = []
+        t_end = time.monotonic() + hold
+        while time.monotonic() < t_end:
+            reads.append((ad2.read_dio() >> dio) & 1)
+            time.sleep(0.02)
+        if reads and reads.count(0) / len(reads) >= min_low:
+            return True
     return False
+
+
+def rail_rise(seg: analyze.Segments, dio: int) -> float | None:
+    """Start of the last high span of the DIO if it lasts to the end of the capture: the
+    3.3 V rise (before it the unpowered inputs float and toggle). 0.0 if always high."""
+    e = analyze.bit_edges(seg, dio)
+    if not e.final:
+        return None
+    return float(e.rise[-1]) if e.rise.size else (0.0 if e.initial else None)
 
 
 def ask(message: str, choices: dict[str, str]) -> str:
@@ -1356,7 +1366,9 @@ def ask(message: str, choices: dict[str, str]) -> str:
 
 def _powerup_dio(cfg: Config, args) -> int:
     """Power-up with the 3.3 V on ad2.dio.v33 (STEP400): Digital In triggers on its rise and
-    starts the Scope (OUT1A, P0). Both USB and 12 V are switched (USB alone powers the 3.3 V)."""
+    starts the Scope (OUT1A, P0). Both USB and 12 V are switched (USB alone powers the 3.3 V).
+    No trigger: the unpowered AD2 inputs float and toggle, so the recording starts before the
+    power-on and runs until /booted + POWERUP_AFTER_BOOTED_S."""
     out = new_result_dir("powerup")
     v33 = cfg.v33_dio
     brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
@@ -1367,20 +1379,22 @@ def _powerup_dio(cfg: Config, args) -> int:
         prompt(f"Power-up: the recording starts at the 3.3 V rise (DIO {v33}). Press Enter when ready: ")
         for i in range(args.repeat):
             print(f"[{i + 1}/{args.repeat}] Switch OFF both the USB cable and the 12 V supply.", flush=True)
-            if not wait_dio(ad2, v33, 0):
-                runs.append({"run": i + 1, "error": f"DIO {v33} (3.3 V) did not stay low within 10 minutes"})
+            if not wait_rail_off(ad2, v33):
+                runs.append({"run": i + 1, "error": f"DIO {v33} (3.3 V) still high after 10 minutes"})
                 break
-            rec = ad2.start_recording(args.duration, digital_rate=POWERUP_RATE,
+            rec = ad2.start_recording(None, digital_rate=POWERUP_RATE,
                                       sensible_mask=mask_of(brake_dios + cfg.probe_dios + [v33]),
                                       analog_channels=(out1a, ref) if ref else (out1a,), analog_rate=POWERUP_RATE,
-                                      digital_trigger=v33, check_v33=False)
+                                      check_v33=False)
             t_armed = time.monotonic_ns()
-            print(f"[{i + 1}/{args.repeat}] Power is off, armed. Switch ON the USB cable and the 12 V supply, "
+            print(f"[{i + 1}/{args.repeat}] Power is off, recording. Switch ON the USB cable and the 12 V supply, "
                   "in your usual order (no time limit).", flush=True)
-            cap = rec.wait(timeout=600.0 + args.duration)
-            if rec._thread is not None and rec._thread.is_alive():
-                rec.stop()
-                runs.append({"run": i + 1, "error": "no 3.3 V rising edge within 10 minutes"})
+            booted = link.wait_for("/booted", 600.0, t_armed)
+            if booted is not None:
+                time.sleep(POWERUP_AFTER_BOOTED_S)
+            cap = rec.stop()
+            if booted is None:
+                runs.append({"run": i + 1, "error": "no /booted within 10 minutes"})
                 continue
             order = ask("Which did you switch on first? [u] USB, [p] 12 V, [b] both at once: ",
                         {"u": "USB first", "p": "12 V first", "b": "both"})
@@ -1395,12 +1409,28 @@ def _powerup_dio(cfg: Config, args) -> int:
     write_json(out / "summary.json", {"runs": runs, "rate": POWERUP_RATE,
                                       "note": "times from the 3.3 V rise on the DIO (logic threshold, about "
                                               "1.5 V), not the Scope crossing of the STEP800 power-up runs"})
-    rows = [[r["run"], r.get("order"), "PASS" if r.get("ok") else ("FAIL" if "ok" in r else "-"),
+    rows = [[r["run"], r.get("order"), ("PASS*" if r.get("indeterminate") else "PASS") if r.get("ok")
+             else ("FAIL" if "ok" in r else "-"),
              ",".join(f"M{m}" for m in r.get("brake_high", {})) or "none", r.get("first_p0_ms"),
              r.get("hiz_ms"), r.get("error", "")] for r in runs]
     print_table(["run", "order", "brakes low", "high", "first P0 [ms]", "OUT1A HiZ [ms]", "error"], rows)
     print(f"results: {out}")
     return 0 if runs and all(r.get("ok") for r in runs) else 1
+
+
+def common_high_spans(cfg: Config, cap: Capture, t_from: float, p0_low_v: float = 0.5) -> list[tuple[float, float]]:
+    """Spans from t_from on where every probe DIO and every switch DIO reads high while P0
+    on the Scope (ad2.scope.p0_ref) stays below p0_low_v."""
+    seg = cap.digital
+    spans = [(t_from, seg.duration)]
+    for d in cfg.probe_dios + list(cfg.switch_dios.values()):
+        spans = analyze.intersect(spans, analyze.Step.from_edges(analyze.bit_edges(seg, d)).intervals(True))
+    ref = int(cfg.ad2["scope"].get("p0_ref", 0))
+    if not ref or ref not in cap.analog or not cap.analog_rate:
+        return []
+    v, r = cap.analog[ref], cap.analog_rate
+    return [(a, b) for a, b in spans
+            if v[int(a * r):max(int(a * r) + 1, int(b * r))].size and v[int(a * r):max(int(a * r) + 1, int(b * r))].max() < p0_low_v]
 
 
 def analyze_powerup_dio(cfg: Config, cap: Capture, hiz_hold_ms: float = 100.0) -> dict:
@@ -1412,15 +1442,29 @@ def analyze_powerup_dio(cfg: Config, cap: Capture, hiz_hold_ms: float = 100.0) -
     if not cap.ok:
         return {"error": "; ".join(cap.problems())}
     seg = cap.digital
-    v = analyze.bit_edges(seg, cfg.v33_dio)
-    t_rise = float(v.rise[0]) if v.rise.size else 0.0
+    t_rise = rail_rise(seg, cfg.v33_dio)
+    if t_rise is None:
+        return {"error": f"DIO {cfg.v33_dio} (3.3 V) not high at the end of the capture"}
     res: dict = {"rise_in_capture_ms": t_rise * 1e3, "brake_high": {}}
+    # At the power-on every AD2 input can read high at once for a few ms while P0 on the
+    # Scope (differential) stays low: an AD2-side artifact (ground shift), not the board's
+    # signals. Brake spans inside such a span are listed apart (not judged).
+    common = common_high_spans(cfg, cap, t_rise)
+    res["all_inputs_high_ms"] = [[round((a - t_rise) * 1e3, 2), round((b - a) * 1e3, 2)] for a, b in common]
+    res["brake_high_in_common"] = {}
     for motor, d in enumerate(cfg.ad2["dio"]["brake"], start=1):
         step = analyze.Step.from_edges(analyze.bit_edges(seg, int(d)))
         high = analyze.intersect([(t_rise, seg.duration)], step.intervals(True))
-        if high:
-            res["brake_high"][motor] = [[round((a - t_rise) * 1e3, 2), round((b - a) * 1e3, 2)] for a, b in high]
+        # Starts while every input reads high: the lines come back at slightly different
+        # times, so the span may end after the common span. Not judged (indeterminate).
+        inside = [(a, b) for a, b in high if any(ca - 1e-4 <= a <= cb for ca, cb in common)]
+        real = [x for x in high if x not in inside]
+        if real:
+            res["brake_high"][motor] = [[round((a - t_rise) * 1e3, 2), round((b - a) * 1e3, 2)] for a, b in real]
+        if inside:
+            res["brake_high_in_common"][motor] = [[round((a - t_rise) * 1e3, 2), round((b - a) * 1e3, 2)] for a, b in inside]
     res["ok"] = not res["brake_high"]
+    res["indeterminate"] = bool(res["brake_high_in_common"])
     p0 = analyze.bit_edges(seg, cfg.probe(0)).all
     p0 = p0[p0 >= t_rise]
     res["first_p0_ms"] = round(float(p0[0] - t_rise) * 1e3, 2) if p0.size else None

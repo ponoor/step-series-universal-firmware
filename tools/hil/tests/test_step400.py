@@ -265,7 +265,7 @@ def digital(cfg, duration, highs: dict[int, list[tuple[float, float]]], toggles:
 def test_powerup_dio_pass_and_fail():
     cfg = step400_cfg()
     p0_toggles = list(0.3 + np.arange(200) * 1e-3)
-    ok = Capture(digital=digital(cfg, 1.0, {4: [(0.01, 1.0)]}, {8: p0_toggles}))
+    ok = Capture(digital=digital(cfg, 1.0, {4: [(0.001, 0.002), (0.004, 0.005), (0.01, 1.0)]}, {8: p0_toggles}))
     r = commands.analyze_powerup_dio(cfg, ok)
     assert r["ok"] and r["brake_high"] == {} and r["first_p0_ms"] == pytest.approx(290.0, abs=0.2)
     # EM_4 (motor 4, DIO 3) high for 2 ms, 30 ms after the 3.3 V rise.
@@ -367,3 +367,15 @@ def test_pwm_stop():
     cfg4, cfg8 = step400_cfg(), step800_cfg()
     assert restart.driver_standby(cfg4, v, RATE) == pytest.approx(0.4)
     assert restart.driver_standby(cfg8, v, RATE) == pytest.approx(0.9)  # L6470: the jump
+
+
+def test_powerup_common_mode_spans_not_judged():
+    # Every input reads high 0.3-5 ms after the rise while P0 on the Scope is low: indeterminate.
+    cfg = step400_cfg()
+    all_hi = {d: [(0.0103, 0.015)] for d in (0, 1, 2, 3, 8, 9, 10, 14, 15)}
+    all_hi[4] = [(0.01, 1.0)]
+    all_hi[3] = [(0.0103, 0.0152)]  # J7-4 comes back a little later
+    cap = Capture(digital=digital(cfg, 1.0, all_hi, {8: list(0.3 + np.arange(200) * 1e-3)}),
+                  analog_rate=RATE, analog={1: np.full(int(RATE), 12.6), 2: np.zeros(int(RATE))})
+    r = commands.analyze_powerup_dio(cfg, cap)
+    assert r["ok"] and r["indeterminate"] and set(r["brake_high_in_common"]) == {1, 2, 3, 4}

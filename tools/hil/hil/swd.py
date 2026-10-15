@@ -118,21 +118,23 @@ def is_code(addr: int) -> bool:
     return APP_START <= (addr & ~1) < FLASH_END
 
 
-def exception_frames(stack: list[int], sp: int) -> list[dict]:
+def exception_frames(stack: list[int], sp: int, lr: int | None = None) -> list[dict]:
     """Exception frames on the stack: the 8 words after each EXC_RETURN word (a handler
     that calls functions pushes LR = EXC_RETURN last, right below the frame the hardware
-    stacked). Kept only when the stacked xPSR has the Thumb bit and the PC is code."""
+    stacked), and the 8 words at SP when LR is EXC_RETURN (a handler that pushes nothing,
+    e.g. the core's Dummy_Handler). Kept only when the stacked xPSR has the Thumb bit and
+    the PC is code."""
     out = []
-    for i, w in enumerate(stack):
-        if w in EXC_RETURN:
-            f = stack[i + 1:i + 9]
-            if len(f) < 8:
-                continue
-            r0, r1, r2, r3, r12, lr, pc, xpsr = f
-            if (xpsr & 0x01000000) and is_code(pc):
-                out.append({"exc_return": w, "frame_addr": sp + 4 * (i + 1), "r0": r0, "r1": r1, "r2": r2,
-                            "r3": r3, "r12": r12, "lr": lr, "pc": pc, "xpsr": xpsr,
-                            "interrupted": exception_name(xpsr & 0x3F)})
+    starts = ([(0, lr)] if lr in EXC_RETURN else []) + [(i + 1, w) for i, w in enumerate(stack) if w in EXC_RETURN]
+    for i, exc_return in starts:
+        f = stack[i:i + 8]
+        if len(f) < 8:
+            continue
+        r0, r1, r2, r3, r12, f_lr, pc, xpsr = f
+        if (xpsr & 0x01000000) and is_code(pc):
+            out.append({"exc_return": exc_return, "frame_addr": sp + 4 * i, "r0": r0, "r1": r1, "r2": r2,
+                        "r3": r3, "r12": r12, "lr": f_lr, "pc": pc, "xpsr": xpsr,
+                        "interrupted": exception_name(xpsr & 0x3F)})
     return out
 
 
@@ -337,7 +339,7 @@ def dump(ocd: OpenOcd, elf: Path | None) -> dict:
     n = max(0, min(128, (RAM_END - sp) // 4))
     stack = ocd.words(sp, n) if n else []
     res["stack"] = [f"0x{w:08X}" for w in stack]
-    frames = exception_frames(stack, sp)
+    frames = exception_frames(stack, sp, regs["lr"] if res["ipsr"] else None)
     res["exception_frames"] = [{k: (f"0x{v:08X}" if isinstance(v, int) and k != "frame_addr" else v)
                                 for k, v in f.items()} for f in frames]
     if elf is not None:

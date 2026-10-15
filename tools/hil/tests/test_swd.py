@@ -134,3 +134,12 @@ def test_setup_messages_u1(tmp_path):
     assert msgs[-3:] == [("/activate", 1, 1), ("wait", 1.0), ("wait", 1.0)]  # the second: close_serial in usb
     # u3: released, then engaged before the unplug.
     assert ("/activate", 1, 0) in swd.setup_messages(config.load(path), "u3")
+
+
+def test_exception_frame_at_sp():
+    # Dummy_Handler (HardFault) pushes nothing: the frame is at SP, LR = EXC_RETURN.
+    sp = 0x20007FB8
+    stack = [0x20000FE8, 1, 0x20100C54, 0x20000C50, 0x20001F20, 0xCAE9, 0xCAFA, 0x21000000, 0x20001920]
+    fr = swd.exception_frames(stack, sp, 0xFFFFFFF9)
+    assert len(fr) == 1 and fr[0]["pc"] == 0xCAFA and fr[0]["frame_addr"] == sp and fr[0]["interrupted"] == "thread"
+    assert swd.exception_frames(stack, sp) == []

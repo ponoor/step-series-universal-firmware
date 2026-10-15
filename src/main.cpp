@@ -24,6 +24,7 @@
 #include "homingTimeout.h"
 #include "servoSwitch.h"
 #include "hilProbe.h"
+#include "hilFault.h"
 
 const String productName = PRODUCT_NAME;
 const char *firmwareName = FIRMWARE_NAME;
@@ -47,6 +48,7 @@ void setup()
     resetCause = readResetCause(&resetCauseRaw); // before any other initialization
     SerialUSB.begin(9600);
     HIL_PROBE_INIT();
+    HIL_FAULT_INIT();
 #ifdef HIL_PROBE
     hilCaptureDriversAtBoot(driverSPI);
 #endif
@@ -493,6 +495,7 @@ void updateServo()
 void loop()
 {
     PROBE_TOGGLE(0);
+    HIL_FAULT_LOOP_MARK();
     static uint32_t lastLoopStartMicros = 0;
     const uint32_t loopStartMicros = micros();
     if (lastLoopStartMicros != 0)

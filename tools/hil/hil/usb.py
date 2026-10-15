@@ -16,6 +16,7 @@ summary.json, per MCU stop (a P0 gap of STOP_GAP_S or more):
 - stop: the last P0 edge before the gap (the MCU stopped there);
 - early warning: a long P2 pulse (EW_MIN_S or more) in the gap. P2 also pulses during
   every servo update (microseconds), the early warning holds it high until the reset;
+  the HIL HardFault handler toggles it every 0.5 ms instead (p2_edges_in_stop);
 - brake outputs: the J7 changes in the gap (engaged by the early warning, or when the pins
   float at the MCU reset);
 - loop resumes: the first P0 edge that starts the loop toggling after the gap (restart.py);
@@ -47,6 +48,9 @@ STOP_GAP_S = 0.2
 EW_MIN_S = 0.005
 # A heartbeat gap this long counts as "no reply" (the board answers within a few ms).
 HEARTBEAT_GAP_S = 0.3
+# The HIL HardFault handler toggles P2 every 0.5 ms (src/hilFault.h): this many P2 edges
+# in a stop, without a long P2 pulse, mark a HardFault.
+HARDFAULT_MIN_P2_EDGES = 20
 # Waits after the operator request: for the replies to stop, then for /booted.
 UNPLUG_WAIT_S = 60.0
 BOOTED_WAIT_S = 10.0
@@ -243,6 +247,7 @@ def analyze_stop(t_stop: float, t_resume: float | None, p2: analyze.Edges, brake
     res: dict = {"stop_s": round(t_stop, 6), "loop_resumes_ms": ms(t_resume),
                  "early_warning_ms": ms(ew[0]) if ew else None,
                  "early_warning_p2_high_ms": round((ew[1] - ew[0]) * 1e3, 2) if ew and ew[1] is not None else None,
+                 "p2_edges_in_stop": int(np.sum((p2.all > t_stop) & (p2.all < t_to))),
                  "brake_changes_ms": {}}
     for m, e in brakes.items():
         ch = [[ms(t), "engaged"] for t in e.fall if t_stop < t < t_to] + \
@@ -313,6 +318,8 @@ def classify(stop: dict) -> str:
         return "no restart in the capture"
     if stop.get("early_warning_ms") is not None:
         return "stop, early warning, reset"
+    if stop.get("p2_edges_in_stop", 0) >= HARDFAULT_MIN_P2_EDGES:
+        return "HardFault (HIL marker on P2), reset (watchdog period)"
     return "stop, no early warning, reset (watchdog period)"
 
 

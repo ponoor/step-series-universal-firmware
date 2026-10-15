@@ -139,3 +139,22 @@ def test_cli_usb_needs_step(tmp_path):
     cfg_path = tmp_path / "b.toml"
     cfg_path.write_text('[board]\nmodel = "step400"\nid = 0\n\n[motor]\ntest_axis = 1\nmotor_connected = true\n')
     assert mod.main(["--config", str(cfg_path), "usb"]) == 2
+
+
+def test_hardfault_marker(tmp_path):
+    cfg = usb_cfg(tmp_path)
+    cap = capture(8.0, 2.0, 6.5)
+    n = int(8.0 * RATE)
+    t = np.arange(n) / RATE
+    words = np.zeros(n, np.uint32)
+    seg = cap.digital
+    # Rebuild the samples and add P2 toggling every 0.5 ms from the stop to the reset.
+    for k in range(seg.start.size):
+        end = seg.start[k + 1] if k + 1 < seg.start.size else n
+        words[seg.start[k]:end] = seg.value[k]
+    toggling = (t > 2.0) & (t < 6.0) & (((t * 2000).astype(int) % 2) == 1)
+    words |= np.where(toggling, 1 << P2, 0).astype(np.uint32)
+    cap.digital = analyze.segments_from_samples(words, RATE)
+    (s,) = usb.analyze_usb(cfg, cap, [], None, None)["stops"]
+    assert s["early_warning_ms"] is None and s["p2_edges_in_stop"] > 1000
+    assert s["kind"].startswith("HardFault")

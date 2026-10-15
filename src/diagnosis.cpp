@@ -8,6 +8,7 @@
 #include "perfStats.h"
 #include "resetCause.h"
 #include "hilProbe.h"
+#include "hilFault.h"
 #include "oscListeners.h"
 
 String configVersionCompareString[5] = {
@@ -89,6 +90,12 @@ void diagnosisCommand(uint8_t inByte) {
 	case 'U':
 		hilSendOtherDest();
 		break;
+	case 'H':
+		hilFaultPrint();
+		break;
+	case 'X':
+		hilFaultTrigger();
+		break;
 #endif
 	default:
 		break;
@@ -117,6 +124,8 @@ void printMenu() {
 	dbgPrint("W: HIL test, hang until the watchdog resets the board\n");
 	dbgPrint("N: HIL test, reopen the UDP socket (ARP refresh candidate C1)\n");
 	dbgPrint("U: HIL test, 1 byte to 255.255.255.255:9 (ARP refresh candidate C2)\n");
+	dbgPrint("H: HIL record of the last HardFault / early warning (kept across a reset), then clear it\n");
+	dbgPrint("X: HIL test, HardFault (unaligned read)\n");
 #endif
 }
 

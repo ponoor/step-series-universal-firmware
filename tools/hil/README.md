@@ -474,6 +474,7 @@ STEP400 Brake Board is connected to J7.
 | `check` | C1, C2, C4, C7, C9 (`--all-auto`: C1, C2, C4, C7). The others use P3-P6, the L6470 bit layout or the STEP800 brake outputs and are refused |
 | `arp` | refused (needs P5) |
 | `motor` | tests with a motor, brake and load, record only; see [Motor tests](#motor-tests-hilpy-motor) |
+| `usb` | USB cable unplugged / plugged in, record only; see [USB cable unplugged](#usb-cable-unplugged-hilpy-usb) |
 
 Scenario steps can press / release either switch: `press(label, switch="limit")`
 (default `"home"`); the step's AD2 time is the edge on that switch's DIO.
@@ -603,6 +604,16 @@ terminal) it waits up to 60 s for the replies to stop and then up to 10 s for `/
 neither is an error (no stop is a result). After the recording the operator plugs the cable
 back in, the USB serial is reopened and the fault record of the HIL_PROBE build (`H`) is read
 into `summary.json` (`fault_record`, null with a firmware without it).
+
+The fault record (`src/hilFault.h`, HIL_PROBE builds) survives a watchdog or software reset
+in RAM after `.bss` that neither the startup code nor the bootloader writes. It holds the
+exception frame of a HardFault (the handler then toggles P2 every 0.5 ms and waits for the
+watchdog period) and the frame of the code the early warning interrupted, with the USB
+registers and interrupt counts. In these builds the USB interrupt runs at priority 1 (the
+core sets 0, as the early warning), so that the early warning can interrupt it. USB serial
+`H` prints and clears the record, `X` causes a HardFault (unaligned read). Turn the PC / LR
+into functions with `arm-none-eabi-addr2line -f -e .pio/build/step400_devlib_probe/firmware.elf
+0x<pc>`.
 
 `summary.json` `stops`: each P0 gap of 0.2 s or more, times in ms from its last P0 edge (the
 stop): `early_warning_ms` (a P2 pulse of 5 ms or more: the early warning holds P2 high for

@@ -60,7 +60,12 @@ void WatchdogTimer::disable()
     WDT->INTFLAG.reg = WDT_INTFLAG_EW;
 }
 
+#ifdef HIL_PROBE
+// HIL: WDT_Handler (hilFault.cpp) records the interrupted code first, then runs this.
+extern "C" void hilWdtHandlerBody(void)
+#else
 void WDT_Handler(void)
+#endif
 {
     WDT->INTFLAG.reg = WDT_INTFLAG_EW;
     onWatchdogEarlyWarning();

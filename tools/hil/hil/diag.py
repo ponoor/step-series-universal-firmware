@@ -1,7 +1,8 @@
 """USB serial diagnosis commands of the firmware (src/diagnosis.cpp):
 p (timing stats, then reset), P (probe self-test, HIL_PROBE builds), b (brake output
 test), s (status), R (reboot), and in HIL_PROBE builds Z (HardHiZ to all drivers),
-D (driver registers read at boot), Y (driver standby test)."""
+D (driver registers read at boot), Y (driver standby test), H (fault record, hil.py usb),
+X (HardFault)."""
 
 from __future__ import annotations
 

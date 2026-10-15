@@ -312,3 +312,15 @@ def test_judge_restart():
     assert j["engage"]["ok"] and j["cause"]["ok"]
     j = restart.judge_restart(cfg, "R", dict(res, brake_engage_vs_standby=lead_w), 100.0)
     assert not j["engage"]["ok"]
+
+
+def test_engage_before_reset_ignores_hiz_before_the_engage():
+    # STEP400: HiZ (12.6 V) at the start, energized (0 V) from 0.5 s, the brake released from
+    # 0.6 s and engaged at 1.0 s, the excitation lost (12.6 V) at 1.6 s.
+    cfg = step400_cfg()
+    t = np.arange(int(2.0 * RATE)) / RATE
+    v = np.where((t >= 0.5) & (t < 1.6), 0.0, 12.6)
+    cap = Capture(analog_rate=RATE, analog={1: v})
+    released = analyze.Step(np.array([0.0, 0.6, 1.0]), np.array([False, True, False]), 2.0)
+    r = commands.check_engage_before_reset(cfg, cap, 0.0, released, 1.0, "E")
+    assert r.passed and "600.0 ms" in r.detail

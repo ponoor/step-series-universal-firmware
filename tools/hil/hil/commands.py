@@ -1063,7 +1063,9 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
 def check_engage_before_reset(cfg: Config, cap: Capture, shift: float, released: analyze.Step,
                               t_engage: float, check_id: str) -> analyze.CheckResult:
     from .restart import standby_entry
-    t = standby_entry(cap.analog[int(cfg.ad2["scope"]["out1a"])], cap.analog_rate)
+    # From the engage on: before it the motor may be HiZ, which is above the standby jump
+    # level on the STEP400 (PowerSTEP01 HiZ about 12.6 V; L6470 1.8 V).
+    t = standby_entry(cap.analog[int(cfg.ad2["scope"]["out1a"])], cap.analog_rate, after=max(0.0, t_engage - shift))
     if t is None:
         return analyze.CheckResult(check_id, False, [], "no driver standby entry (OUT1A jump) found")
     t_reset = t + shift

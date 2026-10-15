@@ -470,7 +470,7 @@ STEP400 Brake Board is connected to J7.
 | `timing` | the P0-P2 metrics only (`loop`, `oscReceive`, `updateServo`, `servoInterval`), `p` as before |
 | `brake` | the same scenarios (they use the test axis and 255 only); the brake output delay of a command is from its P1 rise (`delays[].brake_change_ms`); no P4 / P6 rows |
 | `reboot` | as the STEP800, plus `--how W` (watchdog), `--how button` (reset button: prints `OPERATOR:` and records until `/booted`, up to 10 minutes) and `--all-motors`; judged items below |
-| `powerup` | 10 kS/s, Digital In triggered by the DIO 4 rise starts the Scope; both USB and 12 V are switched; the operator is asked which came on first; judged below |
+| `powerup` | 10 kS/s, both USB and 12 V are switched. No trigger: with the board off the AD2 inputs float and toggle, so the rail counts as off when 25 % of the reads over 1 s are low, the recording starts before the power-on and runs to 8 s after `/booted`, and the 3.3 V rise is the start of the last high span of DIO 4. The operator is asked which came on first; judged below |
 | `check` | C1, C2, C4, C7, C9 (`--all-auto`: C1, C2, C4, C7). The others use P3-P6, the L6470 bit layout or the STEP800 brake outputs and are refused |
 | `arp` | refused (needs P5) |
 
@@ -500,7 +500,10 @@ that `loop()` resumes after (the 2 s hang before the early warning is a longer g
 `timing` also records the position report intervals from the host receive times
 (`report_interval_host`: per motor, or of `/positionList`), the only ones on the STEP400.
 
-`powerup` (STEP400): PASS per run when no brake output is ever high after the 3.3 V rise
+`powerup` (STEP400): at the power-on every AD2 input (brakes, probes, switches) was seen
+high at once for 2-5 ms while P0 on the Scope stayed low (an AD2-side artifact, e.g. a ground
+shift); brake spans that start in such a span are listed as `brake_high_in_common` and not
+judged (PASS*). PASS per run when no other brake output span is high after the 3.3 V rise
 (brake disabled by default, so low before and after `setup()`); a high span is listed as
 motor, [ms from the rise, length ms]. RECORD: the first P0 edge (`hilProbeInit()`, start of
 `setup()`), the first OUT1A segment that stays in `[excitation] hiz_median_v` for 100 ms

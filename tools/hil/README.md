@@ -460,7 +460,7 @@ STEP400 Brake Board is connected to J7.
 | `ad2.dio.v33` | `4` | 3.3 V |
 | `ad2.dio.limit_sw` / `home_sw` | `14` / `15` | the only pins the bench drives |
 | `ad2.scope.v33` | `0` | none (the 3.3 V is on the DIO) |
-| `[excitation]` | STEP800 values | to be measured on the STEP400 (`selftest --only excitation`) and written to `bench.step400.toml` |
+| `[excitation]` | `hiz_median_v = [11.5, 13.5]` | the PowerSTEP01 output floats at the motor supply when HiZ (12.6 V at 12 V; the L6470 at 1.8 V); the rest as the STEP800 |
 
 ### Commands on the STEP400
 
@@ -487,6 +487,18 @@ Scenario steps can press / release either switch: `press(label, switch="limit")`
 | `boot` | no brake output is high from the MCU reset (last P0 edge before the longest gap) to `loop()` (the first P0 edge followed by 10 edges within 5 ms; single edges of a floating pin or a bootloader are not). High spans are listed per motor as [ms from the reference, length ms] (`brakes_high_during_boot`) |
 | `drivers` | CONFIG read by `D` at boot is the power-on default of every driver (0x2C88 PowerSTEP01, 0x2E88 L6470): the MCU reset put them in standby |
 | `cause` | `/booted <id> <resetCause>`: 5 for `R` / `resetDevice`, 4 for `W` |
+
+On the STEP400 the drivers do not go to standby at the MCU reset: they stay energized for
+about 517 ms after it (measured with `R`, `/resetDevice` and `W`, and `Y` floats the reset
+line for 300 ms without a standby), then lose the excitation; CONFIG is the power-on
+default at `setup()`. The OUT1A jump above 3 V (HiZ is 12.6 V there) is that loss of
+excitation, so `engage` of `R` / `resetDevice` reads about 620 ms instead of
+`transition_ms`. The standby is searched from the brake engage on (before it the motor can
+be HiZ, above the jump level). For `W` the MCU reset is the last P0 edge before the gap
+that `loop()` resumes after (the 2 s hang before the early warning is a longer gap).
+
+`timing` also records the position report intervals from the host receive times
+(`report_interval_host`: per motor, or of `/positionList`), the only ones on the STEP400.
 
 `powerup` (STEP400): PASS per run when no brake output is ever high after the 3.3 V rise
 (brake disabled by default, so low before and after `setup()`); a high span is listed as

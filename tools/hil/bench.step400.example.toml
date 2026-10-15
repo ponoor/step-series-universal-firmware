@@ -40,12 +40,14 @@ p0_ref = 2
 range_vpp = 50.0
 
 [excitation]
-# Not measured on the STEP400 (PowerSTEP01) yet: the STEP800 (L6470) values. Measure
-# with "selftest --only excitation" (Task 3) and write the STEP400 values here, in
-# bench.step400.toml, with the reason.
+# Measured on the STEP400_R1 (2026-10-15, KVAL 16, voltage mode, 12 V, no motor):
+#   HiZ: OUT1A floats at the motor supply, 12.62-12.63 V (p1-p99); the L6470 at 1.8 V
+#   energized, EL_POS 0: -0.02 V; +64 microsteps: PWM 23.3 kHz, pulses about 2 us
+# Only hiz_median_v differs from the STEP800; the excitation detection (edges or the
+# median below clamp_v) separates the states with the STEP800 values.
 level_v = 3.0
 hysteresis_v = 1.0
 window_ms = 1.0
 min_edges = 10
 clamp_v = 0.9
-hiz_median_v = [1.5, 2.1]
+hiz_median_v = [11.5, 13.5]

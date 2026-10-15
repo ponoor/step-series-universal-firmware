@@ -647,12 +647,13 @@ void getStatus(OscMessage &msg)
     uint8_t motorID = getInt(msg, 0);
     if (isCorrectMotorId(motorID))
     {
-        sendTwoData("/status", motorID, stepper[motorID - MOTOR_ID_FIRST].getStatus());
+        // GetParam: GetStatus would clear the latched flags before checkStatus() reports them.
+        sendTwoData("/status", motorID, (int)stepper[motorID - MOTOR_ID_FIRST].getParam(REG_STATUS));
     }
     else if (motorID == MOTOR_ID_ALL)
     {
-        uint16_t status[NUM_OF_MOTOR];
-        readAllStatus(status);
+        uint32_t status[NUM_OF_MOTOR];
+        readAllParams(REG_STATUS, status);
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             sendTwoData("/status", i + MOTOR_ID_FIRST, (int)status[i]);
@@ -666,8 +667,8 @@ void getStatusList(OscMessage &msg)
     {
         return;
     }
-    uint16_t status[NUM_OF_MOTOR];
-    readAllStatus(status);
+    uint32_t status[NUM_OF_MOTOR];
+    readAllParams(REG_STATUS, status); // GetParam: does not clear the latched flags
     OscWriter newMes("/statusList");
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
@@ -2410,7 +2411,8 @@ bool clearBusyForGoTo(uint8_t motorId)
     {
         int32_t rawSpeed = stepper[motorId].getParam(SPEED);
         stepper[motorId].runRaw(dir[motorId], rawSpeed);
-        bool isReadyForGoTo = (stepper[motorId].getStatus() & STATUS_BUSY) > 0;
+        // GetParam: GetStatus would clear the latched flags before checkStatus() reports them.
+        bool isReadyForGoTo = (stepper[motorId].getParam(REG_STATUS) & STATUS_BUSY) > 0;
         return isReadyForGoTo;
     }
     else
@@ -2568,6 +2570,10 @@ void homing(OscMessage &msg)
 static bool goUntilStartConditions(uint8_t motorId) {
     if (!brakeAllowsMotion(motorId))
         return false;
+    if (isServoMode[motorId]) {
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_IN_SERVO_MODE);
+        return false;
+    }
     if (homeSwState[motorId]) {
         sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_HOMESW_ACTIVATING);
         return false;
@@ -2631,6 +2637,12 @@ void goUntilRaw(OscMessage& msg) {
 bool releaseSw(uint8_t motorId, bool action, bool dir) {
     if (!brakeAllowsMotion(motorId))
         return false;
+    // The homing (homing(), and checkStatus() after the goUntil) never gets here in the
+    // servo mode: homing() refuses it, and /enableServoMode 1 clears the homing state.
+    if (isServoMode[motorId]) {
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_IN_SERVO_MODE);
+        return false;
+    }
     commitMotionStart(motorId);
     stepper[motorId].releaseSw(action, dir);
     homingStatus[motorId] = HOMING_RELEASESW;

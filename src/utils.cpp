@@ -14,7 +14,7 @@
 #include <stdarg.h>
 #include <utility/w5100.h>
 
-char* dbgPrint_(const __FlashStringHelper* fmt, ...)
+void dbgPrint_(const __FlashStringHelper* fmt, ...)
 {
 	char buf[128]; // resulting string limited to 128 chars
 	va_list args;
@@ -26,7 +26,6 @@ char* dbgPrint_(const __FlashStringHelper* fmt, ...)
 #endif
 	va_end(args);
 	SerialUSB.print(buf);
-	return buf;
 }
 
 void turnOnRXL() {
@@ -207,7 +206,10 @@ void onWatchdogEarlyWarning() {
                 waitMs = t;
         }
     }
-    // The watchdog resets at twice the early warning time (4 s), well after this.
+    // WDT_Handler() resets the MCU as soon as this returns: the reset comes up to 1 s
+    // after the early warning (2 s after the last Watchdog.reset()). The watchdog period
+    // (twice the early warning time, 4 s) is not reached by this wait; it resets the MCU
+    // only when the early warning cannot run (e.g. a hang with the interrupts disabled).
     for (uint16_t ms = 0; ms < waitMs; ms++)
         delayMicroseconds(1000);
 #endif

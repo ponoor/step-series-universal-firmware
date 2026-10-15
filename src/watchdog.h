@@ -4,9 +4,11 @@
 //
 // The clock is the same as with SleepyDog: GCLK2 = OSCULP32K / 32, about 1024 Hz.
 // enable(ms): the early warning comes ms after the last reset() (rounded down to a power
-// of two of WDT cycles, as SleepyDog did for the timeout), the watchdog reset at twice
-// that. The early warning calls onWatchdogEarlyWarning() (engage the brakes), then
-// resets the MCU at once through the watchdog (reset cause: watchdog).
+// of two of WDT cycles, as SleepyDog did for the timeout). The early warning calls
+// onWatchdogEarlyWarning() (engage the brakes and wait for them, up to 1 s), then resets
+// the MCU at once through the watchdog (reset cause: watchdog). The watchdog period,
+// twice the early warning time, resets the MCU only when the early warning cannot run
+// (e.g. a hang with the interrupts disabled).
 
 #ifndef _WATCHDOG_h
 #define _WATCHDOG_h

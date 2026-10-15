@@ -15,8 +15,9 @@
 // address (another destination IP) before it handles the packet; the next send to destIp
 // then resolves its MAC address again. The record (address, time) is updated on every
 // packet from destIp, also when isDestIpSet is false; packets from other addresses do
-// not change it. A client that sends at least every ARP_REFRESH_GAP_MS (e.g. /setDestIp
-// every second as a heartbeat) causes no refresh after the first one.
+// not change it. A client that sends at intervals shorter than ARP_REFRESH_GAP_MS (e.g.
+// /setDestIp every second as a heartbeat) causes no refresh after the first one; a gap of
+// exactly ARP_REFRESH_GAP_MS already causes one.
 // Addresses are IPAddress values converted to uint32_t.
 
 #ifndef _ARPREFRESH_h

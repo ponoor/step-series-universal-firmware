@@ -22,6 +22,7 @@
 #include "packedTransfer.h"
 #include "resetCause.h"
 #include "homingTimeout.h"
+#include "servoSwitch.h"
 #include "hilProbe.h"
 
 const String productName = PRODUCT_NAME;
@@ -425,18 +426,16 @@ static void computeServoSpeed(uint8_t i, int32_t currentPos, bool &dir, float &a
     servoPrevError[i] = error;
     absSpd = fabsf(spd);
     dir = (spd > 0.0f);
-    if (homeSwState[i])
-    {
-        if ((bProhibitMotionOnHomeSw[i] || !homeSwMode[i]) && (homingDirection[i] == dir))
-            absSpd = 0.0f;
-    }
+    // The home switch and the limit switch are judged separately (servoSwitch.h).
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-    else if (limitSwState[i])
-    {
-        if ((bProhibitMotionOnLimitSw[i] || !limitSwMode[i]) && (homingDirection[i] != dir))
-            absSpd = 0.0f;
-    }
+    if (servoSwitchBlocks(homeSwState[i], limitSwState[i], bProhibitMotionOnHomeSw[i],
+                          bProhibitMotionOnLimitSw[i], homeSwMode[i], limitSwMode[i],
+                          homingDirection[i], dir))
+#else
+    if (servoSwitchBlocks(homeSwState[i], false, bProhibitMotionOnHomeSw[i], false,
+                          homeSwMode[i], true, homingDirection[i], dir))
 #endif
+        absSpd = 0.0f;
 }
 
 // The servo update runs once per slot (see loop()), so its period is the slot period.

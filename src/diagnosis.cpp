@@ -122,7 +122,7 @@ void printMenu() {
 
 void testMotion() {
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
-		if (checkMotionStartConditions(i, dir)) {
+		if (checkMotionStartConditions(i, FWD)) {
 			commitMotionStart(i);
 			stepper[i].move(FWD, 25600);
 		}
@@ -209,7 +209,7 @@ void printCurrentState() {
 	uint16_t status[NUM_OF_MOTOR];
 	uint32_t temp = 0;
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
-		status[i] = stepper[i].getStatus();
+		status[i] = stepper[i].getParam(REG_STATUS); // GetStatus would clear the latched flags
 		temp += status[i];
 	}
 	showBoolResult(F("Motor driver SPI connection established"), temp != 0);
@@ -333,6 +333,12 @@ void printCurrentState() {
 
 			t = (status[i] & STATUS_UVLO) == 0;
 			showBoolResult("\t  UVLO (Undervoltage lock out)", t);
+#ifdef DRIVER_POWERSTEP01
+			// UVLO_ADC, active low, latched: ADCIN below the ADC UVLO threshold. On the
+			// STEP400 the limit switch pulls ADCIN to GND, so a pressed limit switch shows Yes.
+			t = (status[i] & STATUS_UVLO_ADC) == 0;
+			showBoolResult("\t  UVLO_ADC (ADCIN undervoltage)", t);
+#endif
 
 #ifdef DRIVER_L6470
         	t = (status[i] & (STATUS_TH_WRN|STATUS_TH_SD)) >> 10;

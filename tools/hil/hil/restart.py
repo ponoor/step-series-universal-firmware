@@ -115,6 +115,18 @@ def engage_lead(step, t_standby: float, ref: float) -> dict:
             "engage_ms_from_ref": round((falls[-1] - ref) * 1e3, 2) if falls.size else None}
 
 
+def reset_before_loop(p0_edges: np.ndarray, gap: float = 0.2) -> float | None:
+    """Last P0 edge before the last gap of at least `gap` seconds that loop() resumes after."""
+    t = np.asarray(p0_edges, float)
+    if t.size < 2:
+        return None
+    k = np.flatnonzero(np.diff(t) >= gap)
+    for i in k[::-1]:
+        if loop_resume(t, float(t[i])) is not None:
+            return float(t[i])
+    return None
+
+
 def loop_resume(p0_edges: np.ndarray, t_reset: float, min_edges: int = 10, within: float = 5e-3) -> float | None:
     """First P0 edge after the reset that starts the loop toggling: followed by at least
     min_edges edges within `within` seconds (a loop pass takes about 50 us). Single edges
@@ -139,6 +151,10 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     res: dict = {"how": how}
     p0 = analyze.bit_edges(seg, probe[0]).all
     t_reset = mcu_reset_time(p0) if how != "standby" else None
+    if how == "W":
+        # The hang before the early warning is a long P0 gap too: the reset is the last P0
+        # edge before the gap that loop() resumes after.
+        t_reset = reset_before_loop(p0)
     ref = t_reset if t_reset is not None else (t_cmd or 0.0)
     ch = int(cfg.ad2["scope"]["out1a"])
     shift = res.get("scope_minus_digital_s", 0.0)

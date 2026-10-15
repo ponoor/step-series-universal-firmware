@@ -324,3 +324,13 @@ def test_engage_before_reset_ignores_hiz_before_the_engage():
     released = analyze.Step(np.array([0.0, 0.6, 1.0]), np.array([False, True, False]), 2.0)
     r = commands.check_engage_before_reset(cfg, cap, 0.0, released, 1.0, "E")
     assert r.passed and "600.0 ms" in r.detail
+
+
+def test_reset_before_loop_skips_the_hang():
+    loop1 = np.arange(0, 0.5, 55e-6)
+    hang_end = [2.5]  # early warning sets P0 high after a 2 s hang
+    reset = [4.5, 4.5001]  # the pin floats at the watchdog reset
+    loop2 = 5.2 + np.arange(200) * 55e-6
+    p0 = np.concatenate((loop1, hang_end, reset, loop2))
+    assert restart.reset_before_loop(p0) == pytest.approx(4.5001)
+    assert restart.mcu_reset_time(p0) == pytest.approx(loop1[-1])  # the longest gap is the hang

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hardware-in-the-loop test bench for the STEP800 / STEP400 with a Digilent Analog Discovery 2.
 
-Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp|motor> [--id N] ...
+Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp|motor|usb> [--id N] ...
 See README.md.
 """
 
@@ -15,6 +15,7 @@ from hil.arp import STEPS as ARP_STEPS
 from hil.checks import TESTS as CHECKS
 from hil.motor import STEPS as MOTOR_STEPS
 from hil.scenarios import SCENARIOS
+from hil.usb import STEPS as USB_STEPS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -107,6 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--label", help="suffix of the result directory")
     s.add_argument("--rate", type=float, help="digital sample rate (default 100 kS/s, 10 kS/s with a restart)")
     s.add_argument("--reboot", action="store_true", help="reboot the board (R) before the setup")
+
+    s = sub.add_parser("usb", parents=[common], help="USB cable unplugged / plugged in while running, record only "
+                       "(needs a human)")
+    s.add_argument("--step", choices=list(USB_STEPS), help="condition U1-U6 (see hil/usb.py)")
+    s.add_argument("--note", nargs="+", metavar=("RESULT_DIR", "KEY=VALUE"),
+                   help="store operator observations in summary.json of a result, no board access")
+    s.add_argument("--label", help="suffix of the result directory")
+    s.add_argument("--rate", type=float, help="digital sample rate (default 10 kS/s: across a restart)")
     return p
 
 
@@ -119,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.load(args.config)
     if getattr(args, "id", None) is not None:
         cfg.override_board_id(args.id)
-    from hil import arp, checks, commands, motor, restart
+    from hil import arp, checks, commands, motor, restart, usb
 
     if args.command == "arp" and cfg.model != "step800":
         print(f"error: arp needs P5 (UDP send), which {cfg.model} has no pin for")
@@ -144,8 +153,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     # The board must be the one of board.model, with its HIL_PROBE build. Not for compare
     # (no board), nor for the STEP800 power-up (its USB cable is unplugged then).
-    if args.command == "motor" and args.note:
-        return motor.cmd_motor(cfg, args)
+    if args.command in ("motor", "usb") and args.note:
+        return motor.add_note(args.note[0], args.note[1:])
+    if args.command == "usb" and not args.step:
+        print("error: --step or --note is needed")
+        return 2
     if args.command != "compare" and not (args.command == "powerup" and cfg.model == "step800"):
         try:
             board = commands.preflight(cfg)
@@ -165,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         "check": checks.cmd_check,
         "arp": arp.cmd_arp,
         "motor": motor.cmd_motor,
+        "usb": usb.cmd_usb,
     }[args.command]
     return handler(cfg, args)
 

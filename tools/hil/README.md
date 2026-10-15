@@ -575,6 +575,43 @@ latency included). `/position`, `/busy` and `/brakeStatus` are left out, `/uvlo`
 only when it changes. `brake_delays`: each brake output change of the test axis with the
 last command before it.
 
+### USB cable unplugged (`hil.py usb`)
+
+The firmware stopped for about 4 s when the board's USB cable was unplugged while it ran on
+24 V (TASK_usb_unplug). `usb` records such an unplug (or plug-in) for one condition; like
+`motor` it records only, also with `motor.motor_connected = true`.
+
+```bash
+.venv/bin/python hil.py --config bench.step400.toml usb --step u1
+.venv/bin/python hil.py --config bench.step400.toml usb --note results/<dir> drop_mm=0
+```
+
+| Step | Condition |
+|---|---|
+| `u1` | brake enabled, released (`/activate 1`), stopped, serial port closed on the host |
+| `u2` | as `u1`, the port stays open |
+| `u3` | brake enabled, engaged (`/activate 0`) |
+| `u4` | test axis turning at 5 step/s (`/run`; take the weight off) |
+| `u5` | as `u1` with the position report every 20 ms (the others: no report) |
+| `u6` | unplug, wait for the restart, then plug in again: the plug-in is recorded |
+
+The `motor` setup is applied (except the report interval of the step) before the recording
+and again after a `/booted`. The AD2 records J7, P0-P2, the 3.3 V and, with `usb.vbus_dio`
+set, the USB VBUS (through a divider; not wired by default) at 10 kS/s. During the recording
+the host sends `/getVersion` every 100 ms. After `OPERATOR: unplug ...` (Enter with a
+terminal) it waits up to 60 s for the replies to stop and then up to 10 s for `/booted`;
+neither is an error (no stop is a result). After the recording the operator plugs the cable
+back in, the USB serial is reopened and the fault record of the HIL_PROBE build (`H`) is read
+into `summary.json` (`fault_record`, null with a firmware without it).
+
+`summary.json` `stops`: each P0 gap of 0.2 s or more, times in ms from its last P0 edge (the
+stop): `early_warning_ms` (a P2 pulse of 5 ms or more: the early warning holds P2 high for
+the brake wait; the servo update pulses are microseconds), `brake_changes_ms` (J7 changes in
+the gap: the early warning, or the pins floating at the MCU reset, which the Brake Board pulls
+to engaged), `loop_resumes_ms`, `booted_ms` and `resetCause` (host times mapped to the AD2
+time), `heartbeat_last_ms` / `heartbeat_next_ms`, and with VBUS the unplug before the stop.
+Without VBUS the unplug time is not known; the stop is the last P0 edge.
+
 ## Tests
 
 ```bash
@@ -603,3 +640,4 @@ The tests use synthetic data and run without the hardware.
 | `hil/arp.py` | `arp`: pcap parsing, capture, link status, AD2 segments, client replacement steps |
 | `hil/checks.py` | `check`: C1-C11, the logged USB serial (`SerialLog`) and their judgement helpers |
 | `hil/motor.py` | `motor`: tests with a motor, brake and load (steps as data, timeline, observations) |
+| `hil/usb.py` | `usb`: USB cable unplugged / plugged in (heartbeat, stops, early warning, fault record) |

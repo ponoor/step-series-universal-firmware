@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hardware-in-the-loop test bench for the STEP800 / STEP400 with a Digilent Analog Discovery 2.
 
-Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp|motor|usb> [--id N] ...
+Usage: hil.py [--config bench.toml] <selftest|timing|brake|powerup|reboot|compare|check|arp|motor|usb|swd> [--id N] ...
 See README.md.
 """
 
@@ -119,6 +119,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-probe", action="store_true",
                    help="firmware without the HIL probes (e.g. main): no board check, judged from the heartbeat "
                         "gaps, J7 and /booted only")
+
+    s = sub.add_parser("swd", parents=[common], help="CPU state through SWD (Atmel-ICE, OpenOCD); no reset")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--info", action="store_true", help="no halt: chip ID, reset cause, debug state, flash check")
+    g.add_argument("--halt", action="store_true", help="halt now, read the state, resume")
+    g.add_argument("--on-hang", action="store_true",
+                   help="/getVersion every 100 ms, halt when no reply for 0.3 s (operator unplugs the USB)")
+    s.add_argument("--elf", help="firmware.elf of the firmware on the board (symbols, HIL record)")
+    s.add_argument("--bin", help="firmware.bin to compare with the flash (default: next to --elf)")
+    s.add_argument("--gdb", action="store_true", help="also a gdb backtrace after the dump")
+    s.add_argument("--stay-halted", action="store_true", help="leave the CPU halted after the dump")
+    s.add_argument("--timeout", type=float, default=120.0, help="--on-hang: seconds to wait for the stop")
+    s.add_argument("--label", help="suffix of the result directory")
     return p
 
 
@@ -131,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.load(args.config)
     if getattr(args, "id", None) is not None:
         cfg.override_board_id(args.id)
-    from hil import arp, checks, commands, motor, restart, usb
+    from hil import arp, checks, commands, motor, restart, swd, usb
 
     if args.command == "arp" and cfg.model != "step800":
         print(f"error: arp needs P5 (UDP send), which {cfg.model} has no pin for")
@@ -162,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --step or --note is needed")
         return 2
     no_board_check = (args.command == "powerup" and cfg.model == "step800") or \
-        (args.command == "usb" and args.no_probe)
+        (args.command == "usb" and args.no_probe) or args.command == "swd"
     if args.command != "compare" and not no_board_check:
         try:
             board = commands.preflight(cfg)
@@ -183,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         "arp": arp.cmd_arp,
         "motor": motor.cmd_motor,
         "usb": usb.cmd_usb,
+        "swd": swd.cmd_swd,
     }[args.command]
     return handler(cfg, args)
 

@@ -628,6 +628,38 @@ no board check before the run, no P0-P2 and no fault record; `heartbeat_stops` l
 gap of the `/getVersion` replies (0.3 s or more) with the J7 changes in it and the `/booted`
 after it, in ms from the last reply (host times: judge with a window of about 300 ms).
 
+### CPU state through SWD (`hil.py swd`)
+
+With an Atmel-ICE (CMSIS-DAP, SAM port) on the board's SWD connection, `swd` runs OpenOCD
+(`interface/cmsis-dap.cfg`, `target/at91samdXX.cfg`) as a server and drives it over its Tcl
+port. It never sends `reset` or a flash command; `at91samdXX.cfg` has no
+`connect_assert_srst`, so connecting does not reset the board.
+
+```bash
+.venv/bin/python hil.py --config bench.step400.toml swd --info --elf results/elf/<firmware>.elf
+.venv/bin/python hil.py --config bench.step400.toml swd --halt --elf results/elf/<firmware>.elf
+.venv/bin/python hil.py --config bench.step400.toml swd --on-hang --elf results/elf/<firmware>.elf --gdb
+```
+
+- `--info`: no halt. DSU DID, PM RCAUSE, DHCSR (halted / lockup), and the flash compared word
+  for word with the `.bin` next to `--elf` (or `--bin`): which firmware is on the board.
+- `--halt`: halts the CPU, reads the state, resumes it (`--stay-halted`: not). While halted
+  nothing runs: the brake outputs and the drivers keep their state.
+- `--on-hang`: `/getVersion` every 100 ms; the operator unplugs the USB cable, and the CPU is
+  halted as soon as no reply came for 0.3 s.
+
+`summary.json` `dump`: the registers, the exception being executed (IPSR: 0 thread,
+3 HardFault, 16 + n IRQ n: USB 23, WDT 18), ICSR, NVIC enabled / pending / priorities, WDT,
+USB device and endpoint registers, 128 stack words and the exception frames on the stack
+(after an EXC_RETURN word), with a HIL_PROBE ELF also the fault record and the USB interrupt
+counters; code addresses with addr2line. `--gdb` adds a gdb backtrace.
+
+Line numbers need an ELF with debug information. `-g` does not change the code: a build
+with `PLATFORMIO_BUILD_FLAGS=-g` gives the same `.bin` byte for byte (checked on
+`step400_devlib_probe`). Build the firmware on the board that way, with
+`SOURCE_DATE_EPOCH` set to its build time (UTC of the time `/getVersion` reports), and keep
+the ELF and `.bin` under `results/elf/`.
+
 ## Tests
 
 ```bash
@@ -656,4 +688,5 @@ The tests use synthetic data and run without the hardware.
 | `hil/arp.py` | `arp`: pcap parsing, capture, link status, AD2 segments, client replacement steps |
 | `hil/checks.py` | `check`: C1-C11, the logged USB serial (`SerialLog`) and their judgement helpers |
 | `hil/motor.py` | `motor`: tests with a motor, brake and load (steps as data, timeline, observations) |
+| `hil/swd.py` | `swd`: OpenOCD (Atmel-ICE) over its Tcl port: chip info, flash check, halt and dump, addr2line |
 | `hil/usb.py` | `usb`: USB cable unplugged / plugged in (heartbeat, stops, early warning, fault record) |

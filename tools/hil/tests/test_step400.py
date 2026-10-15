@@ -319,7 +319,7 @@ def test_engage_before_reset_ignores_hiz_before_the_engage():
     # 0.6 s and engaged at 1.0 s, the excitation lost (12.6 V) at 1.6 s.
     cfg = step400_cfg()
     t = np.arange(int(2.0 * RATE)) / RATE
-    v = np.where((t >= 0.5) & (t < 1.6), 0.0, 12.6)
+    v = np.where((t >= 0.5) & (t < 1.6), 0.5, np.where(t < 0.5, 12.6, -0.01))  # PWM stops at 1.6 s
     cap = Capture(analog_rate=RATE, analog={1: v})
     released = analyze.Step(np.array([0.0, 0.6, 1.0]), np.array([False, True, False]), 2.0)
     r = commands.check_engage_before_reset(cfg, cap, 0.0, released, 1.0, "E")
@@ -355,3 +355,15 @@ def test_host_report_intervals():
     cap = Capture(host_trigger_ns=t0 - 1, host_stop_ns=t0 + 10**9)
     r = commands.host_report_intervals(Link(log), cap, {"position_report_ms": 20}, 2)
     assert r["per"][1]["off"] == 0 and r["per"][2]["off"] == 2 and r["intervals"] == 98
+
+
+def test_pwm_stop():
+    # 10 kS/s (averaged): energized off EL_POS 0 about 0.5 V, standby about 0 V from 0.4 s,
+    # HiZ 12.6 V from 0.9 s.
+    t = np.arange(int(1.2 * RATE)) / RATE
+    v = np.where(t < 0.4, 0.5, np.where(t < 0.9, -0.01, 12.6))
+    assert restart.pwm_stop(v, RATE) == pytest.approx(0.4)
+    assert restart.pwm_stop(np.full(t.size, -0.02), RATE) is None  # EL_POS 0: no PWM to stop
+    cfg4, cfg8 = step400_cfg(), step800_cfg()
+    assert restart.driver_standby(cfg4, v, RATE) == pytest.approx(0.4)
+    assert restart.driver_standby(cfg8, v, RATE) == pytest.approx(0.9)  # L6470: the jump

@@ -59,6 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--how", choices=["R", "resetDevice", "W", "button", "standby"], required=True,
                    help="R: serial reboot, resetDevice: OSC, W: watchdog (serial 'W', hang), button: the "
                         "reset button (human, waits for /booted), standby: 'Y' (driver reset line floating)")
+    s.add_argument("--analog-rate", type=float,
+                   help="Scope rate (default 10 kS/s across a restart, [brake] analog_rate for standby); "
+                        "the PWM pulses of OUT1A (about 2 us) need 500 kS/s or more")
+    s.add_argument("--move", type=int, default=0,
+                   help="/move the test axis this many microsteps after the release (e.g. 64), so OUT1A shows "
+                        "PWM while energized")
     s.add_argument("--all-motors", action="store_true",
                    help="release the brakes of all motors (/activate 255 1) instead of the test axis only")
 

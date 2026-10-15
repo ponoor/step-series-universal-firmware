@@ -880,6 +880,12 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
     connect_board(link)
     _run_steps(sc.COMMON_SETUP + scenario.extra_setup, values, link, ad2, None)
     time.sleep(0.3)
+    steps = scenario.steps
+    if cfg.model == "step400" and any(isinstance(m, sc.EngageBeforeReset) for m in scenario.motion):
+        # The PowerSTEP01 standby shows as the stop of the PWM on OUT1A, which is held at 0 V
+        # at EL_POS 0 also while energized: move off it after the release.
+        k = next(i for i, st in enumerate(steps) if st.label == "activate") + 2
+        steps = steps[:k] + (sc.osc("/move", sc.AXIS, 64), sc.wait(0.5)) + steps[k:]
 
     pre = hiz_precheck(cfg, ad2)
     if not pre["ok"]:
@@ -910,7 +916,7 @@ def run_scenario(cfg: Config, scenario: sc.Scenario, ad2: AD2, diag: SerialDiag,
             poller.start()
         time.sleep(0.3)
         log: list = []
-        _run_steps(scenario.steps, values, link, ad2, log, diag)
+        _run_steps(steps, values, link, ad2, log, diag)
         time.sleep(0.3)
     finally:
         stop.set()
@@ -1092,12 +1098,14 @@ def analyze_scenario(cfg: Config, scenario: sc.Scenario, cap: Capture, link: Osc
 
 def check_engage_before_reset(cfg: Config, cap: Capture, shift: float, released: analyze.Step,
                               t_engage: float, check_id: str) -> analyze.CheckResult:
-    from .restart import standby_entry
+    from .restart import driver_standby
     # From the engage on: before it the motor may be HiZ, which is above the standby jump
-    # level on the STEP400 (PowerSTEP01 HiZ about 12.6 V; L6470 1.8 V).
-    t = standby_entry(cap.analog[int(cfg.ad2["scope"]["out1a"])], cap.analog_rate, after=max(0.0, t_engage - shift))
+    # level on the STEP400 (PowerSTEP01 HiZ about 12.6 V; L6470 1.8 V). On the STEP400 the
+    # standby is the stop of the PWM (restart.pwm_stop()).
+    t = driver_standby(cfg, cap.analog[int(cfg.ad2["scope"]["out1a"])], cap.analog_rate,
+                       after=max(0.0, t_engage - shift))
     if t is None:
-        return analyze.CheckResult(check_id, False, [], "no driver standby entry (OUT1A jump) found")
+        return analyze.CheckResult(check_id, False, [], "no driver standby entry (OUT1A jump / PWM stop) found")
     t_reset = t + shift
     engaged_at_reset = not bool(released.at(t_reset))
     stays = not analyze.intersect([(t_reset, released.t_end)], released.intervals(True))

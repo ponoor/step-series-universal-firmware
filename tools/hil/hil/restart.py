@@ -70,6 +70,36 @@ def standby_entry(volts: np.ndarray, rate: float, after: float = 0.0, window: fl
     return float(k[0] * window) if k.size else None
 
 
+PWM_STOP_MAX_V = 0.15  # window max of OUT1A in standby (about 0 V)
+PWM_ON_MIN_V = 0.3  # window max while energized off EL_POS 0 (PWM; 0.5 V mean at 10 kS/s)
+
+
+def pwm_stop(volts: np.ndarray, rate: float, after: float = 0.0, window: float = 1e-3) -> float | None:
+    """Start (scope time) of the first window after `after` whose max is below PWM_STOP_MAX_V
+    after a window with a max of PWM_ON_MIN_V or more: OUT1A switching (energized off EL_POS 0)
+    stops. The PowerSTEP01 output sits at about 0 V in standby and floats at the motor supply
+    when HiZ, so its standby has no jump (STEP400). Needs the test axis off EL_POS 0 (--move),
+    where OUT1A is held at 0 V also while energized."""
+    v = np.asarray(volts, float)
+    n = int(round(window * rate))
+    k = v.size // n
+    if k < 2:
+        return None
+    mx = v[:k * n].reshape(k, n).max(axis=1)
+    for i in range(max(1, int(np.ceil(after / window))), k):
+        if mx[i] < PWM_STOP_MAX_V and mx[i - 1] >= PWM_ON_MIN_V:
+            return float(i * window)
+    return None
+
+
+def driver_standby(cfg: Config, volts: np.ndarray, rate: float, after: float = 0.0) -> float | None:
+    """Driver standby entry on OUT1A: the jump of the L6470 (STEP800), the PWM stop of the
+    PowerSTEP01 (STEP400)."""
+    if cfg.model == "step400":
+        return pwm_stop(volts, rate, after)
+    return standby_entry(volts, rate, after)
+
+
 def long_pulse(edges, min_width: float) -> tuple[float, float] | None:
     """First high pulse at least min_width seconds long (rise, fall)."""
     for r in edges.rise:
@@ -158,11 +188,12 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     ref = t_reset if t_reset is not None else (t_cmd or 0.0)
     ch = int(cfg.ad2["scope"]["out1a"])
     shift = res.get("scope_minus_digital_s", 0.0)
-    t_sb = standby_entry(cap.analog[ch], cap.analog_rate)
+    t_sb = driver_standby(cfg, cap.analog[ch], cap.analog_rate)
     t_sb = t_sb + shift if t_sb is not None else None
     if how != "standby" and t_sb is not None:
         ref = t_sb
-    res["t_ref"] = ("driver standby entry (OUT1A jump)" if how != "standby" and t_sb is not None
+    res["t_ref"] = ("driver standby entry (" + ("OUT1A PWM stop" if cfg.model == "step400" else "OUT1A jump") + ")"
+                    if how != "standby" and t_sb is not None
                     else "MCU reset (last P0 edge)" if t_reset is not None else "command")
     res["standby_entry_s"] = t_sb
     res["mcu_reset_s"] = t_reset
@@ -197,7 +228,17 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
         t_loop = t_loop if t_loop is not None else seg.duration
         res["loop_resumes_ms"] = round((t_loop - ref) * 1e3, 2)
         res["boot_window_ms"] = [round((t_reset - ref) * 1e3, 2), round((t_loop - ref) * 1e3, 2)]
-        res["brakes_high_during_boot"] = {m: sp for m, st in steps.items() if (sp := high_spans(st, t_reset, t_loop, ref))}
+        # A brake released up to the reset falls when its pin floats (the Brake Board
+        # pull-down): that first span, under 1 ms from the reset, is the engage, not a release.
+        high = {}
+        for m, st in steps.items():
+            sp = high_spans(st, t_reset, t_loop, ref)
+            if sp and abs(sp[0][0] - round((t_reset - ref) * 1e3, 2)) <= 0.01 and sp[0][1] < 1.0:
+                res.setdefault("engage_at_reset_ms", {})[m] = sp[0][1]
+                sp = sp[1:]
+            if sp:
+                high[m] = sp
+        res["brakes_high_during_boot"] = high
         res["p0_edges_during_boot_ms"] = [round((t - ref) * 1e3, 2) for t in p0 if t_reset < t < t_loop]
     if how == "standby":
         # P2 also pulses every servo period; the standby window is the long pulse.
@@ -208,6 +249,16 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     res["out1a_segments"] = level_segments(cap.analog[ch], cap.analog_rate, t0=ref - shift)
     excited, _, _ = commands.excitation_step(cfg, cap, shift)
     res["excited_edges_ms"] = [[round((t - ref) * 1e3, 1), bool(v)] for t, v in zip(excited.times[1:], excited.values[1:])]
+    # OUT1A comparator edges per 10 ms from the reference: PWM (energized off EL_POS 0) or none.
+    v = np.asarray(cap.analog[ch], float)
+    e = analyze.comparator_edges(v, cap.analog_rate, float(cfg.section("excitation")["level_v"]),
+                                 float(cfg.section("excitation")["hysteresis_v"])) + shift
+    if t_reset is not None:
+        bins = np.arange(t_reset - 0.2, min(seg.duration, t_reset + 1.5), 0.01)
+        h = np.histogram(e, bins)[0]
+        res["out1a_edges_per_10ms_from_reset"] = [[round((b - t_reset) * 1e3), int(n)] for b, n in zip(bins[:-1], h)]
+        pwm = [b for b, n in zip(bins[:-1], h) if n >= 3 and b > t_reset]
+        res["out1a_pwm_after_reset_until_ms"] = round((max(pwm) + 0.01 - t_reset) * 1e3) if pwm else None
     return res
 
 
@@ -264,6 +315,11 @@ def cmd_reboot(cfg: Config, args) -> int:
     standby = how == "standby"
     # The test axis, or every motor (brake enabled on all by COMMON_SETUP), released.
     activate = (sc.osc("/activate", sc.ALL if all_motors else sc.AXIS, 1), sc.wait(0.5))
+    move = getattr(args, "move", 0) or 0
+    if move:
+        # Off EL_POS 0, where OUT1A is held at 0 V also while energized: with phase A
+        # switching, energized (PWM) and standby (no PWM) can be told apart.
+        activate += (sc.osc("/move", sc.AXIS, move), sc.wait(0.5))
     with commands.open_ad2(cfg) as ad2, SerialDiag(cfg.serial_port) as diag, commands.open_link(cfg) as link:
         diag.reboot()
         commands.connect_board(link)
@@ -274,6 +330,8 @@ def cmd_reboot(cfg: Config, args) -> int:
         ref = int(cfg.ad2["scope"].get("p0_ref", 0)) if standby else 0
         # A restart re-enumerates the board's USB, which stalls the AD2 stream: 10 kS/s.
         rate = float(b["analog_rate"]) if standby else 1e4
+        if getattr(args, "analog_rate", None):
+            rate = float(args.analog_rate)
         rec = ad2.start_recording(None, digital_rate=float(b["digital_rate"]),
                                   sensible_mask=commands.mask_of(brake_dios + probe),
                                   analog_channels=(out1a, ref) if ref else (out1a,), analog_rate=rate)

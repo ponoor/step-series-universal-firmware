@@ -260,3 +260,20 @@ def test_swap_recovery():
     assert r["osc_to_new"] == {"/version": 1, "/positionList": 1}
     none = arp.swap_recovery(fr[:1], BOARD, B10, C, NIC_B, 0.0, 5.0)
     assert none["first_rx"] is None and none["dummy_ms"] is None and none["dummies"] == 0
+
+
+def test_gap_captures_nic_a_only():
+    nic = {"A": "en9", "B": "en7"}
+    assert arp.capture_nics("gap", nic) == {"A": "en9"}
+    for step in arp.STEPS:
+        if step != "gap":
+            assert arp.capture_nics(step, nic) == nic
+
+
+def test_nic_names_without_nic_b():
+    # `ifconfig` of an adapter that is not attached: no output, no MAC address.
+    info = {"A": arp.parse_ifconfig(f"en9: flags=8863<UP>\n\tether {NIC_A}\n\tstatus: active\n"),
+            "B": arp.parse_ifconfig("")}
+    assert arp.nic_names(info) == {NIC_A: "NIC A"}
+    info["B"] = arp.parse_ifconfig(f"en7: flags=8863<UP>\n\tether {NIC_B}\n\tstatus: inactive\n")
+    assert arp.nic_names(info) == {NIC_A: "NIC A", NIC_B: "NIC B"}

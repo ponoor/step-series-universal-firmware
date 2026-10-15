@@ -166,6 +166,18 @@ def link_transitions(samples: list[tuple[float, str, str]]) -> list[tuple[float,
     return out
 
 
+def capture_nics(step: str, nic: dict[str, str]) -> dict[str, str]:
+    """The adapters captured by a step: `gap` uses NIC A only, so it also runs when NIC B
+    is not attached (its tcpdump would fail); the other steps capture both."""
+    return {"A": nic["A"]} if step == "gap" else dict(nic)
+
+
+def nic_names(info: dict[str, dict]) -> dict[str, str]:
+    """MAC address -> "NIC A" / "NIC B" of the `ifconfig` results; an adapter that is not
+    attached has no MAC address and is left out."""
+    return {i["mac"]: f"NIC {k}" for k, i in info.items() if i.get("mac")}
+
+
 def mac_name(mac: str | None, names: dict[str, str]) -> str:
     if mac is None:
         return "?"
@@ -1119,7 +1131,7 @@ def cmd_arp(cfg: Config, args) -> int:
     nic = {"A": a["nic_a"], "B": a["nic_b"]}
     info = {k: ifconfig(v) for k, v in nic.items()}
     res["nics"] = {k: {"iface": nic[k], **info[k]} for k in nic}
-    names = {info["A"]["mac"]: "NIC A", info["B"]["mac"]: "NIC B"}
+    names = nic_names(info)
     with ArpBench(cfg, out, args) as b:
         run = ArpRun(b, args)
         caps: list[Tcpdump] = []
@@ -1132,7 +1144,7 @@ def cmd_arp(cfg: Config, args) -> int:
             res["board_mac"] = board_mac
             res["wall_minus_mono_s"] = wall_minus_mono()
             flt = f"ether host {board_mac} or arp"
-            for k, i in nic.items():
+            for k, i in capture_nics(args.step, nic).items():
                 caps.append(Tcpdump(i, flt, out / f"nic_{k}_{i}.pcap").start())
             rec = run.rec = SegmentRecorder(b, float(a["segment_s"]))  # started by establish()
             try:

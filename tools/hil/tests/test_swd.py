@@ -123,3 +123,14 @@ def test_symbols_of_probe_build():
     assert "hilFaultRecordStorage" in syms and "usbIsrCount" in syms
     lines = swd.addr2line(PROBE_ELF, [syms["hilFaultRecordStorage"]])
     assert len(lines) == 1
+
+
+def test_setup_messages_u1(tmp_path):
+    from hil import config
+    path = tmp_path / "b.toml"
+    path.write_text('[board]\nmodel = "step400"\nid = 0\n\n[motor]\ntest_axis = 1\nmotor_connected = true\n')
+    msgs = swd.setup_messages(config.load(path), "u1")
+    assert ("/enableElectromagnetBrake", 1, 1) in msgs and ("/setPositionReportInterval", 1, 0) in msgs
+    assert msgs[-3:] == [("/activate", 1, 1), ("wait", 1.0), ("wait", 1.0)]  # the second: close_serial in usb
+    # u3: released, then engaged before the unplug.
+    assert ("/activate", 1, 0) in swd.setup_messages(config.load(path), "u3")

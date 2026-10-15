@@ -131,6 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--gdb", action="store_true", help="also a gdb backtrace after the dump")
     s.add_argument("--stay-halted", action="store_true", help="leave the CPU halted after the dump")
     s.add_argument("--timeout", type=float, default=120.0, help="--on-hang: seconds to wait for the stop")
+    s.add_argument("--setup", choices=list(USB_STEPS), help="--on-hang: apply the setup of this hil.py usb step "
+                   "and its messages before the unplug (e.g. u1: brake enabled and released)")
     s.add_argument("--label", help="suffix of the result directory")
     return p
 

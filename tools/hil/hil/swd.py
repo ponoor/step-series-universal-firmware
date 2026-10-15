@@ -12,7 +12,12 @@ Steps (each run is one step; the human approves each):
   --stay-halted). While halted nothing runs: the brake outputs and the drivers keep their
   state (a turning motor keeps turning).
 - --on-hang: sends /getVersion every 100 ms and halts as soon as no reply came for 0.3 s
-  (the USB cable is unplugged by the operator meanwhile), then as --halt.
+  (the USB cable is unplugged by the operator meanwhile), then as --halt. --setup u1 (a
+  hil.py usb step) applies that step's setup and its messages before the unplug first.
+
+The watchdog stops while the CPU is halted (measured 2026-10-16: no early warning flag
+after a 2.5 s halt, no restart after the resume): a halt does not shorten the time to the
+reset, the count goes on after the resume.
 
 The dump: PC, LR, SP, MSP, PSP, xPSR (the exception number in IPSR: 0 thread, 3 HardFault,
 16 + n IRQ n, USB = 23, WDT = 18), PRIMASK, ICSR, the NVIC enable / pending / priority
@@ -358,13 +363,45 @@ def gdb_backtrace(elf: Path) -> str:
     return r.stdout + r.stderr
 
 
-def wait_hang(cfg: Config, timeout: float, gap: float = 0.3) -> dict:
+def setup_messages(cfg: Config, step_id: str) -> list[tuple]:
+    """--setup: the setup of a hil.py usb step and its OSC messages / waits before the
+    unplug (the host serial port is not used here). ("wait", seconds) for a wait."""
+    from . import motor, usb
+
+    step = usb.STEPS[step_id]
+    out: list[tuple] = list(usb.setup_actions(cfg, step))
+    for a in step.actions:
+        if a.kind == "unplug":
+            break
+        if a.kind == "osc":
+            out.append((a.address, *motor._resolve(a.args, cfg.test_axis)))
+        elif a.kind == "wait":
+            out.append(("wait", a.seconds))
+    return out
+
+
+def wait_hang(cfg: Config, timeout: float, gap: float = 0.3, setup: str | None = None) -> dict:
     """Heartbeat /getVersion every 100 ms; returns when no reply came for gap seconds."""
     from . import commands
     from .usb import Heartbeat, wait_heartbeat_lost
 
     with commands.open_link(cfg) as link:
         commands.connect_board(link)
+        sent = []
+        for m in setup_messages(cfg, setup) if setup else []:
+            if m[0] == "wait":
+                time.sleep(m[1])
+            else:
+                link.send(*m)
+                sent.append(list(m))
+                time.sleep(0.02)
+        brake = None
+        if setup:
+            try:
+                brake = list(link.request("/getBrakeStatus", cfg.test_axis, reply="/brakeStatus", timeout=0.3).args)
+            except Exception as ex:  # OscError
+                brake = str(ex)
+            print(f"setup {setup}: {len(sent)} messages, /brakeStatus {brake}", flush=True)
         hb = Heartbeat(link).start()
         try:
             print("OPERATOR: unplug the USB cable of the board now (the AD2 and the Atmel-ICE stay connected)",
@@ -375,7 +412,7 @@ def wait_hang(cfg: Config, timeout: float, gap: float = 0.3) -> dict:
             hb.stop()
     if last is None:
         raise SwdError(f"the replies did not stop within {timeout} s")
-    return {"last_reply_ns": last}
+    return {"last_reply_ns": last, "setup": sent, "brake_before": brake}
 
 
 def cmd_swd(cfg: Config, args) -> int:
@@ -395,9 +432,10 @@ def cmd_swd(cfg: Config, args) -> int:
             print(f"results: {out}")
             return 0
         if args.on_hang:
-            hang = wait_hang(cfg, args.timeout)
+            hang = wait_hang(cfg, args.timeout, setup=args.setup)
             ocd.halt()
             res["halt_after_last_reply_ms"] = round((time.monotonic_ns() - hang["last_reply_ns"]) / 1e6, 1)
+            res["setup"], res["brake_before"] = hang["setup"], hang["brake_before"]
         else:
             ocd.halt()
         t_halt = time.monotonic()

@@ -2,7 +2,8 @@
 
 OpenOCD runs as a server (cmsis-dap, at91samdXX.cfg) and is driven over its Tcl port. The
 connection does not reset the board: at91samdXX.cfg resets only on an explicit `reset`
-(there is no connect_assert_srst), and nothing here sends one, nor any flash command.
+(there is no connect_assert_srst), nothing here sends one, nor any flash command, and
+`reset_config none` keeps OpenOCD off nRESET (wired on the 10-pin connector).
 
 Steps (each run is one step; the human approves each):
 - --info: no halt. Chip ID (DSU DID), reset cause (PM RCAUSE), debug state (DHCSR), and
@@ -172,7 +173,8 @@ class OpenOcd:
 
     def start(self, timeout: float = 10.0) -> "OpenOcd":
         args = [self.exe, "-f", "interface/cmsis-dap.cfg", "-c", "transport select swd",
-                "-f", "target/at91samdXX.cfg", "-c", f"adapter speed {self.speed}",
+                "-f", "target/at91samdXX.cfg", "-c", "reset_config none",
+                "-c", f"adapter speed {self.speed}",
                 "-c", f"tcl_port {OPENOCD_TCL_PORT}", "-c", f"gdb_port {OPENOCD_GDB_PORT}",
                 "-c", "telnet_port disabled", "-c", "init"]
         log = open(self.log_path, "w") if self.log_path else subprocess.DEVNULL

@@ -212,7 +212,7 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
 
 
 # resetCause of /booted (src/resetCause.h) expected after each restart.
-EXPECTED_RESET_CAUSE = {"R": 5, "resetDevice": 5, "W": 4}
+EXPECTED_RESET_CAUSE = {"R": 5, "resetDevice": 5, "W": 4, "button": 3}
 
 
 def judge_restart(cfg: Config, how: str, res: dict, transition_ms: float, tolerance_ms: tuple = (-1.0, 6.0)) -> dict:
@@ -285,9 +285,13 @@ def cmd_reboot(cfg: Config, args) -> int:
             link.send("/resetDevice")
         elif how == "W":
             diag.send("W")  # hang: early warning after 2.0 s, reset after 4 s
+        elif how == "button":
+            print("OPERATOR: press the reset button of the board once (waiting up to 10 minutes)", flush=True)
+            if link.wait_for("/booted", 600.0, t_host) is None:
+                print("no /booted within 10 minutes")
         else:
             diag.send("Y")
-        time.sleep(1.0 if standby else 8.0 if how == "W" else 4.0)
+        time.sleep(1.0 if standby else 8.0 if how == "W" else 1.5 if how == "button" else 4.0)
         cap = rec.stop()
         cap.save(out / f"reboot_{how}.npz")
         if not standby:

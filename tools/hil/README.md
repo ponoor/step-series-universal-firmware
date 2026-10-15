@@ -469,7 +469,7 @@ STEP400 Brake Board is connected to J7.
 | `selftest` | adds `v33` (DIO 4 high) first and `limit_sw` (as `home_sw`, with `/enableLimitSwReport`, `/getLimitSw`, `/limitSw`, DIO 14); `probes` checks P0-P2 on DIO 8-10 and no edge on DIO 11-13; `brake_map` sends `b` 4 times (no P4: the delay is from the host time of `b`, USB latency included) |
 | `timing` | the P0-P2 metrics only (`loop`, `oscReceive`, `updateServo`, `servoInterval`), `p` as before |
 | `brake` | the same scenarios (they use the test axis and 255 only); the brake output delay of a command is from its P1 rise (`delays[].brake_change_ms`); no P4 / P6 rows |
-| `reboot` | as the STEP800, plus `--how W` (watchdog) and `--all-motors`; judged items below |
+| `reboot` | as the STEP800, plus `--how W` (watchdog), `--how button` (reset button: prints `OPERATOR:` and records until `/booted`, up to 10 minutes) and `--all-motors`; judged items below |
 | `powerup` | 10 kS/s, Digital In triggered by the DIO 4 rise starts the Scope; both USB and 12 V are switched; the operator is asked which came on first; judged below |
 | `check` | C1, C2, C4, C7, C9 (`--all-auto`: C1, C2, C4, C7). The others use P3-P6, the L6470 bit layout or the STEP800 brake outputs and are refused |
 | `arp` | refused (needs P5) |
@@ -486,7 +486,7 @@ Scenario steps can press / release either switch: `press(label, switch="limit")`
 | `engage` | every brake output is engaged at the driver standby entry (first OUT1A window above 3 V) and stays engaged; for `R` / `resetDevice` it engaged `transition_ms` -1/+6 ms before the standby (safeSystemReset() waits the longest transition). `W`: before the standby (the early warning engages them about 2 s earlier) |
 | `boot` | no brake output is high from the MCU reset (last P0 edge before the longest gap) to `loop()` (the first P0 edge followed by 10 edges within 5 ms; single edges of a floating pin or a bootloader are not). High spans are listed per motor as [ms from the reference, length ms] (`brakes_high_during_boot`) |
 | `drivers` | CONFIG read by `D` at boot is the power-on default of every driver (0x2C88 PowerSTEP01, 0x2E88 L6470): the MCU reset put them in standby |
-| `cause` | `/booted <id> <resetCause>`: 5 for `R` / `resetDevice`, 4 for `W` |
+| `cause` | `/booted <id> <resetCause>`: 5 for `R` / `resetDevice`, 4 for `W`, 3 for `button` |
 
 On the STEP400 the drivers do not go to standby at the MCU reset: they stay energized for
 about 517 ms after it (measured with `R`, `/resetDevice` and `W`, and `Y` floats the reset

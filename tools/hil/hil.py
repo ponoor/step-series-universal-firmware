@@ -56,9 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--duration", type=float, default=10.0, help="seconds after the 3.3 V rise")
 
     s = sub.add_parser("reboot", parents=[common], help="brake outputs and driver state across a restart")
-    s.add_argument("--how", choices=["R", "resetDevice", "W", "standby"], required=True,
-                   help="R: serial reboot, resetDevice: OSC, W: watchdog (serial 'W', hang), "
-                        "standby: 'Y' (driver reset line floating)")
+    s.add_argument("--how", choices=["R", "resetDevice", "W", "button", "standby"], required=True,
+                   help="R: serial reboot, resetDevice: OSC, W: watchdog (serial 'W', hang), button: the "
+                        "reset button (human, waits for /booted), standby: 'Y' (driver reset line floating)")
     s.add_argument("--all-motors", action="store_true",
                    help="release the brakes of all motors (/activate 255 1) instead of the test axis only")
 

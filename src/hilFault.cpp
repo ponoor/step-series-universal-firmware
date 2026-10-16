@@ -257,8 +257,10 @@ void hilFaultTrigger()
     dbgPrint("HIL: HardFault (unaligned read)\n");
     SerialUSB.flush();
     delay(20);
-    volatile uint32_t *p = (volatile uint32_t *)(RAM_START + 1);
-    (void)*p;
+    // A word load from an odd address; in C, GCC splits a known unaligned access into byte
+    // loads, which do not fault.
+    uint32_t addr = RAM_START + 1;
+    __asm volatile("ldr %0, [%0]" : "+r"(addr));
 }
 
 #endif // HIL_PROBE

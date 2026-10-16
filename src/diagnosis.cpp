@@ -1290,7 +1290,7 @@ void saveRawConfigToSd(const char* json, size_t len) {
 //
 // Does NOT call SD.begin(): SD.begin() sends CMD0 which resets the card internally.
 // The first writeBlock() after a CMD0 reset takes ~100-600 ms on some SD cards
-// (NAND block erase / internal GC), firing the 128 ms watchdog before the operation
+// (NAND block erase / internal GC), firing the watchdog before the operation
 // returns. The SD state from loadConfig() at boot is already valid — no re-init needed.
 //
 // Watchdog is DISABLED for the entire SD sequence and re-enabled when done.
@@ -1309,7 +1309,8 @@ static bool sdSaveConfig() {
 	}
 	// The first write to the card can take long (the save measured 82-86 ms by /saveConfig
 	// on the HIL bench, but the card's own delays are not bounded); the watchdog (early
-	// warning 2 s, reset 4 s) is off until the file is closed, then enabled again.
+	// warning about 250 ms, WATCHDOG_TIMEOUT_MS) is off until the file is closed, then
+	// enabled again.
 	Watchdog.disable();
 	sd.remove(configFilename);
 	File32 file;

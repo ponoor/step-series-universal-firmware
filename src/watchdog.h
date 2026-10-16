@@ -8,7 +8,8 @@
 // onWatchdogEarlyWarning() (engage the brakes and wait for them, up to 1 s), then resets
 // the MCU at once through the watchdog (reset cause: watchdog). The watchdog period,
 // twice the early warning time, resets the MCU only when the early warning cannot run
-// (e.g. a hang with the interrupts disabled).
+// (e.g. a hang with the interrupts disabled, a CPU lockup); the brake wait of the early
+// warning clears the watchdog (WATCHDOG_BRAKE_WAIT_CLEAR_MS), so it may outlast the period.
 
 #ifndef _WATCHDOG_h
 #define _WATCHDOG_h

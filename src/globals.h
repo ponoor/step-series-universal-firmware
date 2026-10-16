@@ -39,9 +39,12 @@ extern uint8_t resetCauseRaw; // raw MCU register value, diagnosis output only
 #define HOUSEKEEPING_PERIOD_MS (SLOT_PERIOD_US * HOUSEKEEPING_SLOTS / 1000) // [ms]
 static_assert(HOUSEKEEPING_PERIOD_MS * 1000 == SLOT_PERIOD_US * HOUSEKEEPING_SLOTS,
               "the housekeeping period must be a whole number of milliseconds");
-// Watchdog timeout. A UDP send blocks until ARP is resolved (W5500 retries every 200 ms),
-// which can exceed 100 ms.
-#define WATCHDOG_TIMEOUT_MS  2000 // [ms] early warning (brakes engaged, then reset); watchdog.h
+// Watchdog: the early warning (brakes engaged, then reset; watchdog.h) comes this long
+// after the last Watchdog.reset(): 256 WDT cycles (about 250 ms), the period 512 cycles
+// (about 500 ms). At least twice and 100 ms more than the longest interval between two
+// resets in normal operation: 117.4 ms measured (TASK_fault_reset, STEP800, /get* 255 with
+// 276 replies to a reachable destination; the loop resets the watchdog every 10 ms).
+#define WATCHDOG_TIMEOUT_MS  250 // [ms] early warning; enable() rounds down to a power of two of cycles
 
 
 // Tx, Rx LED

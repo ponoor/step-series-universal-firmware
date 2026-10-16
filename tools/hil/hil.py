@@ -58,9 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--duration", type=float, default=10.0, help="seconds after the 3.3 V rise")
 
     s = sub.add_parser("reboot", parents=[common], help="brake outputs and driver state across a restart")
-    s.add_argument("--how", choices=["R", "resetDevice", "W", "button", "standby"], required=True,
-                   help="R: serial reboot, resetDevice: OSC, W: watchdog (serial 'W', hang), button: the "
-                        "reset button (human, waits for /booted), standby: 'Y' (driver reset line floating)")
+    s.add_argument("--how", choices=["R", "resetDevice", "W", "X", "button", "standby"], required=True,
+                   help="R: serial reboot, resetDevice: OSC, W: watchdog (serial 'W', hang), X: HardFault "
+                        "(serial 'X'), button: the reset button (human, waits for /booted), standby: 'Y' "
+                        "(driver reset line floating)")
+    s.add_argument("--transition-ms", type=int,
+                   help="brakeTransitionDuration of every motor (default: [brake] transition_ms)")
+    s.add_argument("--brake-disabled", action="store_true",
+                   help="brake disabled on every motor (W / X: the handler does not wait)")
     s.add_argument("--analog-rate", type=float,
                    help="Scope rate (default 10 kS/s across a restart, [brake] analog_rate for standby); "
                         "the PWM pulses of OUT1A (about 2 us) need 500 kS/s or more")

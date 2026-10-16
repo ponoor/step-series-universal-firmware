@@ -145,6 +145,14 @@ def engage_lead(step, t_standby: float, ref: float) -> dict:
             "engage_ms_from_ref": round((falls[-1] - ref) * 1e3, 2) if falls.size else None}
 
 
+def _last_fall_before(step, t: float) -> float | None:
+    """Last engage (fall) of a brake output at or before t, None if it did not fall."""
+    times = np.asarray(step.times, float)
+    v = np.asarray(step.values, bool)
+    falls = times[1:][(~v[1:]) & (times[1:] <= t)]
+    return float(falls[-1]) if falls.size else None
+
+
 def reset_before_loop(p0_edges: np.ndarray, gap: float = 0.2) -> float | None:
     """Last P0 edge before the last gap of at least `gap` seconds that loop() resumes after."""
     t = np.asarray(p0_edges, float)
@@ -181,9 +189,10 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     res: dict = {"how": how}
     p0 = analyze.bit_edges(seg, probe[0]).all
     t_reset = mcu_reset_time(p0) if how != "standby" else None
-    if how == "W":
-        # The hang before the early warning is a long P0 gap too: the reset is the last P0
-        # edge before the gap that loop() resumes after.
+    if how in ("W", "X"):
+        # The hang before the early warning (W) and the brake wait of the HardFault handler
+        # (X) are long P0 gaps too: the reset is the last P0 edge (the HIL reset marker)
+        # before the gap that loop() resumes after.
         t_reset = reset_before_loop(p0)
     ref = t_reset if t_reset is not None else (t_cmd or 0.0)
     ch = int(cfg.ad2["scope"]["out1a"])
@@ -215,6 +224,23 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
             res["other_brakes_released_after_ref_ms"][motor] = after
     if how != "standby" and t_sb is not None:
         res["brake_engage_vs_standby"] = {m: engage_lead(st, t_sb, ref) for m, st in steps.items()}
+    if how in ("W", "X") and t_reset is not None:
+        # P2 goes high in the early warning / HardFault handler after the brakes are engaged
+        # and stays high to the reset (the servo update pulses are microseconds): the
+        # handler's brake wait is from that rise to the reset marker on P0.
+        p2r = analyze.bit_edges(seg, probe[2]).rise
+        before = p2r[p2r <= t_reset]
+        if before.size:
+            t_p2 = float(before[-1])
+            res["handler_wait_ms"] = round((t_reset - t_p2) * 1e3, 2)
+            res["engage_to_handler_ms"] = {m: round((t_p2 - fall) * 1e3, 3)
+                                           for m, st in steps.items()
+                                           for fall in [_last_fall_before(st, t_p2)] if fall is not None}
+            if how == "W":
+                # The hang: loop() stops toggling P0. The early warning comes the watchdog
+                # early warning time after the last Watchdog.reset() (every 10 ms in loop()).
+                last = p0[p0 < t_p2 - 1e-4]
+                res["hang_to_early_warning_ms"] = round((t_p2 - float(last[-1])) * 1e3, 2) if last.size else None
     if t_reset is not None:
         nxt = _first_after(p0, t_reset + 0.02)
         res["p0_resumes_ms"] = (nxt - ref) * 1e3 if nxt is not None else None
@@ -263,10 +289,11 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
 
 
 # resetCause of /booted (src/resetCause.h) expected after each restart.
-EXPECTED_RESET_CAUSE = {"R": 5, "resetDevice": 5, "W": 4, "button": 3}
+EXPECTED_RESET_CAUSE = {"R": 5, "resetDevice": 5, "W": 4, "button": 3, "X": 6}
 
 
-def judge_restart(cfg: Config, how: str, res: dict, transition_ms: float, tolerance_ms: tuple = (-1.0, 6.0)) -> dict:
+def judge_restart(cfg: Config, how: str, res: dict, transition_ms: float, tolerance_ms: tuple = (-1.0, 6.0),
+                  brake_enabled: bool = True) -> dict:
     """PASS / FAIL items of a restart (STEP400 S4-2; recorded the same way on the STEP800).
     engage: every brake output engaged before the drivers' standby and engaged from there
     on; for R / resetDevice the engage comes transition_ms (+tolerance) before the standby
@@ -274,7 +301,14 @@ def judge_restart(cfg: Config, how: str, res: dict, transition_ms: float, tolera
     the reset to loop(). drivers: CONFIG at the power-on default at boot. cause: resetCause."""
     items = {}
     lead = res.get("brake_engage_vs_standby")
-    if how != "standby":
+    if how in ("W", "X"):
+        # The handler waits transition_ms (brake enabled and released), or not at all.
+        wait = res.get("handler_wait_ms")
+        lo, hi = (transition_ms * 0.97 - 1.0, transition_ms * 1.03 + 2.0) if brake_enabled else (-1.0, 1.0)
+        items["wait"] = {"ok": wait is not None and lo <= wait <= hi,
+                         "detail": f"handler brake wait {wait} ms (P2 rise to the reset marker), expected "
+                                   f"{lo:.1f}-{hi:.1f} ms"}
+    if how != "standby" and brake_enabled:
         if lead is None:
             items["engage"] = {"ok": False, "detail": "no driver standby entry found"}
         else:
@@ -309,9 +343,14 @@ def judge_restart(cfg: Config, how: str, res: dict, transition_ms: float, tolera
 def cmd_reboot(cfg: Config, args) -> int:
     how = args.how
     all_motors = getattr(args, "all_motors", False)
-    out = commands.new_result_dir(f"reboot_{how}" + ("_all" if all_motors else ""))
+    brake_disabled = getattr(args, "brake_disabled", False)
+    out = commands.new_result_dir(f"reboot_{how}" + ("_all" if all_motors else "") + ("_nobrake" if brake_disabled else "")
+                                  + (f"_{args.transition_ms}ms" if getattr(args, "transition_ms", None) else ""))
     b = cfg.section("brake")
     values = commands.scenario_values(cfg)
+    if getattr(args, "transition_ms", None):
+        values["transition_ms"] = int(args.transition_ms)
+    transition_ms = float(values["transition_ms"])
     standby = how == "standby"
     # The test axis, or every motor (brake enabled on all by COMMON_SETUP), released.
     activate = (sc.osc("/activate", sc.ALL if all_motors else sc.AXIS, 1), sc.wait(0.5))
@@ -323,7 +362,12 @@ def cmd_reboot(cfg: Config, args) -> int:
     with commands.open_ad2(cfg) as ad2, SerialDiag(cfg.serial_port) as diag, commands.open_link(cfg) as link:
         diag.reboot()
         commands.connect_board(link)
-        commands._run_steps(sc.COMMON_SETUP + activate, values, link, ad2, None)
+        setup = sc.COMMON_SETUP
+        if brake_disabled:
+            # Brake disabled on every motor (the outputs stay engaged): /activate 1 only energizes.
+            setup = (sc.osc("/activate", sc.ALL, 0), sc.wait(0.3), sc.osc("/enableElectromagnetBrake", sc.ALL, 0),
+                     sc.osc("/setKval", sc.AXIS, sc.KVAL, sc.KVAL, sc.KVAL, sc.KVAL), sc.wait(0.3))
+        commands._run_steps(setup + activate, values, link, ad2, None)
         probe = cfg.probe_dio
         brake_dios = [int(d) for d in cfg.ad2["dio"]["brake"]]
         out1a = int(cfg.ad2["scope"]["out1a"])
@@ -342,7 +386,9 @@ def cmd_reboot(cfg: Config, args) -> int:
         elif how == "resetDevice":
             link.send("/resetDevice")
         elif how == "W":
-            diag.send("W")  # hang: early warning after 2.0 s, reset after 4 s
+            diag.send("W")  # hang: early warning after WATCHDOG_TIMEOUT_MS, then the brake wait
+        elif how == "X":
+            diag.send("X")  # HardFault: brakes, brake wait, reset
         elif how == "button":
             print("OPERATOR: press the reset button of the board once (waiting up to 10 minutes)", flush=True)
             if link.wait_for("/booted", 600.0, t_host) is None:
@@ -377,11 +423,13 @@ def cmd_reboot(cfg: Config, args) -> int:
     res["booted_reset_cause"] = [int(e.args[1]) for e in link.entries("rx", t_host)
                                  if e.address == "/booted" and len(e.args) >= 2]
     res["boot_drivers_raw"] = drivers
-    res["judged"] = judge_restart(cfg, how, res, float(b["transition_ms"]))
+    res["transition_ms"] = transition_ms
+    res["brake_disabled"] = brake_disabled
+    res["judged"] = judge_restart(cfg, how, res, transition_ms, brake_enabled=not brake_disabled)
     del res["boot_drivers_raw"]
     commands.write_json(out / "summary.json", res)
     print(f"how: {how}, capture ok: {cap.ok} {'; '.join(cap.problems())}")
-    for k in ("t_ref", "command_to_standby_ms", "p0_reset_marker_to_standby_ms", "p0_resumes_ms", "first_p4_after_reset_ms", "standby_window_ms",
+    for k in ("handler_wait_ms", "hang_to_early_warning_ms", "engage_to_handler_ms", "t_ref", "command_to_standby_ms", "p0_reset_marker_to_standby_ms", "p0_resumes_ms", "first_p4_after_reset_ms", "standby_window_ms",
               "brake_released_at_start", "brake_edges_ms"):
         if k in res:
             print(f"{k}: {res[k]}")

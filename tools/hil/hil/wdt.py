@@ -18,6 +18,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,7 +126,19 @@ class WdtBench:
         return [list(e.args) for e in self.link.entries("rx", t_ns) if e.address == "/booted"]
 
     def human(self, message: str) -> None:
-        self.commands.prompt(f"OPERATOR: {message} -- Enter when done ")
+        """Enter with a terminal; without one (e.g. run by an agent), waits up to 10 minutes
+        for the file OPERATOR_DONE in the results directory, then removes it."""
+        if sys.stdin.isatty():
+            self.commands.prompt(f"OPERATOR: {message} -- Enter when done ")
+            return
+        done = self.commands.RESULTS_DIR / "OPERATOR_DONE"
+        print(f"OPERATOR: {message} -- waiting for {done}", flush=True)
+        deadline = time.monotonic() + 600.0
+        while not done.exists():
+            if time.monotonic() > deadline:
+                raise DiagError("no OPERATOR_DONE within 10 minutes")
+            time.sleep(0.2)
+        done.unlink()
 
 
 def run_once(b: WdtBench, load: Callable[[WdtBench], dict | None], settle: float = 1.0) -> dict:
@@ -243,9 +256,7 @@ def case_w6(b: WdtBench) -> list[dict]:
     # The IP address follows the ID (isMyIpAddId): only the USB serial is used until the
     # switch is back; 'p' covers both changes.
     def load(b):
-        b.human("change the DIP switch ID (any other value), wait about 2 s")
-        time.sleep(1.0)
-        b.human("set the DIP switch ID back")
+        b.human("change the DIP switch ID (any other value), wait about 2 s, set it back")
         time.sleep(2.0)
         b.connect(15.0)
         return {"new_ip_lines": re.findall(r"New IP: [\d.]+", b.ser.text(b.t0_ns))[-2:]}

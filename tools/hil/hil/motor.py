@@ -234,7 +234,7 @@ STEPS: dict[str, MotorStep] = {s.id: s for s in [
     MotorStep("m2-resetDevice", "M2-2: /resetDevice, 3 times", "rod tip: does it drop (mm) at each restart",
               _restart("resetDevice"), "as M2-1", restart=True),
     MotorStep("m2-W", "M2-3: watchdog (USB serial W), 3 times", "rod tip: does it drop (mm) at each restart",
-              _restart("W"), "engage at the early warning (2 s), reset about 100 ms later; no drop",
+              _restart("W"), "engage at the early warning (WATCHDOG_TIMEOUT_MS), reset about 100 ms later; no drop",
               restart=True),
     MotorStep("m2-button", "M2-4 (record): reset button, 3 times (operator)",
               "rod tip: does it drop (mm) at each press", _restart("button"),

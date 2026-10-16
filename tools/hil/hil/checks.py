@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 
 from . import analyze
-from .config import NUM_MOTORS, Config
+from .config import NUM_MOTORS, Config, watchdog_early_warning_s
 from .diag import DiagError, find_port, parse_perf
 
 PASS, FAIL, RECORD = "PASS", "FAIL", "RECORD"
@@ -2001,7 +2001,11 @@ def check_c11(b: Bench) -> list[Item]:
         before = p4[p4 < early[0][0]]
         t_hang = float(before[-1]) if before.size else None
     dt = (early[0][0] - t_hang) if early and t_hang is not None else None
-    ok = within(dt, 1.95, 2.06) and status2["resetCause"] == 4 and booted is not None and int(booted.args[1]) == 4
+    # The early warning time of the firmware (src/globals.h); the bounds were 1.95-2.06 s
+    # for 2 s: the OSCULP32K clock and up to one loop pass (10 ms) since the last reset.
+    ew = watchdog_early_warning_s()
+    ok = within(dt, ew * 0.975, ew * 1.03 + 0.01) and status2["resetCause"] == 4 and booted is not None \
+        and int(booted.args[1]) == 4
     items.append(judged("C11-4", ok, f"'W' after a save: early warning (P2) {fmt_ms(dt * 1e3 if dt else None)} ms after "
                         f"the last getMyId/watchdog reset (P4); /booted {list(booted.args) if booted else None}; "
                         f"T resetCause {status2['resetCause']} raw 0x{status2['resetCauseRaw']:02X}"))

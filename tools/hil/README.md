@@ -216,7 +216,7 @@ operation (a `/booted` message, the new ID in `T`, ...), up to 10 minutes.
 | C9 | b (human): reset button, with the test axis brake released (brake outputs and OUT1A at 10 kS/s); c: `pio run -e step800_devlib_probe -t upload` (serial port closed); d: `/resetDevice`. a is judged from C8c | `/booted` cause and `T` resetCause: b 3, d 5; c RECORD. C9b-brake (RECORD): the brake output edges from the driver standby entry |
 | C10 | Human: DIP switch 1, 2, 4, ..., 128 (`--dip-values`) while running; brake outputs at 1 MHz | `T` myId equals the value, `W5500 RTR:200 RCR:2` and `New IP: 10.0.0.<100 + id>` printed (beyond .254: `10.0.0.100` and `Warning: IP address out of range with ID <id>, ID not added`), `T` myIp the same, `/setDestIp` answered from that address to port 50100 + id, no brake output edge, all outputs low. Beyond .254 the address stays `10.0.0.100` but the MAC changes with the ID: delete the Mac's ARP entry (`sudo arp -d 10.0.0.100`) after setting the switch, and again after setting it back, or the requests go to the old MAC |
 | C10boot | DIP switch already at `--dip` (85); run with `--id 85`: `R`, brake outputs at 10 kS/s | `T` myId, `/setDestIp` answered; the boot output is printed before the port opens (recorded if seen). Then `hil.py selftest --id 85` |
-| C11 | Test SD card in (stops unless `sdInitializeSucceeded` 1). `F/hil_save_test.json`; 5 x `G` sent back with `{`, 5 x `/saveConfig` (1 MHz); a save, then `W` (10 kS/s) | C11-2 / C11-3: `{"result":"ok",...}` / `/saveConfig Saved...`, no `/booted`, no early warning, `resetCause` unchanged; the longest P0 interval (the save, for `{` with the serial transfer) is recorded. C11-4: P2 early warning 1.95-2.06 s after the last P4 (watchdog reset), `/booted` and `T` resetCause 4 |
+| C11 | Test SD card in (stops unless `sdInitializeSucceeded` 1). `F/hil_save_test.json`; 5 x `G` sent back with `{`, 5 x `/saveConfig` (1 MHz); a save, then `W` (10 kS/s) | C11-2 / C11-3: `{"result":"ok",...}` / `/saveConfig Saved...`, no `/booted`, no early warning, `resetCause` unchanged; the longest P0 interval (the save, for `{` with the serial transfer) is recorded. C11-4: P2 early warning 0.975-1.03 x the early warning time (+10 ms) after the last P4 (watchdog reset; the time is `WATCHDOG_TIMEOUT_MS` of `src/globals.h` rounded as the firmware does, `config.watchdog_early_warning_s()`, 250 ms), `/booted` and `T` resetCause 4 |
 | C12 | SD card removed (stops otherwise). `{` with `network.myIp` (last byte 123) and `outPort` (50123); `{` with `bootedMsgEnable` only; `{` with the values before; `s` and `c` saved; restart | C12-1: `G` shows the sent values (only these two keys change), `T` myIp unchanged, replies still to the bench port. C12-2: keys left out do not change `G`. C12-c: no title printed twice in `c`, no `reportLimitSwStatus` (STEP800). C12-s: the thermal status texts are L6470 names (since `0d90d03`), the `s` fields match the raw values as in C5 |
 
 ## Client replacement (`hil.py arp`)
@@ -486,10 +486,11 @@ Scenario steps can press / release either switch: `press(label, switch="limit")`
 
 | Item | PASS when |
 |---|---|
-| `engage` | every brake output is engaged at the driver standby entry (first OUT1A window above 3 V) and stays engaged; for `R` / `resetDevice` it engaged `transition_ms` -1/+6 ms before the standby (safeSystemReset() waits the longest transition). `W`: before the standby (the early warning engages them about 2 s earlier) |
+| `engage` | every brake output is engaged at the driver standby entry (first OUT1A window above 3 V) and stays engaged; for `R` / `resetDevice` it engaged `transition_ms` -1/+6 ms before the standby (safeSystemReset() waits the longest transition). `W` / `X`: before the standby |
+| `wait` | `W` / `X`: the handler's brake wait, from the P2 rise (the early warning or the HardFault handler, after the brakes) to the reset marker on P0 (`handler_wait_ms`), is `transition_ms` -3 %/-1 ms to +3 %/+2 ms; with `--brake-disabled` under 1 ms. `--transition-ms` sets `brakeTransitionDuration` of every motor. `W` also gives `hang_to_early_warning_ms` (last P0 edge to the P2 rise) |
 | `boot` | no brake output is high from the MCU reset (last P0 edge before the longest gap) to `loop()` (the first P0 edge followed by 10 edges within 5 ms; single edges of a floating pin or a bootloader are not). High spans are listed per motor as [ms from the reference, length ms] (`brakes_high_during_boot`) |
 | `drivers` | CONFIG read by `D` at boot is the power-on default of every driver (0x2C88 PowerSTEP01, 0x2E88 L6470): the MCU reset put them in standby |
-| `cause` | `/booted <id> <resetCause>`: 5 for `R` / `resetDevice`, 4 for `W`, 3 for `button` |
+| `cause` | `/booted <id> <resetCause>`: 5 for `R` / `resetDevice`, 4 for `W`, 6 for `X` (CPU fault), 3 for `button` |
 
 On the STEP400 the drivers do not go to standby at the MCU reset: they stay energized for
 about 517 ms after it (measured with `R`, `/resetDevice` and `W`, and `Y` floats the reset
@@ -498,7 +499,8 @@ default at `setup()`. The OUT1A jump above 3 V (HiZ is 12.6 V there) is that los
 excitation, so `engage` of `R` / `resetDevice` reads about 620 ms instead of
 `transition_ms`. The standby is searched from the brake engage on (before it the motor can
 be HiZ, above the jump level). For `W` the MCU reset is the last P0 edge before the gap
-that `loop()` resumes after (the 2 s hang before the early warning is a longer gap).
+that `loop()` resumes after (the hang before the early warning can be a longer gap); the same
+for `X` (the HardFault handler's brake wait).
 
 `timing` also records the position report intervals from the host receive times
 (`report_interval_host`: per motor, or of `/positionList`), the only ones on the STEP400.

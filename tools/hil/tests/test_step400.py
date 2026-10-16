@@ -306,12 +306,26 @@ def test_judge_restart():
                 boot_drivers_raw={**drivers, 2: {"config": 0x2E88, "status": 0, "config_now": 0}})
     j = restart.judge_restart(cfg, "R", res2, 100.0)
     assert not j["boot"]["ok"] and not j["cause"]["ok"] and not j["drivers"]["ok"] and j["engage"]["ok"]
-    # Watchdog: the brakes engage at the early warning, about 2 s before the standby.
-    lead_w = {m: dict(v, engage_before_standby_ms=2000.0) for m, v in lead.items()}
-    j = restart.judge_restart(cfg, "W", dict(res, brake_engage_vs_standby=lead_w, booted_reset_cause=[4]), 100.0)
-    assert j["engage"]["ok"] and j["cause"]["ok"]
+    # Watchdog and HardFault: the handler engages the brakes, waits the transition time
+    # (P2 high to the reset marker), then resets.
+    j = restart.judge_restart(cfg, "W", dict(res, booted_reset_cause=[4], handler_wait_ms=100.4), 100.0)
+    assert all(v["ok"] for v in j.values()) and "wait" in j
+    j = restart.judge_restart(cfg, "X", dict(res, booted_reset_cause=[6], handler_wait_ms=100.4), 100.0)
+    assert all(v["ok"] for v in j.values())
+    j = restart.judge_restart(cfg, "X", dict(res, booted_reset_cause=[4], handler_wait_ms=60.0), 100.0)
+    assert not j["wait"]["ok"] and not j["cause"]["ok"]
+    # The engage of W / X is only required before the standby (on the STEP400 the drivers
+    # lose the excitation about 517 ms after the reset); the wait item times the handler.
+    lead_w = {m: dict(v, engage_before_standby_ms=620.0) for m, v in lead.items()}
+    j = restart.judge_restart(cfg, "W", dict(res, brake_engage_vs_standby=lead_w, booted_reset_cause=[4],
+                                             handler_wait_ms=100.4), 100.0)
+    assert j["engage"]["ok"]
     j = restart.judge_restart(cfg, "R", dict(res, brake_engage_vs_standby=lead_w), 100.0)
     assert not j["engage"]["ok"]
+    # Brake disabled: no engage item, no wait.
+    j = restart.judge_restart(cfg, "X", dict(res, booted_reset_cause=[6], handler_wait_ms=0.2), 100.0,
+                              brake_enabled=False)
+    assert "engage" not in j and j["wait"]["ok"] and j["cause"]["ok"]
 
 
 def test_engage_before_reset_ignores_hiz_before_the_engage():

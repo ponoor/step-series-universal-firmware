@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import ipaddress
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -255,3 +256,22 @@ def load(path: str | Path | None = None) -> Config:
     cfg = Config(raw, used)
     cfg.validate()
     return cfg
+
+
+# --- firmware constants ---
+
+GLOBALS_H = Path(__file__).resolve().parents[3] / "src" / "globals.h"
+
+
+def watchdog_early_warning_s(globals_h: Path = GLOBALS_H) -> float:
+    """Early warning time of the firmware in this checkout: WATCHDOG_TIMEOUT_MS of
+    src/globals.h, rounded down to a power of two of WDT cycles at 1024 Hz as
+    WatchdogTimer::enable() does (src/watchdog.cpp). The watchdog period is twice this."""
+    m = re.search(r"#define\s+WATCHDOG_TIMEOUT_MS\s+(\d+)", globals_h.read_text())
+    if not m:
+        raise ValueError(f"no WATCHDOG_TIMEOUT_MS in {globals_h}")
+    cycles = (int(m.group(1)) * 1024 + 500) // 1000
+    bits = 0
+    while bits < 0xA and (8 << (bits + 1)) <= cycles:
+        bits += 1
+    return (8 << bits) / 1024.0

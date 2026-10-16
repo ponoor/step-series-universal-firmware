@@ -347,6 +347,9 @@ def analyze_usb(cfg: Config, cap, rx: list, fit, vbus_dio: int | None, probes: b
 def classify(stop: dict) -> str:
     if stop.get("loop_resumes_ms") is None:
         return "no restart in the capture"
+    if stop.get("resetCause") == 6:
+        # The HardFault handler (src/faultReset.h): brakes engaged, P2 high for the brake wait.
+        return "CPU fault, brakes engaged by the handler, reset"
     if stop.get("early_warning_ms") is not None:
         return "stop, early warning, reset"
     if stop.get("p2_edges_in_stop", 0) >= HARDFAULT_MIN_P2_EDGES:
@@ -384,7 +387,8 @@ def read_fault_record(diag: SerialDiag) -> str | None:
 # A heartbeat gap at least this long with /booted resetCause 4 after it: a stop until the
 # watchdog period (HardFault or a hang); the HardFault runs measured 4.0-4.4 s.
 WATCHDOG_STOP_MIN_S = 3.0
-RESET_CAUSES = {0: "unknown", 1: "power-on", 2: "brown-out", 3: "external", 4: "watchdog", 5: "software"}
+RESET_CAUSES = {0: "unknown", 1: "power-on", 2: "brown-out", 3: "external", 4: "watchdog", 5: "software",
+                6: "CPU fault"}
 
 
 def classify_gap(gap_s: float | None, booted: bool, reset_cause) -> str:
@@ -395,6 +399,8 @@ def classify_gap(gap_s: float | None, booted: bool, reset_cause) -> str:
         return "replies stopped, no /booted"
     if reset_cause is None:
         return "restart, /booted without resetCause (main)"
+    if reset_cause == 6:
+        return "CPU fault reset (HardFault handler)"
     if reset_cause == 4:
         return ("stop, watchdog reset (HardFault or hang)" if gap_s >= WATCHDOG_STOP_MIN_S
                 else "watchdog reset (short stop)")

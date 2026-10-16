@@ -611,9 +611,9 @@ SCENARIOS: tuple[Scenario, ...] = (
         reboots=True,
         analog_rate=1e4,
         p0_ref=False,
-        notes="The watchdog early warning (2 s after the last clear) engages every brake output "
-              "without SPI and waits the longest transition time, then the watchdog resets the "
-              "MCU. The step is timed by the brake engage edge, 2 s after 'W'.",
+        notes="The watchdog early warning (WATCHDOG_TIMEOUT_MS after the last clear, about 250 ms) "
+              "engages every brake output without SPI and waits the longest transition time, then "
+              "the watchdog resets the MCU. The step is timed by the brake engage edge.",
     ),
 )
 

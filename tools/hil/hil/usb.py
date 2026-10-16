@@ -106,6 +106,12 @@ STEPS: dict[str, UsbStep] = {s.id: s for s in [
             "rod: any drop at the unplug and at the restart",
             _RELEASED + (close_serial(label="close"), wait(1.0), unplug(), wait(2.0)),
             "as U1; the stop time may depend on the OSC load", position_report_ms=20),
+    # TASK_usb_unplug_followup Task 3 (P2 is u3: the brake engaged by /activate 0, then HiZ).
+    UsbStep("p1", "P1: brake disabled (the default after a restart), every motor HiZ (/hardHiZ 255), port closed",
+            "rod: any movement at the unplug (no holding torque, no brake)",
+            (osc("/hardHiZ", 255, label="hardHiZ"), wait(1.0), close_serial(label="close"), wait(1.0), unplug(),
+             wait(2.0)),
+            "no motor current: does the board still stop", brake=False),
     UsbStep("u6", "U6: plug the cable in (after the unplug and its /booted), RELEASED, port closed",
             "rod: any drop at the plug-in",
             _RELEASED + (close_serial(label="close"), wait(1.0), unplug(), wait(2.0),

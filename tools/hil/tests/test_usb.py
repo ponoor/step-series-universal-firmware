@@ -40,7 +40,7 @@ def capture(duration: float, stop: float, resume: float | None, ew: tuple | None
 
 
 def test_steps_defined():
-    assert list(usb.STEPS) == ["u1", "u2", "u3", "u4", "u5", "u6"]
+    assert list(usb.STEPS) == ["u1", "u2", "u3", "u4", "u5", "p1", "u6"]
     assert usb.STEPS["u2"].port_open and not usb.STEPS["u1"].port_open
     assert usb.STEPS["u5"].position_report_ms == 20 and usb.STEPS["u1"].position_report_ms == 0
     assert any(a.kind == "plug" for a in usb.STEPS["u6"].actions)
@@ -222,3 +222,10 @@ def test_parse_fault_record():
 
 def test_parse_conditions():
     assert usb.parse_conditions(["ad2=removed", "power=24 V"]) == {"ad2": "removed", "power": "24 V"}
+
+
+def test_p1_no_brake(tmp_path):
+    cfg = usb_cfg(tmp_path)
+    msgs = usb.setup_actions(cfg, usb.STEPS["p1"])
+    assert not any(m[0] == "/enableElectromagnetBrake" for m in msgs)
+    assert ("/hardHiZ", 255) in [(a.address, *a.args) for a in usb.STEPS["p1"].actions if a.kind == "osc"]

@@ -81,6 +81,15 @@ bool validFrame(uint32_t sp)
     return (sp >= RAM_START) && (sp <= RAM_END - sizeof(Frame)) && !(sp & 3);
 }
 
+// The stack of the frame. Only an EXC_RETURN value (0xFFFFFFF1 / F9 / FD) can select PSP:
+// a HardFault at a USB unplug has shown other values in LR (the handler's first
+// instructions seem to run while the flash reads are still wrong), and this firmware uses
+// MSP only.
+uint32_t frameStack(uint32_t excReturn, uint32_t msp, uint32_t psp)
+{
+    return (excReturn == 0xFFFFFFFD) ? psp : msp;
+}
+
 void readUsb(UsbState &u)
 {
     u.intflag = USB->DEVICE.INTFLAG.reg;
@@ -143,7 +152,7 @@ void hilFaultLoopMark()
 // Called first in WDT_Handler (the trampoline below) with the stack of the interrupted code.
 extern "C" void hilFaultOnEarlyWarning(uint32_t excReturn, uint32_t msp, uint32_t psp)
 {
-    const uint32_t sp = (excReturn & 4) ? psp : msp;
+    const uint32_t sp = frameStack(excReturn, msp, psp);
     if (validFrame(sp))
         memcpy(&record.ew, (const void *)sp, sizeof(Frame));
     else
@@ -187,7 +196,7 @@ extern "C" __attribute__((naked)) void WDT_Handler(void)
 
 extern "C" __attribute__((noreturn, used)) void hilFaultOnHardFault(uint32_t excReturn, uint32_t msp, uint32_t psp)
 {
-    const uint32_t sp = (excReturn & 4) ? psp : msp;
+    const uint32_t sp = frameStack(excReturn, msp, psp);
     if (validFrame(sp))
         memcpy(&record.hf, (const void *)sp, sizeof(Frame));
     else

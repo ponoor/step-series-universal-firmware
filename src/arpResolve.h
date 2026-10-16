@@ -21,7 +21,8 @@
 // that the next send to destIp resolves its MAC address again also for the same IP:
 // - on /setDestIp when arpRxStartsResolution() is true (another address than destIp, or
 //   no packet from destIp for ARP_RX_GAP_MS; a client that sends /setDestIp every second
-//   as a heartbeat starts none after the first), or while isDestIpSet is false;
+//   as a heartbeat starts none after the first), while isDestIpSet is false, or when the
+//   last resolution gave up and no send to destIp succeeded since (failed);
 // - with isDestIpSet, when the link is up after the start or a change of the ID
 //   (initEthernet()), and when the link comes up again after it was down
 //   (arpLinkWatch(): ARP_LINK_WAIT_MS after the link came up, as /booted).
@@ -67,6 +68,7 @@ struct ArpResolve
     bool probed;          // a probe was sent (lastProbeMs valid), kept across resolutions
     bool replyHeld;       // the reply to /setDestIp is held
     bool linkDown;        // PENDING and the link was down at the last poll (since downMs)
+    bool failed;          // the last resolution gave up, and no send to destIp succeeded since
     uint32_t ip;          // the address being resolved while pending
     uint32_t startMs;     // millis() of the start, moved on by the time the link was down
     uint32_t lastProbeMs; // millis() of the last probe
@@ -106,6 +108,10 @@ bool arpResolveProbeResult(ArpResolve &r, bool ok);
 
 // Whether a reply to /setDestIp is held, cleared by the call. Always false while PENDING.
 bool arpResolveTakeReply(ArpResolve &r);
+
+// A send to ip went out (endPacket() 1): if ip is the address of the last resolution, its
+// MAC address is resolved, so a later /setDestIp need not start a resolution for it.
+void arpResolveSent(ArpResolve &r, uint32_t ip);
 
 // The last packet from destIp. Zero-initialized: no record.
 struct ArpRxRecord

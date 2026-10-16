@@ -99,8 +99,9 @@ void sendBackoffOnReceive(const IPAddress &ip);
 bool sendArpRefreshDummy();
 // /setDestIp from src: sets destIp and isDestIpSet, and starts the resolution of the MAC
 // address of destIp (arpResolve.h: the dummy broadcast, the messages to destIp dropped
-// until a probe succeeds or 2 s pass, /destIp held until then) if destIpWasSet is false
-// or arpRxStartsResolution(); otherwise sends /destIp now (or replaces the held one while
+// until a probe succeeds or 2 s pass, /destIp held until then) if destIpWasSet is false,
+// the last resolution gave up (no send to destIp succeeded since) or
+// arpRxStartsResolution(); otherwise sends /destIp now (or replaces the held one while
 // a resolution runs). destIpUpdated: the last argument of /destIp.
 void setDestIpReceived(const IPAddress &src, bool destIpWasSet, bool destIpUpdated);
 // After every received packet (destIp as after it was handled): the record of the last

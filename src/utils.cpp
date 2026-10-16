@@ -589,6 +589,8 @@ void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
     PROBE_LOW(5);
     if (!ok)
         perfStats.udpSendFailedCount++;
+    else
+        arpResolveSent(arpResolve, ipRaw);
     printSendBackoffEvent(sendBackoffSent(sendBackoff, ipRaw, ok, millis()), ip);
     turnOnTXL();
 }
@@ -644,7 +646,8 @@ static void startArpResolve(bool holdDestIp, bool destIpUpdated) {
 
 void setDestIpReceived(const IPAddress &src, bool destIpWasSet, bool destIpUpdated) {
     // Before destIp changes: judged against the packets from the destIp until now.
-    const bool start = !destIpWasSet || arpRxStartsResolution(arpRx, (uint32_t)src, (uint32_t)destIp, millis());
+    const bool start = !destIpWasSet || arpResolve.failed ||
+                       arpRxStartsResolution(arpRx, (uint32_t)src, (uint32_t)destIp, millis());
     destIp = src;
     isDestIpSet = true;
     if (start) {

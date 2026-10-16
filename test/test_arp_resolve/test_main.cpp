@@ -473,6 +473,36 @@ void test_link_watch_cleared_by_another_start()
     TEST_ASSERT_FALSE(arpLinkWatchPoll(w, true, 5000));
 }
 
+// --- after a resolution that gave up ---
+
+void test_failed_after_timeout_until_a_send_succeeds()
+{
+    ArpResolve r = {};
+    arpResolveStart(r, DEST, true, 1000);
+    TEST_ASSERT_FALSE(r.failed);
+    TEST_ASSERT_EQUAL(ARP_RESOLVE_TIMEOUT, arpResolvePoll(r, 1000 + ARP_RESOLVE_TIMEOUT_MS, true));
+    TEST_ASSERT_TRUE(r.failed); // the next /setDestIp starts a resolution in any case
+    arpResolveSent(r, OTHER);   // another address: still failed
+    TEST_ASSERT_TRUE(r.failed);
+    arpResolveSent(r, DEST);    // e.g. the held /destIp went out after the timeout
+    TEST_ASSERT_FALSE(r.failed);
+}
+
+void test_failed_cleared_by_a_start_and_kept_by_success()
+{
+    ArpResolve r = {};
+    arpResolveStart(r, DEST, false, 1000);
+    arpResolvePoll(r, 1000 + ARP_RESOLVE_TIMEOUT_MS, true);
+    TEST_ASSERT_TRUE(r.failed);
+    arpResolveStart(r, DEST, true, 5000);
+    TEST_ASSERT_FALSE(r.failed);
+    arpResolveSent(r, DEST); // ignored while pending
+    TEST_ASSERT_TRUE(r.pending);
+    arpResolvePoll(r, 5000, true);
+    TEST_ASSERT_TRUE(arpResolveProbeResult(r, true));
+    TEST_ASSERT_FALSE(r.failed);
+}
+
 int main(int argc, char **argv)
 {
     UNITY_BEGIN();
@@ -510,5 +540,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_link_watch_link_up_at_once_as_booted);
     RUN_TEST(test_link_watch_link_comes_back);
     RUN_TEST(test_link_watch_cleared_by_another_start);
+    RUN_TEST(test_failed_after_timeout_until_a_send_succeeds);
+    RUN_TEST(test_failed_cleared_by_a_start_and_kept_by_success);
     return UNITY_END();
 }

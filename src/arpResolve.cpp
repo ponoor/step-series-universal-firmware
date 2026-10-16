@@ -10,6 +10,7 @@ void arpResolveStart(ArpResolve &r, uint32_t ip, bool holdReply, uint32_t nowMs)
     else if (r.linkDown)
         r.downMs = nowMs; // the time to the timeout starts when the link is up again
     r.pending = true;
+    r.failed = false;
     r.ip = ip;
     r.startMs = nowMs;
 }
@@ -50,6 +51,7 @@ ArpResolveAction arpResolvePoll(ArpResolve &r, uint32_t nowMs, bool linkUp)
     if ((uint32_t)(nowMs - r.startMs) >= ARP_RESOLVE_TIMEOUT_MS)
     {
         r.pending = false;
+        r.failed = true;
         return ARP_RESOLVE_TIMEOUT;
     }
     if (r.probed && (uint32_t)(nowMs - r.lastProbeMs) < ARP_PROBE_INTERVAL_MS)
@@ -65,6 +67,12 @@ bool arpResolveProbeResult(ArpResolve &r, bool ok)
         return false;
     r.pending = false;
     return true;
+}
+
+void arpResolveSent(ArpResolve &r, uint32_t ip)
+{
+    if (!r.pending && ip == r.ip)
+        r.failed = false;
 }
 
 bool arpResolveTakeReply(ArpResolve &r)

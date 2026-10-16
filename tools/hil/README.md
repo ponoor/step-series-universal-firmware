@@ -269,8 +269,9 @@ While a step runs the bench
 | `e2b` | e1 1-5, then `R` and `/setDestIp` from NIC B, the reports again, `--observe` s, e1 6 |
 | `c1`, `c2` | HIL_PROBE builds with the candidate fixes (`N`: reopen the UDP socket; `U`: 1 byte to 255.255.255.255:9). e1 1-5, then a new AD2 recording and the serial command while `/getVersion` is sent from NIC B 20 times every 2 ms, `--observe` s; e1 6 and the command again (back on NIC A the board keeps the MAC address of NIC B) |
 | `n1`, `n2` | The command of `c1` / `c2` three times while the client is reachable (e1 1, reports every 20 ms, 3 s apart), no swap |
-| `fix` | The ARP refresh with the client swapped (T1, human). `--heartbeat` (F1): `/setDestIp` every 1.0 s from the connected adapter (paused during a swap, resumed from the new adapter once it has the address), 30 s on NIC A, swap to NIC B, 30 s, swap back, 30 s, the destination MAC (`s`, `T`) after each 30 s. Without (F2): one `/setDestIp`; after each swap 10 s without a packet, the destination MAC, `/getVersion` from the new adapter, 10 s, the destination MAC |
-| `gap` | The ARP refresh of the product firmware (`src/arpRefresh.h`), NIC A only (captured alone; NIC B need not be attached), no human. `R`, `G` (initial `destIp`, `canSendMsgBeforeDestIp`), 0: `/setDestIp`, reports `[arp] report_ms`; a: `/setDestIp` every 1.0 s x 30 (heartbeat); b: `/getVersion` every 2.0 s x 10; c: 3 s silence, `/getVersion` every 10 ms x 10; d: 3 s silence, one `/getVersion` (the part "another source first" is left out: the Mac has no other address that reaches the board). `p` is read at the end of each pattern |
+| `fix` | The resolution of the MAC address of `destIp` (`src/arpResolve.h`) with the client swapped (T1, human). E1 1, then for NIC B and back to NIC A: the swap, 10 s without a packet, the destination MAC (`s`, `T`), the first packet from the new adapter (10 s), the destination MAC. F1 (default): the packet is `/setDestIp`, which repairs the swap. F2 (`--commands-only`): `/getVersion`, which does not (as specified; back on NIC A the board reaches it again because it kept its MAC address) |
+| `gap` | The resolution of the MAC address of `destIp` against the packets from the client (the patterns of the ARP refresh before it), NIC A only (captured alone; NIC B need not be attached), no human. `R`, `G` (initial `destIp`, `canSendMsgBeforeDestIp`), 0: `/setDestIp`, reports `[arp] report_ms`; a: `/setDestIp` every 1.0 s x 30 (heartbeat); b: `/getVersion` every 2.0 s x 10; c: 3 s silence, `/getVersion` every 10 ms x 10; d: 3 s silence, one `/getVersion` (the part "another source first" is left out: the Mac has no other address that reaches the board). `p` is read at the end of each pattern |
+| `resolve`, `silence` | A1-A4 of `TASK_arp_resolve.md`, no `--topology`, no capture, no AD2, no NIC A / B, any model (also the STEP400), no human. The OSC socket is `[network] local_ip` / `bound_if` (the wired adapter or Wi-Fi). `/setDestIp` and `/getVersion` once (the firmware), `p` (cleared), then `--count` times (20): `--quiet-s` s (3) without a packet to the board, `/setDestIp` (`resolve`) or `/getVersion` (`silence`), `--window` s (1), `p`. A reply counts for its query until the next query (a late `/destIp` too); `summary.json` has each trial (reply time, the `p` counters) and the probes per resolution |
 
 `summary.json` has, per phase (each step above starts one): the board's ARP requests
 (time from the phase start, the address asked for), its frames by destination MAC
@@ -279,21 +280,22 @@ address, replies, gratuitous ARP), what NIC B received, P1 / P5 counts and P5 wi
 P5 pulses paired with the captured frames of the board (within 5 ms after the clock
 offset, only within the AD2 recordings), and the OSC messages received per socket. `arp
 H1` merges the phases 3-5: H1 is observed when the board sent no ARP request for the
-client address and no frame to NIC B. All items are RECORD, except for `gap`:
+client address and no frame to NIC B. All items are RECORD, except for `gap` and `fix`:
 
 | Item | Judged |
 |---|---|
-| `arp gap 0`, `a` - `d` | the board's dummy broadcasts (UDP to 255.255.255.255:9) in the capture per pattern equal the count the firmware rule gives for the packets actually sent (from the capture, so a shifted interval is taken into account; nominal 0, 0, 10, 1, 1), and the `arpRefresh` counter of `p` equals them |
-| `arp gap-order` | every refresh: the packet to the board, the dummy, the board's ARP request for the client, the ARP reply, the board's reply, in this order, no other board frame between the dummy and the ARP request |
+| `arp gap 0`, `a` - `d` | the board's dummy broadcasts (UDP to 255.255.255.255:9) in the capture per pattern equal the count the firmware rule gives for the packets actually sent (one per `/setDestIp`, from the capture; nominal 1, 30, 0, 0, 0), the `arpResolve` counter of `p` equals them, and every resolution ended by its first probe (`arpProbe` = `arpResolved` = `arpResolve`, `arpTimeout` 0) |
+| `arp gap-order` | every resolution started by `/setDestIp`: the packet to the board, the dummy, the board's ARP request for the client, the ARP reply, the probe (1 byte to port 9 of the client), the board's reply (`/destIp`), in this order, no other board frame between the dummy and the ARP request; recorded: the ARP requests per resolution |
 | `arp gap-p5` (RECORD) | P5 width of the dummy and of the next send (with the ARP) |
-| `arp fix-heartbeat` | F1: no dummy and `arpRefresh` 0 while the heartbeat runs on NIC A |
-| `arp F1/F2 to NIC A/B` | after each swap (from the new adapter having the address to the next swap request or the last event): one dummy and `arpRefresh` 1, the board's reply (`/destIp`, F1; `/version`, F2) and `/positionList` sent to the new MAC address, no `udpSendFailed`; recorded: the times from the first packet of the new adapter to the dummy, the ARP request and the first frame to the new MAC address |
-| `arp F1/F2 on ...` | the destination MAC address of `s` and `T`: the old adapter before the first packet (F2), the new one afterwards |
+| `arp F1 to NIC A/B` | after each swap (from the new adapter having the address to the next swap request or the last event): one dummy, `arpResolve` 1 and `arpResolved` 1, no `arpTimeout`, the probe, `/destIp` and `/positionList` sent to the new MAC address, no `udpSendFailed`; recorded: the times from the first packet of the new adapter to the dummy, the ARP request, the probe and the first other frame to the new MAC address |
+| `arp F2 to NIC B` | `/getVersion` alone: no dummy, `arpResolve` 0, no frame to NIC B (not repaired, as specified) |
+| `arp F2 to NIC A` | back on NIC A: no dummy, `/version` and `/positionList` to NIC A |
+| `arp F1/F2 on ...` | the destination MAC address of `s` and `T`: F1, the old adapter before the first packet, the new one afterwards; F2, NIC A throughout |
 
-A heartbeat socket of the unplugged adapter sent through the other adapter while it was
-still probing its address (no ARP reply yet): the refresh then fails (41 ms, the send
-pause) and the board reaches the client 1-2 s later, with one more refresh. So the
-heartbeat sends only from the connected adapter. Each run saves the wall clock samples
+A socket of the unplugged adapter sent through the other adapter while it was still
+probing its address (no ARP reply yet): with the ARP refresh before the resolution the
+send then failed (41 ms, the send pause) and the board reached the client 1-2 s later.
+So the bench sends only from the connected adapter. Each run saves the wall clock samples
 (`clock_wall_minus_mono.npy`) used to move the pcap times to `time.monotonic()`.
 
 ## How it works
@@ -473,7 +475,7 @@ STEP400 Brake Board is connected to J7.
 | `reboot` | as the STEP800, plus `--how W` (watchdog), `--how button` (reset button: prints `OPERATOR:` and records until `/booted`, up to 10 minutes) and `--all-motors`; judged items below. **The judged items need `--all-motors --move 64`** (e.g. `reboot --how R --all-motors --move 64`): every brake released, and OUT1A moved off EL_POS 0, where it stays at 0 V also while energized, so that the driver standby shows as the end of the PWM |
 | `powerup` | 10 kS/s, both USB and 12 V are switched. No trigger: with the board off the AD2 inputs float and toggle, so the rail counts as off when 25 % of the reads over 1 s are low, the recording starts before the power-on and runs to 8 s after `/booted`, and the 3.3 V rise is the start of the last high span of DIO 4. The operator is asked which came on first; judged below |
 | `check` | C1, C2, C4, C7, C9 (`--all-auto`: C1, C2, C4, C7). The others use P3-P6, the L6470 bit layout or the STEP800 brake outputs and are refused |
-| `arp` | refused (needs P5) |
+| `arp` | refused (needs P5), except `resolve` and `silence` (no AD2) |
 | `motor` | tests with a motor, brake and load, record only; see [Motor tests](#motor-tests-hilpy-motor) |
 | `usb` | USB cable unplugged / plugged in, record only; see [USB cable unplugged](#usb-cable-unplugged-hilpy-usb) |
 

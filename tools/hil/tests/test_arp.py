@@ -166,33 +166,22 @@ def test_to_monotonic():
     assert abs(t[0] - 0.0) < 1e-9 and abs(t[1] - 5.0) < 1e-6
 
 
-# --- ARP refresh (gap step) ---
+# --- resolution of the MAC address of destIp (gap step) ---
 
 C = "10.0.0.10"
 
 
-def test_expected_refreshes_follows_the_firmware_rule():
-    # initial destIp 10.0.0.10 (firmware default) = the client: the first /setDestIp
-    # (isDestIpSet false) is recorded, no refresh
+def test_expected_resolutions_follows_the_firmware_rule():
+    # every /setDestIp, also the heartbeat from the destIp already set
     pk = [(0.0, C, "/setDestIp"), (0.1, C, "/setPositionListReportInterval")]
     pk += [(1.0 + i, C, "/setDestIp") for i in range(30)]  # heartbeat 1.0 s
-    assert arp.expected_refreshes(pk, dest=C) == []
-    pk2 = pk + [(32.0 + 2 * i, C, "/getVersion") for i in range(10)]  # every 2 s
-    assert len(arp.expected_refreshes(pk2, dest=C)) == 10
-    # initial destIp another address: the first /setDestIp is not recorded, the next
-    # packet refreshes once
-    assert arp.expected_refreshes(pk, dest="10.0.0.20") == [0.1]
-    # boundary: 1.5 s counts, 1.499 s does not
-    assert arp.expected_refreshes([(0, C, "/setDestIp"), (1.499, C, "/x"), (2.998, C, "/x")], dest=C) == []
-    assert arp.expected_refreshes([(0, C, "/setDestIp"), (1.5, C, "/x")], dest=C) == [1.5]
-    # another source: no refresh, record kept; a burst refreshes once
-    pk3 = [(0, C, "/setDestIp"), (3.0, "10.0.0.11", "/getVersion"), (3.1, C, "/x"), (3.11, C, "/x")]
-    assert arp.expected_refreshes(pk3, dest=C) == [3.1]
-    # set by the config (canSendMsgBeforeDestIp): the first packet refreshes
-    assert arp.expected_refreshes([(0, C, "/getVersion")], dest=C, dest_set=True) == [0]
-    # /setDestIp from another address: the next packet from it refreshes once
-    pk4 = [(0, C, "/setDestIp"), (0.5, "10.0.0.11", "/setDestIp"), (0.6, "10.0.0.11", "/x"), (0.7, "10.0.0.11", "/x")]
-    assert arp.expected_refreshes(pk4, dest=C) == [0.6]
+    assert arp.expected_resolutions(pk) == [0.0] + [1.0 + i for i in range(30)]
+    # gaps in the packets start none
+    pk2 = [(32.0 + 2 * i, C, "/getVersion") for i in range(10)] + [(60.0, C, "/x"), (63.0, C, "/x")]
+    assert arp.expected_resolutions(pk2) == []
+    # /setDestIp from another address too
+    assert arp.expected_resolutions([(0, C, "/setDestIp"), (0.5, "10.0.0.11", "/setDestIp"),
+                                     (0.6, "10.0.0.11", "/x")]) == [0, 0.5]
 
 
 def udp(t, src, dst, ip_src, ip_dst, dport, osc_addr=None):
@@ -204,18 +193,23 @@ def arpf(t, op, sha, spa, tha, tpa, dst="ff:ff:ff:ff:ff:ff"):
     return arp.Frame(t, sha, dst, 0x0806, "en9", arp_op=op, arp_sha=sha, arp_spa=spa, arp_tha=tha, arp_tpa=tpa)
 
 
-def refresh_frames(swap_reply_and_arp=False):
+def refresh_frames(swap_reply_and_arp=False, failed_probe=False):
     fr = [
-        udp(1.0000, NIC_A, BOARD, C, "10.0.0.100", 50000, "/getVersion"),
+        udp(1.0000, NIC_A, BOARD, C, "10.0.0.100", 50000, "/setDestIp"),
         udp(1.0006, BOARD, "ff:ff:ff:ff:ff:ff", "10.0.0.100", "255.255.255.255", 9),
         arpf(1.0010, 1, BOARD, "10.0.0.100", "00:00:00:00:00:00", C),
         arpf(1.0011, 2, NIC_A, C, BOARD, "10.0.0.100", dst=BOARD),
-        udp(1.0020, BOARD, NIC_A, "10.0.0.100", C, 50100, "/version"),
+        udp(1.0015, BOARD, NIC_A, "10.0.0.100", C, 9),  # the probe
+        udp(1.0020, BOARD, NIC_A, "10.0.0.100", C, 50100, "/destIp"),
         udp(1.0500, BOARD, NIC_A, "10.0.0.100", C, 50100, "/positionList"),
     ]
     if swap_reply_and_arp:
-        fr[2], fr[4] = fr[4], fr[2]
-        fr[2].t, fr[4].t = 1.0010, 1.0020
+        fr[2], fr[5] = fr[5], fr[2]
+        fr[2].t, fr[5].t = 1.0010, 1.0020
+    if failed_probe:
+        # the first probe got no ARP reply (two requests, 40 ms), the second one did
+        fr[2:2] = [arpf(1.0008, 1, BOARD, "10.0.0.100", "00:00:00:00:00:00", C),
+                   arpf(1.0009, 1, BOARD, "10.0.0.100", "00:00:00:00:00:00", C)]
     return fr
 
 
@@ -223,14 +217,27 @@ def test_refresh_sequences_order():
     sq = arp.refresh_sequences(refresh_frames(), BOARD, "10.0.0.100", C)
     assert len(sq) == 1
     s0 = sq[0]
-    assert s0["trigger"] == "/getVersion" and s0["reply"] == "/version" and s0["order_ok"] is True
-    assert s0["dummy_ms"] == 0.6 and s0["arp_request_ms"] == 1.0 and s0["arp_reply_ms"] == 1.1 and s0["reply_ms"] == 2.0
+    assert s0["trigger"] == "/setDestIp" and s0["reply"] == "/destIp" and s0["order_ok"] is True
+    assert s0["dummy_ms"] == 0.6 and s0["arp_request_ms"] == 1.0 and s0["arp_reply_ms"] == 1.1
+    assert s0["probe_ms"] == 1.5 and s0["reply_ms"] == 2.0 and s0["arp_requests"] == 1
     assert arp.is_refresh_dummy(refresh_frames()[1], BOARD) and not arp.is_refresh_dummy(refresh_frames()[4], BOARD)
+    assert arp.is_probe(refresh_frames()[4], BOARD, C) and not arp.is_probe(refresh_frames()[5], BOARD, C)
+
+
+def test_refresh_sequences_counts_the_arp_requests():
+    sq = arp.refresh_sequences(refresh_frames(failed_probe=True), BOARD, "10.0.0.100", C)
+    assert sq[0]["arp_requests"] == 3 and sq[0]["arp_request_ms"] == 0.8 and sq[0]["order_ok"] is True
 
 
 def test_refresh_sequences_reply_before_arp_is_out_of_order():
     sq = arp.refresh_sequences(refresh_frames(swap_reply_and_arp=True), BOARD, "10.0.0.100", C)
     assert sq[0]["order_ok"] is False
+
+
+def test_refresh_sequences_without_probe_is_out_of_order():
+    fr = [f for f in refresh_frames() if not arp.is_probe(f, BOARD, C)]
+    sq = arp.refresh_sequences(fr, BOARD, "10.0.0.100", C)
+    assert sq[0]["probe_ms"] is None and sq[0]["order_ok"] is False
 
 
 def test_nearest_pulse():
@@ -245,21 +252,105 @@ def test_swap_recovery():
     B10 = "10.0.0.100"
     fr = [
         udp(0.5, BOARD, NIC_A, B10, C, 50100, "/positionList"),  # old MAC, before the first packet
-        udp(2.0, NIC_B, BOARD, C, B10, 50000, "/getVersion"),
+        udp(2.0, NIC_B, BOARD, C, B10, 50000, "/setDestIp"),
         udp(2.0005, BOARD, "ff:ff:ff:ff:ff:ff", B10, "255.255.255.255", 9),
         arpf(2.0009, 1, BOARD, B10, "00:00:00:00:00:00", C),
         arpf(2.0010, 2, NIC_B, C, BOARD, B10, dst=BOARD),
-        udp(2.0020, BOARD, NIC_B, B10, C, 50100, "/version"),
+        udp(2.0015, BOARD, NIC_B, B10, C, 9),  # the probe
+        udp(2.0020, BOARD, NIC_B, B10, C, 50100, "/destIp"),
         udp(2.0500, BOARD, NIC_B, B10, C, 50100, "/positionList"),
         udp(9.0, BOARD, NIC_B, B10, C, 50100, "/positionList"),  # after the window
     ]
     r = arp.swap_recovery(fr, BOARD, B10, C, NIC_B, 0.0, 5.0)
-    assert r["first_rx"] == "/getVersion" and r["first_rx_s"] == 2.0
-    assert r["dummy_ms"] == 0.5 and r["arp_request_ms"] == 0.9 and r["first_to_new_ms"] == 2.0
-    assert r["first_to_new"] == "/version" and r["dummies"] == 1
-    assert r["osc_to_new"] == {"/version": 1, "/positionList": 1}
+    assert r["first_rx"] == "/setDestIp" and r["first_rx_s"] == 2.0
+    assert r["dummy_ms"] == 0.5 and r["arp_request_ms"] == 0.9 and r["probe_ms"] == 1.5
+    assert r["first_to_new_ms"] == 2.0 and r["first_to_new"] == "/destIp" and r["dummies"] == 1
+    assert r["osc_to_new"] == {"/destIp": 1, "/positionList": 1}
     none = arp.swap_recovery(fr[:1], BOARD, B10, C, NIC_B, 0.0, 5.0)
-    assert none["first_rx"] is None and none["dummy_ms"] is None and none["dummies"] == 0
+    assert none["first_rx"] is None and none["dummy_ms"] is None and none["probe_ms"] is None
+    assert none["dummies"] == 0
+
+
+def fix_res(tag, perf_b, perf_a, macs):
+    ev = [{"t": 1.0, "name": f"{tag} B swap to NIC B requested", "phase": f"{tag} B swap to B"},
+          {"t": 1.5, "name": f"{tag} B 10.0.0.10 on NIC B", "phase": None},
+          {"t": 5.0, "name": f"{tag} A swap to NIC A requested", "phase": f"{tag} A swap to A"},
+          {"t": 5.5, "name": f"{tag} A 10.0.0.10 on NIC A", "phase": None},
+          {"t": 9.0, "name": "last", "phase": None}]
+    return {"board_mac": BOARD, "board_ip": "10.0.0.100", "client_ip": C, "events": ev,
+            "perf": {f"{tag} on B": perf_b, f"{tag} on A": perf_a}, "dest_macs": macs}
+
+
+def resolved_perf():
+    return {"arpResolve": 1, "arpResolved": 1, "arpTimeout": 0, "arpDropped": 0, "udpSendFailed": 0}
+
+
+def repaired(t, nic):
+    B10 = "10.0.0.100"
+    return [udp(t, nic, BOARD, C, B10, 50000, "/setDestIp"),
+            udp(t + 0.0005, BOARD, "ff:ff:ff:ff:ff:ff", B10, "255.255.255.255", 9),
+            arpf(t + 0.0009, 1, BOARD, B10, "00:00:00:00:00:00", C),
+            arpf(t + 0.0010, 2, nic, C, BOARD, B10, dst=BOARD),
+            udp(t + 0.0015, BOARD, nic, B10, C, 9),
+            udp(t + 0.0020, BOARD, nic, B10, C, 50100, "/destIp"),
+            udp(t + 0.1, BOARD, nic, B10, C, 50100, "/positionList")]
+
+
+def test_fix_items_f1_repaired_by_set_dest_ip():
+    macs = [{"label": "F1 on B before the first packet", "s": NIC_A, "T": NIC_A},
+            {"label": "F1 on B after /setDestIp", "s": NIC_B, "T": NIC_B},
+            {"label": "F1 on A before the first packet", "s": NIC_B, "T": NIC_B},
+            {"label": "F1 on A after /setDestIp", "s": NIC_A, "T": NIC_A}]
+    res = fix_res("F1", resolved_perf(), resolved_perf(), macs)
+    items = arp.fix_items(res, repaired(3.0, NIC_B) + repaired(7.0, NIC_A), NAMES)
+    assert [i.verdict for i in items] == ["PASS"] * 6, [i.detail for i in items]
+    # no probe: not repaired by the resolution
+    fr = [f for f in repaired(3.0, NIC_B) if not arp.is_probe(f, BOARD, C)] + repaired(7.0, NIC_A)
+    assert arp.fix_items(fix_res("F1", resolved_perf(), resolved_perf(), []), fr, NAMES)[0].verdict == "FAIL"
+
+
+def test_fix_items_f2_not_repaired_by_a_command():
+    B10 = "10.0.0.100"
+    none = {"arpResolve": 0, "arpResolved": 0, "arpTimeout": 0, "arpDropped": 0, "udpSendFailed": 0}
+    macs = [{"label": "F2 on B before the first packet", "s": NIC_A, "T": NIC_A},
+            {"label": "F2 on B after /getVersion", "s": NIC_A, "T": NIC_A},
+            {"label": "F2 on A before the first packet", "s": NIC_A, "T": NIC_A},
+            {"label": "F2 on A after /getVersion", "s": NIC_A, "T": NIC_A}]
+    fr = [udp(3.0, NIC_B, BOARD, C, B10, 50000, "/getVersion"),
+          udp(3.002, BOARD, NIC_A, B10, C, 50100, "/version"),  # still to NIC A
+          udp(7.0, NIC_A, BOARD, C, B10, 50000, "/getVersion"),
+          udp(7.002, BOARD, NIC_A, B10, C, 50100, "/version"),
+          udp(7.1, BOARD, NIC_A, B10, C, 50100, "/positionList")]
+    items = arp.fix_items(fix_res("F2", none, none, macs), fr, NAMES)
+    assert [i.verdict for i in items] == ["PASS"] * 6, [i.detail for i in items]
+    # a frame to NIC B: repaired, not as specified
+    fr2 = fr + [udp(3.5, BOARD, NIC_B, B10, C, 50100, "/positionList")]
+    assert arp.fix_items(fix_res("F2", none, none, []), fr2, NAMES)[0].verdict == "FAIL"
+
+
+def test_assign_replies():
+    s = 1_000_000_000
+    sent = [0, 4 * s, 8 * s]
+    # a late reply (1.5 s) still counts; none for the second; two for the third: the first
+    assert arp.assign_replies(sent, [int(1.5 * s), 8 * s + 5, 8 * s + 9]) == [int(1.5 * s), None, 8 * s + 5]
+    assert arp.assign_replies([], [1]) == []
+
+
+def test_reach_summary():
+    p = lambda probes, ok=True: {"arpResolve": 1, "arpProbe": probes, "arpProbeFailed": probes - ok,  # noqa: E731
+                                 "arpResolved": int(ok), "arpTimeout": int(not ok), "arpDropped": 0,
+                                 "udpSendFailed": 0}
+    trials = [{"reply_ms": 2.0, "perf": p(1)}, {"reply_ms": 310.0, "perf": p(3)}, {"reply_ms": 1500.0, "perf": p(9)},
+              {"reply_ms": None, "perf": p(14, ok=False)}]
+    s = arp.reach_summary(trials, 1.0)
+    assert s["trials"] == 4 and s["replies"] == 3 and s["replies_in_window"] == 2
+    assert s["reply_ms"]["min"] == 2.0 and s["reply_ms"]["max"] == 1500.0
+    assert s["resolutions"] == 4 and s["resolved"] == 3 and s["timeouts"] == 1
+    assert s["probes_to_resolve"] == {1: 1, 3: 1, 9: 1}
+    assert "probes to resolve {1: 1, 3: 1, 9: 1}" in arp.reach_line(s)
+    # the firmware before the resolution: no arp* counters
+    old = arp.reach_summary([{"reply_ms": None, "perf": {"udpSendFailed": 1}}], 1.0)
+    assert "resolutions" not in old and old["replies"] == 0 and "-" in arp.reach_line(old)
 
 
 def test_gap_captures_nic_a_only():

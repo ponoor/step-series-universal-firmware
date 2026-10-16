@@ -117,8 +117,9 @@ class WdtBench:
 
     def perf(self) -> dict:
         if self.args.product:
-            # Product build: no wdtGapMax; the last line of 'p' is arpRefreshFailed.
-            p = parse_perf(self.ser.command("p", until=r"arpRefreshFailed\s+\d+"))
+            # Product build: no wdtGapMax; the last line of 'p' is arpDropped
+            # (arpRefreshFailed before the resolution of the MAC address of destIp).
+            p = parse_perf(self.ser.command("p", until=r"(arpDropped|arpRefreshFailed)\s+\d+"))
             p["wdtGapMax"] = {"max_us": None, "from": None, "to": None}
             return p
         text = self.ser.command("p", until=r"wdtGapMax\s+\d+ us\s+from 0x[0-9A-Fa-f]+ to 0x[0-9A-Fa-f]+")

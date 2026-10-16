@@ -1252,7 +1252,18 @@ void receiveFilename() {
 	char buf[MAX_CONFIG_FILENAME];
 	uint8_t idx = 0;
 	uint32_t t = millis();
-	while ((millis() - t) < 2000) {
+	// Typed by hand, the characters can be more than the watchdog early warning apart:
+	// reset it every 50 ms, as receiveConfigJson() does (SYNCBUSY takes 2-3 ms). The
+	// whole name is limited to 10 s, the timeout of '{', so a stream without a line end
+	// does not hold the loop with the watchdog reset.
+	const uint32_t startTime = t;
+	uint32_t lastWdtReset = t;
+	while (((millis() - t) < 2000) && ((millis() - startTime) < 10000UL)) {
+		const uint32_t now = millis();
+		if (now - lastWdtReset >= 50) {
+			Watchdog.reset();
+			lastWdtReset = now;
+		}
 		if (SerialUSB.available()) {
 			char c = SerialUSB.read();
 			if (c == '\n' || c == '\r') break;

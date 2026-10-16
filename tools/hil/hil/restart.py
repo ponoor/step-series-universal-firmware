@@ -189,11 +189,12 @@ def analyze_restart(cfg: Config, cap, how: str, t_cmd: float | None) -> dict:
     res: dict = {"how": how}
     p0 = analyze.bit_edges(seg, probe[0]).all
     t_reset = mcu_reset_time(p0) if how != "standby" else None
-    if how in ("W", "X"):
-        # The hang before the early warning (W) and the brake wait of the HardFault handler
-        # (X) are long P0 gaps too: the reset is the last P0 edge (the HIL reset marker)
-        # before the gap that loop() resumes after.
-        t_reset = reset_before_loop(p0)
+    if how != "standby":
+        # The hang before the early warning (W) and the brake waits (X, and R / resetDevice
+        # with a long transition time: safeSystemReset() does not toggle P0) are long P0
+        # gaps too, merged with the boot if P0 is already high at the marker: the reset is
+        # the last P0 edge (the HIL reset marker) before the gap that loop() resumes after.
+        t_reset = reset_before_loop(p0) or t_reset
     ref = t_reset if t_reset is not None else (t_cmd or 0.0)
     ch = int(cfg.ad2["scope"]["out1a"])
     shift = res.get("scope_minus_digital_s", 0.0)
@@ -351,9 +352,10 @@ def cmd_reboot(cfg: Config, args) -> int:
     if getattr(args, "transition_ms", None):
         values["transition_ms"] = int(args.transition_ms)
     transition_ms = float(values["transition_ms"])
+    # The test axis, or every motor (brake enabled on all by COMMON_SETUP), released: the
+    # brake releases transition_ms after /activate 1.
+    activate = (sc.osc("/activate", sc.ALL if all_motors else sc.AXIS, 1), sc.wait(0.5 + transition_ms / 1000.0))
     standby = how == "standby"
-    # The test axis, or every motor (brake enabled on all by COMMON_SETUP), released.
-    activate = (sc.osc("/activate", sc.ALL if all_motors else sc.AXIS, 1), sc.wait(0.5))
     move = getattr(args, "move", 0) or 0
     if move:
         # Off EL_POS 0, where OUT1A is held at 0 V also while energized: with phase A

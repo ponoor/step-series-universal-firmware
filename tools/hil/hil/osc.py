@@ -22,6 +22,10 @@ class OscError(Exception):
 # macOS: setsockopt(IPPROTO_IP, IP_BOUND_IF, interface index) scopes a socket to one
 # interface (sends leave through it, receives only from it). Not in the socket module.
 IP_BOUND_IF = 25
+# macOS: IP_RECVIF adds the receiving interface (struct sockaddr_dl, sdl_index at bytes 2-3)
+# to each datagram. A socket bound to 0.0.0.0 with IP_BOUND_IF still gets the broadcasts
+# that arrive on the other interfaces (e.g. Wi-Fi on the same subnet: /booted twice).
+IP_RECVIF = 20
 
 
 @dataclass
@@ -57,6 +61,7 @@ class OscLink:
         self._log_lock = threading.Lock()
         self._cond = threading.Condition(self._log_lock)
         self._rx_sock: socket.socket | None = None
+        self._rx_index = 0  # interface index of bound_if (receive filter), set in open()
         self._tx_sock: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._running = False
@@ -73,6 +78,9 @@ class OscLink:
         # With bound_if, receive on any address of that interface: a socket bound to the
         # unicast address does not get the broadcasts (/booted to x.x.x.255).
         self._rx_sock.bind(("0.0.0.0" if self.bound_if else self.local_ip, self.listen_port))
+        self._rx_index = socket.if_nametoindex(self.bound_if) if self.bound_if else 0
+        if self._rx_index:
+            self._rx_sock.setsockopt(socket.IPPROTO_IP, IP_RECVIF, 1)
         self._rx_sock.settimeout(0.1)
         if self.local_ip != "0.0.0.0":
             self._tx_sock.bind((self.local_ip, 0))
@@ -116,11 +124,13 @@ class OscLink:
     def _receive(self) -> None:
         while self._running:
             try:
-                data, _ = self._rx_sock.recvfrom(2048)
+                data, anc, _, _ = self._rx_sock.recvmsg(2048, 64)
             except socket.timeout:
                 continue
             except OSError:
                 return
+            if self._rx_index and not self._from_bound_if(anc):
+                continue
             t = time.monotonic_ns()
             try:
                 packet = OscPacket(data)
@@ -130,6 +140,12 @@ class OscLink:
                 for m in packet.messages:
                     self.log.append(LogEntry(t, "rx", m.message.address, tuple(m.message.params)))
                 self._cond.notify_all()
+
+    def _from_bound_if(self, anc) -> bool:
+        for level, kind, cdata in anc:
+            if level == socket.IPPROTO_IP and kind == IP_RECVIF and len(cdata) >= 4:
+                return int.from_bytes(cdata[2:4], "little") == self._rx_index
+        return True  # no interface information: keep it
 
     def wait_for(self, address: str, timeout: float = 1.0, since_ns: int = 0, predicate=None) -> LogEntry | None:
         """First received message with this address after since_ns (and matching the

@@ -50,6 +50,12 @@ void applyBrakeAction(uint8_t motorId, const BrakeAction &action);
 BrakeAction brakeCommand(uint8_t motorId, BrakeCommand command);
 // Status poll of the brakes, after checkStatus(). Also starts the homing at startup.
 void updateBrake(uint32_t _currentTimeMillis);
+// The longest brakeTransitionDuration (at most 1000 ms) of the motors with the brake
+// enabled and not engaged: the wait before a reset.
+uint16_t longestBrakeWaitMs();
+// Sets faultBrakeWaitMs (faultReset.h) for the CPU fault handler. Call after every change
+// of brakeStatus[], electromagnetBrakeEnable[] or brakeTransitionDuration[].
+void updateFaultBrakeWait();
 #endif
 // true when the brake is disabled or released (the driver may be run).
 bool brakeReleasedOrDisabled(uint8_t motorId);

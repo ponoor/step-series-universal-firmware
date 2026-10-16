@@ -1159,6 +1159,7 @@ bool enableElectromagnetBrake(uint8_t motorId, bool bEnable)
     PROBE_PULSE(6);
     brakeStatusFresh[motorId] = false;
     electromagnetBrakeEnable[motorId] = bEnable;
+    updateFaultBrakeWait();
     return true;
 }
 void enableElectromagnetBrake(OscMessage &msg)
@@ -1195,6 +1196,7 @@ void setBrakeTransitionDuration(OscMessage &msg)
         }
         motorID -= MOTOR_ID_FIRST;
         brakeTransitionDuration[motorID] = duration;
+        updateFaultBrakeWait();
     }
     else if (motorID == MOTOR_ID_ALL)
     {
@@ -1207,6 +1209,7 @@ void setBrakeTransitionDuration(OscMessage &msg)
         {
             brakeTransitionDuration[i] = duration;
         }
+        updateFaultBrakeWait();
     }
 }
 

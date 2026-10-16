@@ -98,6 +98,13 @@ void WatchdogTimer::reset()
 #endif
 }
 
+void WatchdogTimer::clearFromIsr()
+{
+    while (WDT->STATUS.bit.SYNCBUSY)
+        ;
+    WDT->CLEAR.reg = WDT_CLEAR_CLEAR_KEY;
+}
+
 void WatchdogTimer::disable()
 {
 #ifdef HIL_PROBE

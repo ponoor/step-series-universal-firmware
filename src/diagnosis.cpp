@@ -1125,6 +1125,7 @@ void receiveConfigJson() {
 			if (!enableElectromagnetBrake(i, brakeEnable))
 				dbgPrint("Warning: electromagnetBrakeEnable of motor %d not changed (driver not HiZ, or brake not engaged)\n", i + MOTOR_ID_FIRST);
 			brakeTransitionDuration[i] = ds_brakeTransitionDuration[i] | brakeTransitionDuration[i];
+			updateFaultBrakeWait();
 #endif
 		}
 	}

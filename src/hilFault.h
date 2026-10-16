@@ -8,10 +8,10 @@
 // writes, so it survives a watchdog or software reset (not a power-up: the magic is then
 // wrong and the record is cleared).
 //
-// - HardFault: HardFault_Handler records the exception frame (R0-R3, R12, LR, PC, xPSR),
-//   the stack pointer and EXC_RETURN, then toggles P2 every HIL_FAULT_P2_TOGGLE_US (the
-//   early warning holds P2 high instead) and loops as the core's handler does: the
-//   watchdog period resets the MCU.
+// - HardFault: HardFault_Handler (faultReset.cpp) calls hilFaultRecordHardFault() after
+//   the brakes and the fault marker; it records the exception frame (R0-R3, R12, LR, PC,
+//   xPSR), the stack pointer and EXC_RETURN and sets P2 high. P0 goes high right before
+//   the reset (hilFaultBeforeReset()).
 // - Early warning: WDT_Handler records the frame of the code it interrupted, the USB
 //   registers and the NVIC state before the brakes are engaged. The USB interrupt keeps
 //   the core's priority (0, as the early warning, which then cannot interrupt it), as in
@@ -29,13 +29,14 @@
 
 #include <stdint.h>
 
-#define HIL_FAULT_P2_TOGGLE_US 500
 
 void hilFaultInit();      // in setup(): boot count
 void hilFaultLoopMark();  // every loop() pass
 void hilFaultPrint();     // 'H': prints and clears the record
 void hilFaultTrigger();   // 'X': HardFault
 extern "C" void hilFaultOnEarlyWarning(uint32_t excReturn, uint32_t msp, uint32_t psp);
+extern "C" void hilFaultRecordHardFault(uint32_t excReturn, uint32_t msp, uint32_t psp);
+extern "C" void hilFaultBeforeReset(void);
 
 #define HIL_FAULT_INIT() hilFaultInit()
 #define HIL_FAULT_LOOP_MARK() hilFaultLoopMark()

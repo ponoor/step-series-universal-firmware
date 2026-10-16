@@ -5,6 +5,7 @@
 #if defined(__SAMD21G18A__) || defined(__SAMD21__)
 #define RESET_CAUSE_SAMD21
 #include <Arduino.h> // PM register definitions
+#include "faultReset.h"
 #define RCAUSE_POR PM_RCAUSE_POR
 #define RCAUSE_BOD12 PM_RCAUSE_BOD12
 #define RCAUSE_BOD33 PM_RCAUSE_BOD33
@@ -22,8 +23,10 @@
 #define RCAUSE_SYST (1u << 6)
 #endif
 
-ResetCause resetCauseFromSamd21Rcause(uint8_t rcause)
+ResetCause resetCauseFromSamd21Rcause(uint8_t rcause, bool cpuFaultMarker)
 {
+    if (cpuFaultMarker && !(rcause & (RCAUSE_POR | RCAUSE_BOD12 | RCAUSE_BOD33)))
+        return RESET_CAUSE_CPU_FAULT;
     if (rcause & (RCAUSE_BOD12 | RCAUSE_BOD33))
         return RESET_CAUSE_BROWN_OUT;
     if (rcause & RCAUSE_POR)
@@ -41,7 +44,7 @@ ResetCause readResetCause(uint8_t *raw)
 {
 #ifdef RESET_CAUSE_SAMD21
     *raw = PM->RCAUSE.reg;
-    return resetCauseFromSamd21Rcause(*raw);
+    return resetCauseFromSamd21Rcause(*raw, cpuFaultMarkerTake()); // clears the marker
 #else
     *raw = 0;
     return RESET_CAUSE_UNKNOWN;

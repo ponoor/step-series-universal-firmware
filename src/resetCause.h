@@ -15,16 +15,20 @@ enum ResetCause : uint8_t
     RESET_CAUSE_BROWN_OUT = 2,
     RESET_CAUSE_EXTERNAL = 3, // reset pin
     RESET_CAUSE_WATCHDOG = 4,
-    RESET_CAUSE_SOFTWARE = 5  // e.g. NVIC_SystemReset(), upload over USB
+    RESET_CAUSE_SOFTWARE = 5, // e.g. NVIC_SystemReset(), upload over USB
+    RESET_CAUSE_CPU_FAULT = 6 // the reset after a CPU exception (HardFault on the SAMD21)
 };
 
 // MCU-specific: reads the reset cause register once. Stores the raw register value in
 // *raw (0 on unsupported MCUs) and returns the ResetCause.
 ResetCause readResetCause(uint8_t *raw);
 
-// Converts the SAMD21 PM->RCAUSE value. If several bits are set, the priority is
-// brown-out > power-on > watchdog > reset pin > software.
-ResetCause resetCauseFromSamd21Rcause(uint8_t rcause);
+// Converts the SAMD21 PM->RCAUSE value and the CPU fault marker (faultReset.h). If several
+// causes are set, the priority is CPU fault > brown-out > power-on > watchdog > reset pin >
+// software, except that the marker is ignored after a power-on or a brown-out: the RAM
+// that holds it is not kept then. (The reset after a fault is a software reset, or a
+// watchdog reset if the fault handler hangs, so RCAUSE alone cannot tell it.)
+ResetCause resetCauseFromSamd21Rcause(uint8_t rcause, bool cpuFaultMarker);
 
 // Name of the MCU for the diagnosis output.
 const char *mcuName();

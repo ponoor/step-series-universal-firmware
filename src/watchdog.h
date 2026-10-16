@@ -22,12 +22,19 @@ public:
     int enable(int earlyWarningMs);
     void reset();
     void disable();
+    // For the brake wait of the early warning (interrupt): restarts the watchdog period
+    // like reset(), outside the HIL interval measurement.
+    void clearFromIsr();
 
 private:
     bool initialized = false;
 };
 
 extern WatchdogTimer Watchdog;
+
+// The early warning clears the watchdog this often during its brake wait (up to 1 s),
+// well within the shortest period.
+#define WATCHDOG_BRAKE_WAIT_CLEAR_MS 100
 
 // Called from the early warning interrupt; must not use the driver SPI. Defined in utils.cpp.
 void onWatchdogEarlyWarning();

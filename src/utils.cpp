@@ -13,6 +13,7 @@
 #include "elapsedMs.h"
 #include <stdarg.h>
 #include <utility/w5100.h>
+#include "faultReset.h"
 
 void dbgPrint_(const __FlashStringHelper* fmt, ...)
 {
@@ -196,6 +197,25 @@ void onWatchdogEarlyWarning() {
 #ifdef HAVE_BRAKE
     PROBE_HIGH(2); // HIL: early warning
     engageAllBrakeOutputsFromIsr();
+    const uint16_t waitMs = longestBrakeWaitMs();
+    // WDT_Handler() resets the MCU as soon as this returns: the reset comes up to 1 s
+    // after the early warning. The wait can be longer than the rest of the watchdog
+    // period (the period is twice the early warning time, WATCHDOG_TIMEOUT_MS), so the
+    // watchdog is cleared every WATCHDOG_BRAKE_WAIT_CLEAR_MS meanwhile: the early warning
+    // runs, so the CPU still handles interrupts. The period resets the MCU only when the
+    // early warning cannot run (a hang with the interrupts disabled, a CPU lockup).
+    // delayMicroseconds() is a cycle loop; SysTick does not advance in this interrupt.
+    for (uint16_t ms = 0; ms < waitMs; ms++)
+    {
+        if ((ms % WATCHDOG_BRAKE_WAIT_CLEAR_MS) == 0)
+            Watchdog.clearFromIsr();
+        delayMicroseconds(1000);
+    }
+#endif
+}
+
+#ifdef HAVE_BRAKE
+uint16_t longestBrakeWaitMs() {
     uint16_t waitMs = 0;
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
@@ -206,14 +226,13 @@ void onWatchdogEarlyWarning() {
                 waitMs = t;
         }
     }
-    // WDT_Handler() resets the MCU as soon as this returns: the reset comes up to 1 s
-    // after the early warning (2 s after the last Watchdog.reset()). The watchdog period
-    // (twice the early warning time, 4 s) is not reached by this wait; it resets the MCU
-    // only when the early warning cannot run (e.g. a hang with the interrupts disabled).
-    for (uint16_t ms = 0; ms < waitMs; ms++)
-        delayMicroseconds(1000);
-#endif
+    return waitMs;
 }
+
+void updateFaultBrakeWait() {
+    faultBrakeWaitMs = longestBrakeWaitMs();
+}
+#endif
 
 void safeSystemReset(uint16_t minWaitMs) {
     uint16_t waitMs = minWaitMs;
@@ -375,6 +394,7 @@ void applyBrakeAction(uint8_t motorId, const BrakeAction &action) {
     if (action.next != current) {
         brakeStatus[motorId] = action.next;
         PROBE_PULSE(6);
+        updateFaultBrakeWait();
     }
     if (action.cancelPending)
         cancelPendingMotion(motorId);

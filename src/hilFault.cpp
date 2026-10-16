@@ -191,8 +191,12 @@ extern "C" __attribute__((naked)) void WDT_Handler(void)
         ".ltorg\n");
 }
 
-extern "C" __attribute__((noreturn, used)) void hilFaultOnHardFault(uint32_t excReturn, uint32_t msp, uint32_t psp)
+// Called by HardFault_Handler (faultReset.cpp, in RAM) after the brakes and the fault
+// marker, with EXC_RETURN and the stack pointers; returns to it for the brake wait and
+// the reset. P2 stays high until the reset, as in the early warning.
+extern "C" void hilFaultRecordHardFault(uint32_t excReturn, uint32_t msp, uint32_t psp)
 {
+    PROBE_HIGH(2);
     const uint32_t sp = frameStack(excReturn, msp, psp);
     if (validFrame(sp))
         memcpy(&record.hf, (const void *)sp, sizeof(Frame));
@@ -204,25 +208,12 @@ extern "C" __attribute__((noreturn, used)) void hilFaultOnHardFault(uint32_t exc
     record.hfUsbInIsr = usbInIsr;
     record.flags |= FLAG_HARDFAULT;
     record.bootOfFault = record.bootCount;
-    // As the core's handler: loop until the watchdog period resets the MCU (the early
-    // warning cannot interrupt a HardFault). P2 toggles meanwhile (the early warning holds
-    // it high). delayMicroseconds() is a cycle loop and runs here.
-    while (true)
-    {
-        PROBE_TOGGLE(2);
-        delayMicroseconds(HIL_FAULT_P2_TOGGLE_US);
-    }
 }
 
-extern "C" __attribute__((naked)) void HardFault_Handler(void)
+// Called by HardFault_Handler right before the reset.
+extern "C" void hilFaultBeforeReset(void)
 {
-    __asm volatile(
-        "mov r0, lr\n"
-        "mrs r1, msp\n"
-        "mrs r2, psp\n"
-        "ldr r3, =hilFaultOnHardFault\n"
-        "bx r3\n"
-        ".ltorg\n");
+    PROBE_HIGH(0); // the last P0 edge marks the MCU reset (the pin floats then)
 }
 
 void hilFaultPrint()

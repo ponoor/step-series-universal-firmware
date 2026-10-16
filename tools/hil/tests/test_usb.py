@@ -229,3 +229,16 @@ def test_p1_no_brake(tmp_path):
     msgs = usb.setup_actions(cfg, usb.STEPS["p1"])
     assert not any(m[0] == "/enableElectromagnetBrake" for m in msgs)
     assert ("/hardHiZ", 255) in [(a.address, *a.args) for a in usb.STEPS["p1"].actions if a.kind == "osc"]
+
+
+def test_fault_handler_window():
+    # HardFault handler: P2 high from 1.0 s (after the brakes) to the reset marker at 1.1 s;
+    # servo pulses (microseconds) before it are not the handler.
+    p2 = analyze.Edges(np.array([0.5, 1.0]), np.array([0.50002, 1.1001]), 0, 0, 3.0)
+    assert usb.fault_handler(p2, 1.1) == 1.0
+    # P2 falls well before the marker: not the handler.
+    p2 = analyze.Edges(np.array([1.0]), np.array([1.05]), 0, 0, 3.0)
+    assert usb.fault_handler(p2, 1.1) is None
+    assert usb.fault_handler(analyze.Edges(np.array([]), np.array([]), 0, 0, 3.0), 1.1) is None
+    # resetCause 6 is a CPU fault restart even when the loop resume is not seen (aliasing).
+    assert usb.classify({"loop_resumes_ms": None, "resetCause": 6}).startswith("CPU fault")

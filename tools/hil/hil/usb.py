@@ -87,8 +87,10 @@ STEPS: dict[str, UsbStep] = {s.id: s for s in [
     UsbStep("u1", "U1: brake enabled, RELEASED (/activate 1), stopped, host port closed",
             "rod: any drop at the unplug and at the restart",
             _RELEASED + (close_serial(label="close"), wait(1.0), unplug(), wait(2.0)),
-            "hypothesis: P0 stops at the unplug, no early warning, J7 released until the watchdog reset "
-            "about 4 s later (resetCause 4)"),
+            "TASK_fault_reset F8: J7 engaged right after the unplug by the HardFault handler, the reset "
+            "after the brake wait, resetCause 6 (before: J7 released until the watchdog period, 4 s, "
+            "resetCause 4). If the handler itself does not run: lockup, reset by the watchdog period "
+            "(500 ms), resetCause 4"),
     UsbStep("u2", "U2: as U1 with the host port open",
             "rod: any drop at the unplug and at the restart",
             _RELEASED + (wait(1.0), unplug(), wait(2.0)), "as U1", port_open=True),
@@ -246,6 +248,19 @@ def early_warning(p2: analyze.Edges, t_from: float, t_to: float, min_width: floa
     return None
 
 
+def fault_handler(p2: analyze.Edges, t_stop: float, within: float = 1.2) -> float | None:
+    """The P2 rise of the HardFault handler before the reset marker t_stop: the last rise in
+    (t_stop - within, t_stop] after which P2 stays high to the marker (1 ms slack)."""
+    r = p2.rise[(p2.rise > t_stop - within) & (p2.rise <= t_stop)]
+    if r.size == 0:
+        return None
+    last = float(r[-1])
+    f = p2.fall[p2.fall > last]
+    if f.size and f[0] < t_stop - 0.001:
+        return None
+    return last if t_stop - last >= EW_MIN_S or (f.size and f[0] >= t_stop - 0.001) else None
+
+
 def analyze_stop(t_stop: float, t_resume: float | None, p2: analyze.Edges, brakes: dict[int, analyze.Edges],
                  vbus: analyze.Edges | None, t_end: float) -> dict:
     """One stop: times in ms from the stop (the last P0 edge)."""
@@ -263,6 +278,17 @@ def analyze_stop(t_stop: float, t_resume: float | None, p2: analyze.Edges, brake
         lvl = int(level_at(e, t_stop))
         if ch or lvl:
             res["brake_changes_ms"][m] = {"at_stop": "released" if lvl else "engaged", "changes": sorted(ch)}
+    # The HardFault handler (src/faultReset.h) engages the brakes, sets P2 high and waits
+    # the brake transition before the reset marker on P0, the stop here (a wait shorter than
+    # STOP_GAP_S does not make a P0 gap of its own).
+    h = fault_handler(p2, t_stop)
+    if h is not None:
+        res["handler_start_ms"] = ms(h)
+        res["handler_wait_ms"] = round((t_stop - h) * 1e3, 2)
+        for m, e in brakes.items():
+            f = e.fall[(e.fall >= h - 0.001) & (e.fall <= t_stop)]
+            if f.size:
+                res.setdefault("handler_engage_ms", {})[m] = ms(float(f[0]))
     if vbus is not None:
         falls = vbus.fall[vbus.fall < t_stop + 0.01]
         res["vbus_fall_before_stop_ms"] = ms(float(falls[-1])) if falls.size else None
@@ -345,11 +371,13 @@ def analyze_usb(cfg: Config, cap, rx: list, fit, vbus_dio: int | None, probes: b
 
 
 def classify(stop: dict) -> str:
-    if stop.get("loop_resumes_ms") is None:
-        return "no restart in the capture"
     if stop.get("resetCause") == 6:
         # The HardFault handler (src/faultReset.h): brakes engaged, P2 high for the brake wait.
+        # (At 10 kS/s the loop toggling of P0 after the restart can alias into sparse edges,
+        # so the loop resume is not required here; /booted 6 is the restart.)
         return "CPU fault, brakes engaged by the handler, reset"
+    if stop.get("loop_resumes_ms") is None:
+        return "no restart in the capture"
     if stop.get("early_warning_ms") is not None:
         return "stop, early warning, reset"
     if stop.get("p2_edges_in_stop", 0) >= HARDFAULT_MIN_P2_EDGES:

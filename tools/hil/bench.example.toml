@@ -143,3 +143,10 @@ alias_ip = "10.0.0.11"
 report_ms = 100
 # Length of each AD2 recording (P0-P6, 1 MHz); the recordings follow each other.
 segment_s = 30.0
+
+# Optional: this Mac's address and interface to the board, when another interface (e.g. Wi-Fi)
+# is on the same subnet and would be used otherwise. Wi-Fi can answer the board's ARP too late
+# (the W5500 waits 40 ms), so replies are lost after each pause of 1.5 s (ARP refresh).
+# [network]
+# local_ip = "10.0.0.10"
+# bound_if = "en9"

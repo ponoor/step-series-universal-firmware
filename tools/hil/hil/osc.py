@@ -170,7 +170,7 @@ class OscLink:
     def set_dest_ip(self, timeout: float = 1.0) -> str:
         """Sends /setDestIp and checks that the reply (/destIp a b c d updated) names the
         local address used to reach the board. Returns that address."""
-        local = local_ip_for(self.board_ip, self.board_in_port)
+        local = self.local_ip if self.local_ip != "0.0.0.0" else local_ip_for(self.board_ip, self.board_in_port)
         net = ipaddress.ip_network(f"{self.board_ip}/24", strict=False)
         if ipaddress.ip_address(local) not in net:
             raise OscError(f"this Mac reaches {self.board_ip} from {local}, outside {net}. "

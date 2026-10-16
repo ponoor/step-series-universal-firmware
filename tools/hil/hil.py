@@ -135,6 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--duration", type=float, default=10.0, help="W1 / W4: seconds of load (default 10)")
     s.add_argument("--dead-ip", default="10.0.0.250", help="W3 / W4: unused address in the board's subnet")
     s.add_argument("--elf", help="firmware.elf on the board: the reset() call sites as function and line")
+    s.add_argument("--no-motion", action="store_true",
+                   help="motor on the test axis: servo target kept at the position, /homing on the next axis")
     s.add_argument("--label", help="suffix of the result directory")
     s = sub.add_parser("swd", parents=[common], help="CPU state through SWD (Atmel-ICE, OpenOCD); no reset")
     g = s.add_mutually_exclusive_group(required=True)

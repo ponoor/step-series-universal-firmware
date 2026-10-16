@@ -95,6 +95,17 @@ class Config:
         return int(self.raw["board"]["id"])
 
     @property
+    def local_ip(self) -> str:
+        """[network] local_ip: this Mac's address to the board (e.g. the wired adapter when
+        Wi-Fi is on the same subnet); default: any (the OS route)."""
+        return str(self.raw.get("network", {}).get("local_ip", "0.0.0.0"))
+
+    @property
+    def bound_if(self) -> str:
+        """[network] bound_if: the interface of local_ip (e.g. "en9"); default: none."""
+        return str(self.raw.get("network", {}).get("bound_if", ""))
+
+    @property
     def board_ip(self) -> str:
         ip = self.raw["board"].get("ip")
         if ip:

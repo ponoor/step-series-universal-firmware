@@ -148,6 +148,8 @@ def run_once(b: WdtBench, load: Callable[[WdtBench], dict | None], settle: float
 def servo_load(b: WdtBench, duration: float) -> dict:
     t = b.cfg.section("timing")
     rate, amp, period = float(t["target_rate_hz"]), float(t["sine_amplitude"]), float(t["sine_period"])
+    if b.args.no_motion:
+        amp = 0.0  # the same servo updates and messages, the target stays at the position
     axis, n = b.cfg.test_axis, b.cfg.num_motors
     pos0 = int(b.link.request("/getPosition", axis, reply="/position",
                               predicate=lambda a: int(a[0]) == axis).args[1])
@@ -312,10 +314,13 @@ def case_w8(b: WdtBench) -> list[dict]:
 def case_w9(b: WdtBench) -> list[dict]:
     runs = []
     for _ in range(b.args.repeat):
-        def homing(b):
-            b.send("/homing", b.cfg.test_axis)
+        # --no-motion: an axis other than the test axis (no motor there on the bench)
+        axis = b.cfg.test_axis % b.cfg.num_motors + 1 if b.args.no_motion else b.cfg.test_axis
+
+        def homing(b, axis=axis):
+            b.send("/homing", axis)
             time.sleep(5.0)
-            b.send("/hardHiZ", b.cfg.test_axis)
+            b.send("/hardHiZ", axis)
         runs.append(dict(run_once(b, homing), case="/homing"))
 
         def reset_drivers(b):

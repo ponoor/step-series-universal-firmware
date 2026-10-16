@@ -116,7 +116,7 @@ def open_ad2(cfg: Config) -> AD2:
 
 
 def open_link(cfg: Config) -> OscLink:
-    return OscLink(cfg.board_ip, cfg.board_in_port, cfg.board_out_port)
+    return OscLink(cfg.board_ip, cfg.board_in_port, cfg.board_out_port, local_ip=cfg.local_ip, bound_if=cfg.bound_if)
 
 
 class BoardMismatch(RuntimeError):

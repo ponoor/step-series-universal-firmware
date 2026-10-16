@@ -97,13 +97,21 @@ void sendBackoffOnReceive(const IPAddress &ip);
 // to another destination IP than the send before, so the W5500 resolves its MAC address
 // again (arpResolve.h). Returns the result of endPacket().
 bool sendArpRefreshDummy();
-// Starts the resolution of the MAC address of destIp (arpResolve.h): sends the dummy
-// broadcast, and the messages to destIp are dropped until a probe succeeds or 2 s pass.
-// holdDestIp: from /setDestIp, the reply /destIp (last argument destIpUpdated) is sent
-// once the resolution ends. Called on /setDestIp and by initEthernet() if isDestIpSet.
-void startArpResolve(bool holdDestIp, bool destIpUpdated);
-// Called every housekeeping run: sends the probes of the resolution (each blocks up to
-// about 41 ms when it fails) and the held /destIp.
+// /setDestIp from src: sets destIp and isDestIpSet, and starts the resolution of the MAC
+// address of destIp (arpResolve.h: the dummy broadcast, the messages to destIp dropped
+// until a probe succeeds or 2 s pass, /destIp held until then) if destIpWasSet is false
+// or arpRxStartsResolution(); otherwise sends /destIp now (or replaces the held one while
+// a resolution runs). destIpUpdated: the last argument of /destIp.
+void setDestIpReceived(const IPAddress &src, bool destIpWasSet, bool destIpUpdated);
+// After every received packet (destIp as after it was handled): the record of the last
+// packet from destIp (arpRxReceived()).
+void arpRxOnReceive(const IPAddress &src);
+// initEthernet(): a resolution once the link is up (with isDestIpSet).
+void requestArpResolveOnLink();
+// Called every housekeeping run: reads the link state (prints its changes), starts the
+// resolution at the start and after the link came up again (arpLinkWatchPoll(), with
+// isDestIpSet), sends the probes (each blocks up to about 41 ms when it fails) and the
+// held /destIp.
 void updateArpResolve();
 bool isArpResolvePending();
 // Reads Sn_DHAR of the UDP socket: the MAC address the last send went to. After a send to

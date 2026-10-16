@@ -72,6 +72,7 @@ bool OSCMsgReceive()
         {
             sendOneDatum("/error/osc", "OscSyntaxError");
         }
+        arpRxOnReceive(Udp.remoteIP()); // after the handler: destIp as set by /setDestIp
         PROBE_LOW(1);
         return true;
     }
@@ -101,8 +102,9 @@ bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
 }
 
 #pragma region config_commands_osc_listener
-// The reply /destIp is sent once the MAC address of the new destIp is resolved, also for
-// the same address (a new device may have it, arpResolve.h).
+// The reply /destIp is sent once the MAC address of destIp is resolved, when this
+// /setDestIp starts a resolution (another address, or after a gap of 1.5 s in the packets
+// from destIp: a new device may have the address, arpResolve.h); otherwise at once.
 void setDestIp(OscMessage &msg)
 {
     bool bIpUpdated = false;
@@ -110,9 +112,7 @@ void setDestIp(OscMessage &msg)
     {
         bIpUpdated |= (destIp[i] != Udp.remoteIP()[i]);
     }
-    destIp = Udp.remoteIP();
-    isDestIpSet = true;
-    startArpResolve(true, bIpUpdated);
+    setDestIpReceived(Udp.remoteIP(), isDestIpSet, bIpUpdated);
 }
 
 void getVersion(OscMessage &msg)

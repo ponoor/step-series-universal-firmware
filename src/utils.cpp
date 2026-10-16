@@ -321,8 +321,7 @@ void initEthernet() {
     setEthernetRetransmission(W5500_RETRANSMISSION_TIMEOUT_MS, W5500_RETRANSMISSION_COUNT);
     Udp.begin(inPort);
     dbgPrint("New IP: %d.%d.%d.%d\n", myIp[0], myIp[1], myIp[2], myIp[3]);
-    if (isDestIpSet)
-        startArpResolve(false, false);
+    requestArpResolveOnLink();
 }
 
 void sendBootMsg(uint32_t _currentTime) {
@@ -552,6 +551,8 @@ bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatu
 
 static SendBackoff sendBackoff;
 static ArpResolve arpResolve;
+static ArpRxRecord arpRx;
+static ArpLinkWatch arpLink;
 static bool heldDestIpUpdated; // the last argument of the held /destIp
 
 static void printSendBackoffEvent(SendBackoffEvent event, const IPAddress &ip) {
@@ -631,17 +632,46 @@ static void sendDestIp(bool ipUpdated) {
     sendOscMessage(newMes, destIp, outPort);
 }
 
-void startArpResolve(bool holdDestIp, bool destIpUpdated) {
+static void startArpResolve(bool holdDestIp, bool destIpUpdated) {
     if (holdDestIp)
         heldDestIpUpdated = destIpUpdated;
+    arpLink.startWanted = false; // this one does it
     sendBackoffClear(sendBackoff); // the resolution manages the sends to destIp
     arpResolveStart(arpResolve, (uint32_t)destIp, holdDestIp, millis());
     perfStats.arpResolveCount++;
     sendArpRefreshDummy();
 }
 
+void setDestIpReceived(const IPAddress &src, bool destIpWasSet, bool destIpUpdated) {
+    // Before destIp changes: judged against the packets from the destIp until now.
+    const bool start = !destIpWasSet || arpRxStartsResolution(arpRx, (uint32_t)src, (uint32_t)destIp, millis());
+    destIp = src;
+    isDestIpSet = true;
+    if (start) {
+        startArpResolve(true, destIpUpdated);
+        return;
+    }
+    heldDestIpUpdated = destIpUpdated;
+    if (!arpResolveHoldReply(arpResolve))
+        sendDestIp(destIpUpdated); // resolved: no ARP
+}
+
+void arpRxOnReceive(const IPAddress &src) {
+    arpRxReceived(arpRx, (uint32_t)src, (uint32_t)destIp, millis());
+}
+
+void requestArpResolveOnLink() {
+    arpLinkWatchRequest(arpLink);
+}
+
 void updateArpResolve() {
-    switch (arpResolvePoll(arpResolve, millis())) {
+    // As sendBootMsg(): the link state read at every housekeeping run.
+    const bool linkUp = Ethernet.linkStatus() != LinkOFF;
+    if (linkUp != arpLink.wasUp)
+        dbgPrint("Ethernet link %s\n", linkUp ? "up" : "down");
+    if (arpLinkWatchPoll(arpLink, linkUp, millis()) && isDestIpSet)
+        startArpResolve(false, false);
+    switch (arpResolvePoll(arpResolve, millis(), linkUp)) {
     case ARP_RESOLVE_PROBE: {
         // 1 byte to port 9 (discard), not through sendBackoff: the W5500 tries the ARP.
         static const uint8_t probe = 0;

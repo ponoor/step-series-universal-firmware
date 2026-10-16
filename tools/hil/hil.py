@@ -147,7 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("wdt", parents=[common], help="longest interval between watchdog resets under the loads "
                        "W1-W10 (wdtGapMax of 'p', HIL_PROBE builds); no AD2")
-    s.add_argument("--cases", nargs="+", choices=["w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10"],
+    s.add_argument("--cases", nargs="+", choices=["w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10",
+                                                  "w11"],
                    help="cases to run (default: those without a human: w1 w2 w8 w9 w10)")
     s.add_argument("--repeat", type=int, default=3, help="runs per case (default 3)")
     s.add_argument("--duration", type=float, default=10.0, help="W1 / W4: seconds of load (default 10)")

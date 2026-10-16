@@ -55,6 +55,9 @@ CASES = {c.id: c for c in (
                "'s' x 20 without reading"),
     Case("w9", "/homing on the test axis, /resetMotorDriver 255, servo mode on all motors"),
     Case("w10", "restart ('R') and the first seconds (setup() to /booted), 'p' 5 s after /booted"),
+    Case("w11", "resolution of the MAC address of an unreachable destination (--dead-ip through '{', no SD "
+                "card): the board's Ethernet cable unplugged and plugged in, then 2 s of probes to it",
+         "the SD card must be out; unplug the Ethernet cable of the board, wait about 3 s, plug it in"),
 )}
 
 
@@ -158,7 +161,9 @@ def run_once(b: WdtBench, load: Callable[[WdtBench], dict | None], settle: float
     return {"wdt_gap_ms": gap["max_us"] / 1e3 if gap["max_us"] is not None else None,
             "from": gap["from"], "to": gap["to"],
             "loop_max_ms": p.get("loop", {}).get("max_us", 0) / 1e3, "slotLate": p.get("slotLate"),
-            "udpSendFailed": p.get("udpSendFailed"), "booted": b.booted_since(t), **extra}
+            "udpSendFailed": p.get("udpSendFailed"), "booted": b.booted_since(t),
+            **{k: p.get(k) for k in ("arpResolve", "arpProbe", "arpProbeFailed", "arpTimeout", "arpDropped")
+               if k in p}, **extra}
 
 
 # --------------------------------------------------------------------------------------
@@ -257,6 +262,16 @@ def case_w5(b: WdtBench) -> list[dict]:
         finally:
             b.send("/setPositionReportInterval", 255, 0)
     return [run_once(b, load) for _ in range(b.args.repeat)]
+
+
+def case_w11(b: WdtBench) -> list[dict]:
+    # The link comes back: the resolution of the dead destIp (isDestIpSet from the /setDestIp
+    # before) probes it every 150 ms for 2 s (src/arpResolve.h).
+    def load(b):
+        b.human("unplug the Ethernet cable of the board, wait about 3 s, plug it in again")
+        time.sleep(5.0)  # link up 1 s, then 2 s of probes
+        return {"link_lines": re.findall(r"Ethernet link \w+", b.ser.text(b.t0_ns))[-2:]}
+    return _dead(b, load)
 
 
 def case_w6(b: WdtBench) -> list[dict]:
@@ -374,7 +389,7 @@ def _status(b: WdtBench) -> dict:
 
 
 RUNNERS = {"w1": case_w1, "w2": case_w2, "w3": case_w3, "w4": case_w4, "w5": case_w5, "w6": case_w6,
-           "w7": case_w7, "w8": case_w8, "w9": case_w9, "w10": case_w10}
+           "w7": case_w7, "w8": case_w8, "w9": case_w9, "w10": case_w10, "w11": case_w11}
 
 
 def cmd_wdt(cfg: Config, args) -> int:

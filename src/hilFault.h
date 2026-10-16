@@ -13,8 +13,9 @@
 //   early warning holds P2 high instead) and loops as the core's handler does: the
 //   watchdog period resets the MCU.
 // - Early warning: WDT_Handler records the frame of the code it interrupted, the USB
-//   registers and the NVIC state before the brakes are engaged. The USB interrupt is
-//   lowered to priority 1 (hilFaultInit()) so that the early warning can interrupt it.
+//   registers and the NVIC state before the brakes are engaged. The USB interrupt keeps
+//   the core's priority (0, as the early warning, which then cannot interrupt it), as in
+//   the product builds.
 // - USB interrupt: USB_Handler (overrides the core's weak handler, calls the same
 //   UDD_Handler) counts the entries, keeps the last flags and whether it is running.
 // - loop(): hilFaultLoopMark() keeps the time and the USB interrupt count of the last pass.
@@ -29,10 +30,8 @@
 #include <stdint.h>
 
 #define HIL_FAULT_P2_TOGGLE_US 500
-// USB interrupt priority in the HIL build (the core sets 0, as the early warning).
-#define HIL_FAULT_USB_PRIORITY 1
 
-void hilFaultInit();      // in setup(): boot count, USB interrupt priority
+void hilFaultInit();      // in setup(): boot count
 void hilFaultLoopMark();  // every loop() pass
 void hilFaultPrint();     // 'H': prints and clears the record
 void hilFaultTrigger();   // 'X': HardFault

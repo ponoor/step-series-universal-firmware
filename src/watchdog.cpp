@@ -7,6 +7,46 @@
 
 WatchdogTimer Watchdog;
 
+#ifdef HIL_PROBE
+namespace
+{
+bool gapEnabled = false; // the watchdog is enabled (reset() while disabled is not counted)
+bool gapActive = false;  // an interval is being measured
+uint32_t gapLastUs = 0;
+uint32_t gapLastCaller = 0;
+uint32_t gapMaxUs = 0;
+uint32_t gapMaxFrom = 0; // return address of the reset() call that started the longest interval
+uint32_t gapMaxTo = 0;   // and of the one that ended it
+
+void gapMark(uint32_t caller)
+{
+    if (!gapEnabled)
+        return;
+    const uint32_t now = micros();
+    if (gapActive && ((uint32_t)(now - gapLastUs) > gapMaxUs))
+    {
+        gapMaxUs = now - gapLastUs;
+        gapMaxFrom = gapLastCaller;
+        gapMaxTo = caller;
+    }
+    gapActive = true;
+    gapLastUs = now;
+    gapLastCaller = caller;
+}
+} // namespace
+
+void watchdogGapTake(uint32_t &maxUs, uint32_t &from, uint32_t &to)
+{
+    maxUs = gapMaxUs;
+    from = gapMaxFrom;
+    to = gapMaxTo;
+    gapMaxUs = 0;
+    gapMaxFrom = 0;
+    gapMaxTo = 0;
+}
+#define GAP_CALLER() ((uint32_t)__builtin_return_address(0) & ~1u)
+#endif
+
 int WatchdogTimer::enable(int earlyWarningMs)
 {
     if (!initialized)
@@ -37,6 +77,10 @@ int WatchdogTimer::enable(int earlyWarningMs)
     WDT->EWCTRL.reg = WDT_EWCTRL_EWOFFSET(bits);
     WDT->INTFLAG.reg = WDT_INTFLAG_EW;
     WDT->INTENSET.reg = WDT_INTENSET_EW;
+#ifdef HIL_PROBE
+    gapEnabled = true; // the reset() below starts an interval
+    gapActive = false;
+#endif
     reset();
     WDT->CTRL.bit.ENABLE = 1;
     while (WDT->STATUS.bit.SYNCBUSY)
@@ -49,10 +93,17 @@ void WatchdogTimer::reset()
     while (WDT->STATUS.bit.SYNCBUSY)
         ;
     WDT->CLEAR.reg = WDT_CLEAR_CLEAR_KEY;
+#ifdef HIL_PROBE
+    gapMark(GAP_CALLER());
+#endif
 }
 
 void WatchdogTimer::disable()
 {
+#ifdef HIL_PROBE
+    gapEnabled = false;
+    gapActive = false;
+#endif
     WDT->CTRL.bit.ENABLE = 0;
     while (WDT->STATUS.bit.SYNCBUSY)
         ;

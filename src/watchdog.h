@@ -32,4 +32,11 @@ extern WatchdogTimer Watchdog;
 // Called from the early warning interrupt; must not use the driver SPI. Defined in utils.cpp.
 void onWatchdogEarlyWarning();
 
+#ifdef HIL_PROBE
+// HIL: the longest interval between two reset() calls while the watchdog is enabled
+// (disable() ends an interval, enable() starts one), with the return addresses of the
+// two calls (resolve them with addr2line on the ELF). Returns it and clears it ('p').
+void watchdogGapTake(uint32_t &maxUs, uint32_t &from, uint32_t &to);
+#endif
+
 #endif

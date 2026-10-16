@@ -3,6 +3,7 @@
 #include <string.h>
 #include "perfStats.h"
 #include "utils.h"
+#include "watchdog.h"
 
 PerfStats perfStats;
 
@@ -35,4 +36,10 @@ void perfStatsPrint()
     dbgPrint("udpSendDropped %lu\n", (unsigned long)s.udpSendDroppedCount);
     dbgPrint("arpRefresh     %lu\n", (unsigned long)s.arpRefreshCount);
     dbgPrint("arpRefreshFailed %lu\n", (unsigned long)s.arpRefreshFailedCount);
+#ifdef HIL_PROBE
+    uint32_t gapUs, gapFrom, gapTo;
+    watchdogGapTake(gapUs, gapFrom, gapTo);
+    dbgPrint("wdtGapMax      %lu us  from 0x%08lX to 0x%08lX\n", (unsigned long)gapUs,
+             (unsigned long)gapFrom, (unsigned long)gapTo);
+#endif
 }

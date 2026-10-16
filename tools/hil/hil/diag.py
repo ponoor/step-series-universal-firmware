@@ -22,6 +22,9 @@ SLOT_LATE_COUNTER = "slotLate"
 REPORT_CLOCK_COUNTER = "reportClockRealign"
 BRAKE_LINE = re.compile(r"Turn off #(\d+), Turn on #(\d+)")
 PROBE_MAP = re.compile(r"HIL probe:((?: P\d=\w+\(P[AB]\d+\))+)")
+# HIL_PROBE builds: the longest interval between two watchdog resets, with the return
+# addresses of the two Watchdog.reset() calls.
+WDT_GAP_LINE = re.compile(r"^wdtGapMax\s+(\d+) us\s+from (0x[0-9A-Fa-f]+) to (0x[0-9A-Fa-f]+)\s*$")
 
 
 class DiagError(Exception):
@@ -48,6 +51,10 @@ def parse_perf(text: str) -> dict:
         m = PERF_COUNTER.match(line.strip())
         if m:
             out[m.group(1)] = int(m.group(2))
+            continue
+        m = WDT_GAP_LINE.match(line.strip())
+        if m:
+            out["wdtGapMax"] = {"max_us": int(m.group(1)), "from": m.group(2), "to": m.group(3)}
     return out
 
 

@@ -138,9 +138,6 @@ void hilFaultInit()
         record.magic = HIL_FAULT_MAGIC;
     }
     record.bootCount++;
-    // The core sets the USB interrupt to 0 in USBDevice.init() (before setup()), the same
-    // as the early warning, which then cannot interrupt it. Nothing sets it again.
-    NVIC_SetPriority(USB_IRQn, HIL_FAULT_USB_PRIORITY);
 }
 
 void hilFaultLoopMark()

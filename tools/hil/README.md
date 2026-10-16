@@ -609,8 +609,8 @@ The fault record (`src/hilFault.h`, HIL_PROBE builds) survives a watchdog or sof
 in RAM after `.bss` that neither the startup code nor the bootloader writes. It holds the
 exception frame of a HardFault (the handler then toggles P2 every 0.5 ms and waits for the
 watchdog period) and the frame of the code the early warning interrupted, with the USB
-registers and interrupt counts. In these builds the USB interrupt runs at priority 1 (the
-core sets 0, as the early warning), so that the early warning can interrupt it. USB serial
+registers and interrupt counts. The USB interrupt keeps the core's priority 0, as in the
+product builds (the TASK_usb_unplug builds lowered it to 1). USB serial
 `H` prints and clears the record, `X` causes a HardFault (unaligned read). Turn the PC / LR
 into functions with `arm-none-eabi-addr2line -f -e .pio/build/step400_devlib_probe/firmware.elf
 0x<pc>`.

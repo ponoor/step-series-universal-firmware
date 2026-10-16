@@ -534,6 +534,9 @@ def test_parse_perf():
     # The 5 ms slot firmware adds a counter line; the other lines read as before.
     p = diag.parse_perf(PERF_TEXT + "slotLate       3\n")
     assert p[diag.SLOT_LATE_COUNTER] == 3 and p["loop"]["n"] == 1300000 and p["oscNotMatched"] == 2
+    # HIL_PROBE builds add the longest interval between two watchdog resets.
+    p = diag.parse_perf(PERF_TEXT + "wdtGapMax      10734 us  from 0x0000A1B2 to 0x0000A1B2\n")
+    assert p["wdtGapMax"] == {"max_us": 10734, "from": "0x0000A1B2", "to": "0x0000A1B2"}
 
 
 def test_parse_probe_map():

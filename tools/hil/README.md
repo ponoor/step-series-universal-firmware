@@ -623,6 +623,19 @@ to engaged), `loop_resumes_ms`, `booted_ms` and `resetCause` (host times mapped 
 time), `heartbeat_last_ms` / `heartbeat_next_ms`, and with VBUS the unplug before the stop.
 Without VBUS the unplug time is not known; the stop is the last P0 edge.
 
+`--no-ad2` (TASK_usb_unplug_followup): the measuring instruments disconnected from the board.
+No AD2, no SWD: each gap of the `/getVersion` replies with the `/booted` after it
+(`gaps`: `gap_s`, `resetCause`, `kind`: a gap of 3 s or more with resetCause 4 is a stop
+until the watchdog period, HardFault or hang; `open` when no reply came back). `--conditions
+key=value ...` stores the wiring / power / firmware of the run. The fault record is read
+after the plug-in, as a step of its own: `usb --read-record results/<dir>` (`fault_record`,
+`fault`: flags and the PC / LR / xPSR of the HardFault).
+
+```bash
+.venv/bin/python hil.py --config bench.step400.toml usb --step u1 --no-ad2 --conditions ad2=removed ice=removed power=24V
+.venv/bin/python hil.py --config bench.step400.toml usb --read-record results/<dir>
+```
+
 `--no-probe`, for a firmware without the HIL probes (e.g. `main`, TASK_usb_unplug Task 4):
 no board check before the run, no P0-P2 and no fault record; `heartbeat_stops` lists each
 gap of the `/getVersion` replies (0.3 s or more) with the J7 changes in it and the `/booted`

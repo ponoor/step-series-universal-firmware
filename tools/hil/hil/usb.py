@@ -26,10 +26,12 @@ summary.json, per MCU stop (a P0 gap of STOP_GAP_S or more):
 
 from __future__ import annotations
 
+import re
 import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -52,7 +54,7 @@ HEARTBEAT_GAP_S = 0.3
 # in a stop, without a long P2 pulse, mark a HardFault.
 HARDFAULT_MIN_P2_EDGES = 20
 # Waits after the operator request: for the replies to stop, then for /booted.
-UNPLUG_WAIT_S = 60.0
+UNPLUG_WAIT_S = 120.0
 BOOTED_WAIT_S = 10.0
 
 
@@ -373,9 +375,154 @@ def read_fault_record(diag: SerialDiag) -> str | None:
         return None
 
 
+# A heartbeat gap at least this long with /booted resetCause 4 after it: a stop until the
+# watchdog period (HardFault or a hang); the HardFault runs measured 4.0-4.4 s.
+WATCHDOG_STOP_MIN_S = 3.0
+RESET_CAUSES = {0: "unknown", 1: "power-on", 2: "brown-out", 3: "external", 4: "watchdog", 5: "software"}
+
+
+def classify_gap(gap_s: float | None, booted: bool, reset_cause) -> str:
+    """No-AD2 judgement of one unplug from the host only (TASK_usb_unplug_followup)."""
+    if gap_s is None:
+        return "no stop (no gap in the replies)"
+    if not booted:
+        return "replies stopped, no /booted"
+    if reset_cause is None:
+        return "restart, /booted without resetCause (main)"
+    if reset_cause == 4:
+        return ("stop, watchdog reset (HardFault or hang)" if gap_s >= WATCHDOG_STOP_MIN_S
+                else "watchdog reset (short stop)")
+    return f"{RESET_CAUSES.get(reset_cause, reset_cause)} reset"
+
+
+def host_gaps(rx: list, t0_ns: int, t_end_s: float | None = None, gap: float = HEARTBEAT_GAP_S,
+              booted_within: float = 3.0) -> list[dict]:
+    """No AD2: each gap of the /version replies (host times, s from t0_ns) with the first
+    /booted from the gap's start to booted_within s after its end. With t_end_s (the end of
+    the heartbeat), also a gap from the last reply to t_end_s (no reply came back: gap_s is
+    then at least that, "open")."""
+    s = lambda t_ns: (t_ns - t0_ns) / 1e9  # noqa: E731
+    hb = np.sort(np.array([s(e.t_ns) for e in rx if e.address == "/version"]))
+    boots = booted_causes(rx)
+    spans = [(a, b, False) for a, b in heartbeat_gaps(hb, gap)]
+    if t_end_s is not None and hb.size and t_end_s - hb[-1] >= gap:
+        spans.append((float(hb[-1]), float(t_end_s), True))
+    out = []
+    for a, b, open_end in spans:
+        bt = [x for x in boots if a < s(x["t_ns"]) <= b + booted_within]
+        cause = bt[0]["resetCause"] if bt else None
+        out.append({"last_reply_s": round(a, 3), "gap_s": round(b - a, 3), "open": open_end,
+                    "booted_after_last_reply_s": round(s(bt[0]["t_ns"]) - a, 3) if bt else None,
+                    "resetCause": cause, "kind": classify_gap(b - a, bool(bt), cause)
+                    + (" (replies did not come back)" if open_end else "")})
+    return out
+
+
+def parse_conditions(items: list[str] | None) -> dict:
+    out = {}
+    for it in items or []:
+        k, _, v = it.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def cmd_usb_no_ad2(cfg: Config, args) -> int:
+    """--no-ad2: no AD2 (and no SWD); judged from the heartbeat gap and /booted only. The
+    fault record ('H') is read after the plug-in with --read-record."""
+    from . import commands
+
+    step = STEPS[args.step]
+    out = commands.new_result_dir(f"usb_{step.id}_noad2" + (f"_{args.label}" if args.label else ""))
+    print(f"{step.id} (no AD2): {step.title}\nOBSERVE: {step.observe}", flush=True)
+    diag = SerialDiag(cfg.serial_port).open()
+    with commands.open_link(cfg) as link:
+        try:
+            commands.connect_board(link)
+            version = commands.firmware_version(link)
+            print(f"firmware: {version}")
+            runner = UsbRunner(cfg, None, diag, link, step)
+            runner.setup()
+            time.sleep(0.3)
+            before = motor._get(link, "/getBrakeStatus", "/brakeStatus", cfg.test_axis)
+            t0 = time.monotonic_ns()
+            hb = Heartbeat(link).start()
+            time.sleep(0.3)
+            try:
+                runner.run(step.actions)
+                time.sleep(3.0)  # replies after the restart, for the end of the gap
+            finally:
+                hb.stop()
+                t_end_s = (time.monotonic_ns() - t0) / 1e9
+            after = motor._get(link, "/getBrakeStatus", "/brakeStatus", cfg.test_axis)
+        finally:
+            _safe_close(diag)
+    link.save_log(out / "osc_log.jsonl")
+    rx = link.entries("rx", t0)
+    gaps = host_gaps(rx, t0, t_end_s)
+    summary = {"step": step.id, "title": step.title, "mode": "no AD2", "firmware": version,
+               "conditions": parse_conditions(args.conditions), "axis": cfg.test_axis,
+               "setup": [list(m) for m in setup_actions(cfg, step)], "before": before, "after": after,
+               "gaps": gaps, "booted": [{"host_s": round((x["t_ns"] - t0) / 1e9, 3), "resetCause": x["resetCause"]}
+                                        for x in booted_causes(rx)],
+               "events": [{**e, "host_s": round((e["t_ns"] - t0) / 1e9, 3)} for e in runner.events],
+               "fault_record": None, "errors": runner.errors, "observations": {}}
+    commands.write_json(out / "summary.json", summary)
+    for g in gaps:
+        print(f"gap {g['gap_s']} s from {g['last_reply_s']} s: {g['kind']} (resetCause {g['resetCause']})")
+    if not gaps:
+        print("no gap in the replies")
+    if runner.errors:
+        print(f"errors: {runner.errors}")
+    print(f"results: {out}")
+    return 0
+
+
+def cmd_read_record(cfg: Config, args) -> int:
+    """--read-record DIR: after the plug-in, reopens the USB serial, reads 'H' (HIL builds
+    with the fault record) and stores it in DIR/summary.json."""
+    import json
+    from . import commands
+
+    path = Path(args.read_record) / "summary.json"
+    data = json.loads(path.read_text())
+    diag = SerialDiag(cfg.serial_port)
+    try:
+        diag.reconnect(args.wait)
+        record = read_fault_record(diag)
+    except (DiagError, OSError) as ex:
+        record = f"error: serial reconnect: {ex}"
+    finally:
+        _safe_close(diag)
+    data["fault_record"] = record
+    data["fault"] = parse_fault_record(record)
+    commands.write_json(path, data)
+    print(record if record else "no fault record (firmware without 'H')")
+    print(f"fault: {data['fault']}")
+    return 0
+
+
+FAULT_LINE = re.compile(r"HIL (hardfault|early warning): pc 0x([0-9A-F]+) lr 0x([0-9A-F]+) xpsr 0x([0-9A-F]+)")
+RECORD_LINE = re.compile(r"HIL record: boot (\d+) flags 0x([0-9A-F]+)")
+
+
+def parse_fault_record(text: str | None) -> dict | None:
+    """'H' output -> {flags, hardfault: {pc, lr, xpsr}, early_warning: {...}}."""
+    if not text or text.startswith("error"):
+        return None
+    m = RECORD_LINE.search(text)
+    out: dict = {"boot": int(m.group(1)), "flags": int(m.group(2), 16)} if m else {}
+    for kind, pc, lr, xpsr in FAULT_LINE.findall(text):
+        out[kind.replace(" ", "_")] = {"pc": f"0x{pc}", "lr": f"0x{lr}", "xpsr": f"0x{xpsr}"}
+    return out
+
+
 def cmd_usb(cfg: Config, args) -> int:
     from . import commands
 
+    if getattr(args, "read_record", None):
+        return cmd_read_record(cfg, args)
+    if getattr(args, "no_ad2", False):
+        return cmd_usb_no_ad2(cfg, args)
     step = STEPS[args.step]
     vbus_dio = cfg.raw.get("usb", {}).get("vbus_dio")
     vbus_dio = int(vbus_dio) if vbus_dio is not None and int(vbus_dio) >= 0 else None

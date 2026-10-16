@@ -116,6 +116,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="store operator observations in summary.json of a result, no board access")
     s.add_argument("--label", help="suffix of the result directory")
     s.add_argument("--rate", type=float, help="digital sample rate (default 10 kS/s: across a restart)")
+    s.add_argument("--no-ad2", action="store_true",
+                   help="no AD2 (nor SWD): judged from the heartbeat gap and /booted resetCause only")
+    s.add_argument("--conditions", nargs="+", metavar="KEY=VALUE",
+                   help="--no-ad2: what the run's wiring / power / firmware are, stored in summary.json")
+    s.add_argument("--read-record", metavar="RESULT_DIR",
+                   help="after the plug-in: read the HIL fault record ('H') into RESULT_DIR/summary.json")
+    s.add_argument("--wait", type=float, default=60.0, help="--read-record: seconds to wait for the USB serial")
     s.add_argument("--no-probe", action="store_true",
                    help="firmware without the HIL probes (e.g. main): no board check, judged from the heartbeat "
                         "gaps, J7 and /booted only")
@@ -173,11 +180,11 @@ def main(argv: list[str] | None = None) -> int:
     # (no board), nor for the STEP800 power-up (its USB cable is unplugged then).
     if args.command in ("motor", "usb") and args.note:
         return motor.add_note(args.note[0], args.note[1:])
-    if args.command == "usb" and not args.step:
+    if args.command == "usb" and not args.step and not args.read_record:
         print("error: --step or --note is needed")
         return 2
     no_board_check = (args.command == "powerup" and cfg.model == "step800") or \
-        (args.command == "usb" and args.no_probe) or args.command == "swd"
+        (args.command == "usb" and (args.no_probe or args.read_record)) or args.command == "swd"
     if args.command != "compare" and not no_board_check:
         try:
             board = commands.preflight(cfg)

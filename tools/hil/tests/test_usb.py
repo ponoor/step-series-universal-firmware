@@ -181,3 +181,44 @@ def test_cli_no_probe_flag():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert mod.build_parser().parse_args(["usb", "--step", "u1", "--no-probe"]).no_probe
+
+
+def rx_at(times, address="/version", args=("x",)):
+    return [LogEntry(int(1e9 * t), "rx", address, args) for t in times]
+
+
+def test_classify_gap():
+    assert usb.classify_gap(None, False, None).startswith("no stop")
+    assert usb.classify_gap(4.2, True, 4) == "stop, watchdog reset (HardFault or hang)"
+    assert usb.classify_gap(0.6, True, 4) == "watchdog reset (short stop)"
+    assert usb.classify_gap(0.8, True, 2) == "brown-out reset"
+    assert usb.classify_gap(0.8, True, None).startswith("restart, /booted without")
+    assert usb.classify_gap(12.0, False, None) == "replies stopped, no /booted"
+
+
+def test_host_gaps_watchdog_and_open():
+    # HardFault: replies stop at 2.0 s, /booted 4 4.9 s later, replies again from 7.0 s.
+    rx = rx_at(np.arange(0.1, 2.01, 0.1)) + rx_at(np.arange(7.0, 8.0, 0.1)) + rx_at([6.9], "/booted", (0, 4))
+    (g,) = usb.host_gaps(rx, 0, 8.0)
+    assert abs(g["gap_s"] - 5.0) < 1e-3 and g["resetCause"] == 4 and not g["open"]
+    assert g["kind"] == "stop, watchdog reset (HardFault or hang)"
+    # No restart: the replies do not come back before the end.
+    (g,) = usb.host_gaps(rx_at(np.arange(0.1, 2.01, 0.1)), 0, 14.0)
+    assert g["open"] and g["kind"].startswith("replies stopped, no /booted")
+    # No gap at all.
+    assert usb.host_gaps(rx_at(np.arange(0.1, 5.0, 0.1)), 0, 5.0) == []
+
+
+def test_parse_fault_record():
+    text = ("HIL record: boot 7 flags 0x1 (1 HardFault, 2 early warning) recorded in boot 6\n"
+            "HIL now: USB priority 1, USB interrupts 12\n"
+            "HIL hardfault: pc 0x0000CAFA lr 0x0000CAE9 xpsr 0x21000000 (exception 0) sp 0x20007FB8 exc_return 0xFFFFFFF9\n"
+            "HIL hardfault: r0 0x20000FE8 r1 0x00000001 r2 0x20100C54 r3 0x20000C50 r12 0x20001F20 icsr 0x0000F003\n"
+            "HIL record done\n")
+    f = usb.parse_fault_record(text)
+    assert f["boot"] == 7 and f["flags"] == 1 and f["hardfault"]["pc"] == "0x0000CAFA"
+    assert usb.parse_fault_record(None) is None and usb.parse_fault_record("error: x") is None
+
+
+def test_parse_conditions():
+    assert usb.parse_conditions(["ad2=removed", "power=24 V"]) == {"ad2": "removed", "power": "24 V"}

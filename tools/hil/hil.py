@@ -140,6 +140,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--duration", type=float, default=10.0, help="W1 / W4: seconds of load (default 10)")
     s.add_argument("--dead-ip", default="10.0.0.250", help="W3 / W4: unused address in the board's subnet")
     s.add_argument("--elf", help="firmware.elf on the board: the reset() call sites as function and line")
+    s.add_argument("--product", action="store_true",
+                   help="product build (no wdtGapMax, no HIL probes): records /booted and resetCause only")
     s.add_argument("--no-motion", action="store_true",
                    help="motor on the test axis: servo target kept at the position, /homing on the next axis")
     s.add_argument("--label", help="suffix of the result directory")
@@ -200,7 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --step or --note is needed")
         return 2
     no_board_check = (args.command == "powerup" and cfg.model == "step800") or \
-        (args.command == "usb" and (args.no_probe or args.read_record)) or args.command == "swd"
+        (args.command == "usb" and (args.no_probe or args.read_record)) or args.command == "swd" or \
+        (args.command == "wdt" and args.product)
     if args.command != "compare" and not no_board_check:
         try:
             board = commands.preflight(cfg)

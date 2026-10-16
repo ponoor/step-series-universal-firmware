@@ -70,7 +70,9 @@ class OscLink:
             index = socket.if_nametoindex(self.bound_if)
             for s in (self._rx_sock, self._tx_sock):
                 s.setsockopt(socket.IPPROTO_IP, IP_BOUND_IF, index)
-        self._rx_sock.bind((self.local_ip, self.listen_port))
+        # With bound_if, receive on any address of that interface: a socket bound to the
+        # unicast address does not get the broadcasts (/booted to x.x.x.255).
+        self._rx_sock.bind(("0.0.0.0" if self.bound_if else self.local_ip, self.listen_port))
         self._rx_sock.settimeout(0.1)
         if self.local_ip != "0.0.0.0":
             self._tx_sock.bind((self.local_ip, 0))

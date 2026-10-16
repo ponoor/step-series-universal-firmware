@@ -116,6 +116,11 @@ class WdtBench:
         return self.link.send(address, *args)
 
     def perf(self) -> dict:
+        if self.args.product:
+            # Product build: no wdtGapMax; the last line of 'p' is arpRefreshFailed.
+            p = parse_perf(self.ser.command("p", until=r"arpRefreshFailed\s+\d+"))
+            p["wdtGapMax"] = {"max_us": None, "from": None, "to": None}
+            return p
         text = self.ser.command("p", until=r"wdtGapMax\s+\d+ us\s+from 0x[0-9A-Fa-f]+ to 0x[0-9A-Fa-f]+")
         p = parse_perf(text)
         if "wdtGapMax" not in p:
@@ -149,7 +154,8 @@ def run_once(b: WdtBench, load: Callable[[WdtBench], dict | None], settle: float
     time.sleep(settle)
     p = b.perf()
     gap = p["wdtGapMax"]
-    return {"wdt_gap_ms": gap["max_us"] / 1e3, "from": gap["from"], "to": gap["to"],
+    return {"wdt_gap_ms": gap["max_us"] / 1e3 if gap["max_us"] is not None else None,
+            "from": gap["from"], "to": gap["to"],
             "loop_max_ms": p.get("loop", {}).get("max_us", 0) / 1e3, "slotLate": p.get("slotLate"),
             "udpSendFailed": p.get("udpSendFailed"), "booted": b.booted_since(t), **extra}
 
@@ -353,10 +359,17 @@ def case_w10(b: WdtBench) -> list[dict]:
         p = b.perf()
         gap = p["wdtGapMax"]
         b.connect(5.0)
-        runs.append({"wdt_gap_ms": gap["max_us"] / 1e3, "from": gap["from"], "to": gap["to"],
+        runs.append({"wdt_gap_ms": gap["max_us"] / 1e3 if gap["max_us"] is not None else None,
+                     "from": gap["from"], "to": gap["to"],
                      "loop_max_ms": p.get("loop", {}).get("max_us", 0) / 1e3,
                      "booted": [list(booted.args)] if booted else []})
     return runs
+
+
+def _status(b: WdtBench) -> dict:
+    t = b.ser.command("T", until=r"\{\"board\".*\]\}\r?\n", timeout=5.0)
+    m = re.search(r'"resetCause":(\d+),"resetCauseRaw":(\d+)', t)
+    return {"resetCause": int(m.group(1)), "resetCauseRaw": int(m.group(2))} if m else {}
 
 
 RUNNERS = {"w1": case_w1, "w2": case_w2, "w3": case_w3, "w4": case_w4, "w5": case_w5, "w6": case_w6,
@@ -374,6 +387,8 @@ def cmd_wdt(cfg: Config, args) -> int:
         try:
             summary["local_ip"] = b.connect()
             summary["firmware"] = commands.firmware_version(b.link)
+            summary["product"] = bool(args.product)
+            summary["status_before"] = _status(b)
             print(f"firmware: {summary['firmware']}")
             for cid in cases:
                 case = CASES[cid]
@@ -395,7 +410,15 @@ def cmd_wdt(cfg: Config, args) -> int:
         finally:
             b.ser.save(out / "serial_log.txt", b.t0_ns)
             b.link.save_log(out / "osc_log.jsonl")
+    # Product build: no early warning or restart may happen (W10 restarts on purpose).
+    summary["status_after"] = None
+    try:
+        with WdtBench(cfg, args, out) as b2:
+            summary["status_after"] = _status(b2)
+    except Exception as ex:  # noqa: BLE001
+        summary["status_after"] = f"error: {ex}"
     commands.write_json(out / "summary.json", summary)
+    print(f"resetCause before {summary['status_before']}, after {summary['status_after']}")
     commands.print_table(["case", "what", "wdtGap ms", "loop max ms", "from", "to", "booted / error"],
                          [[r[0], r[1], commands.fmt(r[2], 2), commands.fmt(r[3], 2), r[4], r[5], r[6]]
                           for r in rows])

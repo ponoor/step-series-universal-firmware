@@ -127,6 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="firmware without the HIL probes (e.g. main): no board check, judged from the heartbeat "
                         "gaps, J7 and /booted only")
 
+    s = sub.add_parser("wdt", parents=[common], help="longest interval between watchdog resets under the loads "
+                       "W1-W10 (wdtGapMax of 'p', HIL_PROBE builds); no AD2")
+    s.add_argument("--cases", nargs="+", choices=["w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "w10"],
+                   help="cases to run (default: those without a human: w1 w2 w8 w9 w10)")
+    s.add_argument("--repeat", type=int, default=3, help="runs per case (default 3)")
+    s.add_argument("--duration", type=float, default=10.0, help="W1 / W4: seconds of load (default 10)")
+    s.add_argument("--dead-ip", default="10.0.0.250", help="W3 / W4: unused address in the board's subnet")
+    s.add_argument("--elf", help="firmware.elf on the board: the reset() call sites as function and line")
+    s.add_argument("--label", help="suffix of the result directory")
     s = sub.add_parser("swd", parents=[common], help="CPU state through SWD (Atmel-ICE, OpenOCD); no reset")
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--info", action="store_true", help="no halt: chip ID, reset cause, debug state, flash check")
@@ -153,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.load(args.config)
     if getattr(args, "id", None) is not None:
         cfg.override_board_id(args.id)
-    from hil import arp, checks, commands, motor, restart, swd, usb
+    from hil import arp, checks, commands, motor, restart, swd, usb, wdt
 
     if args.command == "arp" and cfg.model != "step800":
         print(f"error: arp needs P5 (UDP send), which {cfg.model} has no pin for")
@@ -206,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         "motor": motor.cmd_motor,
         "usb": usb.cmd_usb,
         "swd": swd.cmd_swd,
+        "wdt": wdt.cmd_wdt,
     }[args.command]
     return handler(cfg, args)
 

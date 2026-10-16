@@ -148,6 +148,7 @@ The console shows a summary table and the result directory only.
 | `check` | The remaining checks C1-C11, see below. |
 | `arp` | Client replaced by another MAC address with the same IP address, see below. |
 | `powerup` | Needs Scope 2+ moved to 3.3 V and the STEP800 USB cable unplugged: USB VBUS is connected to the board's 5 V net without a diode (schematic sheet 1), so USB alone powers the 3.3 V rail and the 74HC595. Reports, per run, the initial level and every edge of each brake output until the first P4 rise. The 74HC595 output register is not cleared at power-up (SHIFTOUT_ENABLE / R3 clear only the shift register, G is tied to GND), so the outputs keep their power-up state until the first RCK edge. Afterwards, move Scope 2+ back to P0. Arms a recording triggered by the 3.3 V rise on Scope 2, asks for a power cycle, and reports any brake output that is HIGH (released) before the first P4 rise. |
+| `wdt` | Longest interval between two watchdog resets (`wdtGapMax` of `p`, HIL_PROBE builds) under the loads W1-W10 of TASK_fault_reset: `p`, the load, `p`, 3 runs each (`--repeat`). No AD2 (USB serial and network only). W3 / W4 need the SD card out (the unreachable `--dead-ip` is set with `{`, as C6); W5 / W6 / W7 ask the operator. `--elf` names the two `Watchdog.reset()` call sites (addr2line). Record only |
 
 ### Timing load
 
@@ -703,3 +704,4 @@ The tests use synthetic data and run without the hardware.
 | `hil/motor.py` | `motor`: tests with a motor, brake and load (steps as data, timeline, observations) |
 | `hil/swd.py` | `swd`: OpenOCD (Atmel-ICE) over its Tcl port: chip info, flash check, halt and dump, addr2line |
 | `hil/usb.py` | `usb`: USB cable unplugged / plugged in (heartbeat, stops, early warning, fault record) |
+| `hil/wdt.py` | `wdt`: watchdog reset intervals under load (W1-W10) |

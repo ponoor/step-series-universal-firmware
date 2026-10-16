@@ -62,7 +62,21 @@ hiz_median_v = [11.5, 13.5]
 
 # Optional: this Mac's address and interface to the board, when another interface (e.g. Wi-Fi)
 # is on the same subnet and would be used otherwise. Wi-Fi can answer the board's ARP too late
-# (the W5500 waits 40 ms), so replies are lost after each pause of 1.5 s (ARP refresh).
+# (the W5500 waits 40 ms per try), which makes /destIp come later (arp resolve).
 # [network]
 # local_ip = "10.0.0.10"
 # bound_if = "en9"
+
+[arp]
+# hil.py arp (as on the STEP800, bench.example.toml): two USB-LAN adapters of this Mac,
+# both set to client_ip / 255.255.255.0 (no router), never connected at the same time.
+# The STEP400 has no P5: the P5 metrics of arp are empty, the rest is judged as on the STEP800.
+nic_a = "en9"
+nic_b = "en7"
+client_ip = "10.0.0.10"
+# E2 a: an alias address of NIC B, added and removed by a human.
+alias_ip = "10.0.0.11"
+# /setPositionListReportInterval while the client is swapped (ms).
+report_ms = 100
+# Length of each AD2 recording (P0-P2, 1 MHz); the recordings follow each other.
+segment_s = 30.0

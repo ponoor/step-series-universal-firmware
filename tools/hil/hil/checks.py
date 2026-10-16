@@ -1665,6 +1665,22 @@ def c8_analyze(b: Bench, cap, t_trigger_ns: int, sender_sent: list[int], reply, 
     return res
 
 
+def c8_perf(b: Bench) -> dict:
+    """'p' after a C8 run (counted from the start of the firmware): the longest loop
+    interval, wdtGapMax (HIL_PROBE builds), slotLate and the resolutions of the MAC
+    address of destIp (src/arpResolve.h: /setDestIp every 50 ms)."""
+    try:
+        text = b.ser.command("p", until=r"wdtGapMax\s+\d+ us\s+from 0x[0-9A-Fa-f]+ to 0x[0-9A-Fa-f]+")
+    except DiagError:
+        text = b.ser.text(0)[-2000:]
+    p = parse_perf(text)
+    out = {"loop_max_us": (p.get("loop") or {}).get("max_us"),
+           "wdt_gap_max_us": (p.get("wdtGapMax") or {}).get("max_us"), "slotLate": p.get("slotLate")}
+    out.update({k: p.get(k) for k in ("arpResolve", "arpProbe", "arpProbeFailed", "arpResolved", "arpTimeout",
+                                      "arpDropped", "udpSendFailed")})
+    return out
+
+
 def c8_run(b: Bench, mode: str, run: int) -> dict:
     """mode a: R, /setDestIp every 50 ms; b: R, /setDestIp on /booted (again after 300 ms);
     c: power cycle by the operator, /setDestIp every 50 ms."""
@@ -1704,6 +1720,7 @@ def c8_run(b: Bench, mode: str, run: int) -> dict:
     b.ser.reconnect(30.0)
     res = c8_analyze(b, cap, t_start, sender.sent if sender else [], sender.reply if sender else None, booted_list,
                      power_cycle=mode == "c")
+    res["perf"] = c8_perf(b)
     res["capture_ok"] = cap.ok
     res["setDestIp_sent_total"] = len(sender.sent) if sender else 0
     status = b.status_json()["board"]
@@ -1736,7 +1753,8 @@ def check_c8(b: Bench) -> list[Item]:
             f"{[round(x, 1) for x in r.get('booted_ms_host', [])]} ms (host), sent until reply "
             f"{r.get('setDestIp_sent_until_reply')} (after the reset {r.get('setDestIp_sent_after_reset_until_reply')}), "
             f"P1 until reply {r.get('p1_until_reply')}, P5 max {fmt_ms(r.get('p5_max_ms'))} ms, longest P0 gap "
-            f"{fmt_ms(r.get('p0_longest_gap_ms'))} ms, booted {r.get('booted')}" for i, r in enumerate(runs))))
+            f"{fmt_ms(r.get('p0_longest_gap_ms'))} ms, booted {r.get('booted')}; p {r.get('perf')}"
+            for i, r in enumerate(runs))))
     return items
 
 

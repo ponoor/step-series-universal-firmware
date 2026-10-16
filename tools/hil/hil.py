@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dip", type=int, default=85, help="C10boot: DIP switch value set before the restart")
 
     s = sub.add_parser("arp", parents=[common], help="client replaced by another MAC with the same IP (needs a human); "
-                       "resolve / silence: replies after a silence")
+                       "resolve / silence / burst: no AD2, any model")
     s.add_argument("--topology", choices=["T1", "T2"],
                    help="T1: board and both NICs at a switch, T2: board cabled directly to one NIC (all steps but "
                         "resolve / silence)")
@@ -104,16 +104,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="check: NIC A only; e1: E1 1-6; e2a / e2b: E2; c1 / c2: candidate fixes (HIL_PROBE); "
                         "n1 / n2: the fix commands while the client is reachable; gap / fix: the resolution of the "
                         "MAC address of destIp; resolve / silence: A1-A4 (/setDestIp or /getVersion after a "
-                        "silence, through [network] bound_if, any model)")
+                        "silence, through [network] bound_if, any model); link: board cable unplugged (NIC A); "
+                        "burst: C8a through bound_if with 'p'")
     s.add_argument("--wait", type=float, help="E1 3: seconds on NIC B before /getVersion (e1: 300, others: 30)")
     s.add_argument("--observe", type=float, default=30.0, help="seconds after /setDestIp from NIC B (E1 5)")
     s.add_argument("--commands-only", action="store_true",
                    help="fix: /getVersion instead of /setDestIp after each swap (F2: not repaired); without: F1")
-    s.add_argument("--count", type=int, default=20, help="resolve / silence: trials (20)")
+    s.add_argument("--count", type=int, default=20, help="resolve / silence / burst: trials (20)")
     s.add_argument("--quiet-s", type=float, default=3.0, help="resolve / silence: seconds without a packet before "
                    "each query (3)")
     s.add_argument("--window", type=float, default=1.0, help="resolve / silence: seconds after each query (1); a "
                    "later reply still counts, until the next query")
+    s.add_argument("--burst-s", type=float, default=0.0, help="burst: send /setDestIp every 50 ms for at least "
+                   "this long, also after /destIp came (0: until /destIp, as C8a)")
     s.add_argument("--label", help="suffix of the result directory")
 
     s = sub.add_parser("motor", parents=[common], help="tests with a real motor and brake, record only (STEP400)")
@@ -183,9 +186,6 @@ def main(argv: list[str] | None = None) -> int:
         cfg.override_board_id(args.id)
     from hil import arp, checks, commands, motor, restart, swd, usb, wdt
 
-    if args.command == "arp" and cfg.model != "step800" and args.step not in arp.REACH_STEPS:
-        print(f"error: arp needs P5 (UDP send), which {cfg.model} has no pin for")
-        return 2
     motor_connected = bool(cfg.raw["motor"].get("motor_connected", False))
     if motor_connected and args.command in OUT1A_COMMANDS:
         print(f"error: motor.motor_connected = true: {args.command} judges the excitation on OUT1A, which "

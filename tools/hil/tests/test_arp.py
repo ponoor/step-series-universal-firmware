@@ -172,16 +172,27 @@ C = "10.0.0.10"
 
 
 def test_expected_resolutions_follows_the_firmware_rule():
-    # every /setDestIp, also the heartbeat from the destIp already set
+    # the first /setDestIp (isDestIpSet false); the heartbeat every 1.0 s starts none
     pk = [(0.0, C, "/setDestIp"), (0.1, C, "/setPositionListReportInterval")]
-    pk += [(1.0 + i, C, "/setDestIp") for i in range(30)]  # heartbeat 1.0 s
-    assert arp.expected_resolutions(pk) == [0.0] + [1.0 + i for i in range(30)]
-    # gaps in the packets start none
-    pk2 = [(32.0 + 2 * i, C, "/getVersion") for i in range(10)] + [(60.0, C, "/x"), (63.0, C, "/x")]
-    assert arp.expected_resolutions(pk2) == []
-    # /setDestIp from another address too
-    assert arp.expected_resolutions([(0, C, "/setDestIp"), (0.5, "10.0.0.11", "/setDestIp"),
-                                     (0.6, "10.0.0.11", "/x")]) == [0, 0.5]
+    pk += [(1.0 + i, C, "/setDestIp") for i in range(30)]
+    assert arp.expected_resolutions(pk, dest=C) == [0.0]
+    # every 2.0 s: each
+    pk2 = pk + [(32.0 + 2 * i, C, "/setDestIp") for i in range(10)]
+    assert arp.expected_resolutions(pk2, dest=C) == [0.0] + [32.0 + 2 * i for i in range(10)]
+    # boundary: 1.5 s counts, 1.499 s does not; any packet from destIp counts against the gap
+    assert arp.expected_resolutions([(0, C, "/setDestIp"), (1.499, C, "/setDestIp")], dest=C) == [0]
+    assert arp.expected_resolutions([(0, C, "/setDestIp"), (1.5, C, "/setDestIp")], dest=C) == [0, 1.5]
+    assert arp.expected_resolutions([(0, C, "/setDestIp"), (1.0, C, "/getVersion"), (2.0, C, "/setDestIp")],
+                                    dest=C) == [0]
+    # other packets start none, also after a gap
+    assert arp.expected_resolutions([(0, C, "/setDestIp"), (5.0, C, "/getVersion")], dest=C) == [0]
+    # another address starts one; its next /setDestIp 1 s later none
+    pk3 = [(0, C, "/setDestIp"), (0.5, "10.0.0.11", "/setDestIp"), (1.5, "10.0.0.11", "/setDestIp")]
+    assert arp.expected_resolutions(pk3, dest=C) == [0, 0.5]
+    # isDestIpSet from the config (canSendMsgBeforeDestIp): a packet from destIp before
+    # the first /setDestIp counts against the gap
+    assert arp.expected_resolutions([(0, C, "/getVersion"), (0.5, C, "/setDestIp")], dest=C, dest_set=True) == []
+    assert arp.expected_resolutions([(0, C, "/getVersion"), (0.5, C, "/setDestIp")], dest=C) == [0.5]
 
 
 def udp(t, src, dst, ip_src, ip_dst, dport, osc_addr=None):
@@ -353,12 +364,52 @@ def test_reach_summary():
     assert "resolutions" not in old and old["replies"] == 0 and "-" in arp.reach_line(old)
 
 
-def test_gap_captures_nic_a_only():
+def test_gap_and_link_capture_nic_a_only():
     nic = {"A": "en9", "B": "en7"}
     assert arp.capture_nics("gap", nic) == {"A": "en9"}
+    assert arp.capture_nics("link", nic) == {"A": "en9"}
     for step in arp.STEPS:
-        if step != "gap":
+        if step not in ("gap", "link"):
             assert arp.capture_nics(step, nic) == nic
+
+
+def test_link_items():
+    B10 = "10.0.0.100"
+    ev = [{"t": 1.0, "name": "link: cable unplug requested", "phase": "link down"},
+          {"t": 4.0, "name": "link: 'Ethernet link up' on USB serial", "phase": "link up"}]
+    perf = {"arpResolve": 1, "arpProbe": 1, "arpResolved": 1, "arpDropped": 2}
+    res = {"board_mac": BOARD, "board_ip": B10, "client_ip": C, "events": ev, "perf": {"link after": perf},
+           "dest_macs": [{"label": "link after the link came back", "s": NIC_A, "T": NIC_A}]}
+    fr = [udp(0.5, BOARD, NIC_A, B10, C, 50100, "/positionList"),
+          udp(5.0, BOARD, "ff:ff:ff:ff:ff:ff", B10, "255.255.255.255", 9),
+          arpf(5.0004, 1, BOARD, B10, "00:00:00:00:00:00", C),
+          arpf(5.0005, 2, NIC_A, C, BOARD, B10, dst=BOARD),
+          udp(5.001, BOARD, NIC_A, B10, C, 9),
+          udp(5.1, BOARD, NIC_A, B10, C, 50100, "/positionList")]
+    (it,) = arp.link_items(res, fr, NAMES)
+    assert it.verdict == "PASS", it.detail
+    assert "dummy [1000.0]" in it.detail
+    # no report after the probe
+    (it,) = arp.link_items(res, fr[:-1], NAMES)
+    assert it.verdict == "FAIL"
+    # the link change not seen
+    (it,) = arp.link_items({**res, "events": ev[:1]}, fr, NAMES)
+    assert it.verdict == "FAIL"
+
+
+def test_burst_result_and_line():
+    s = 1_000_000_000
+    perf = {"loop": {"max_us": 41500, "avg_us": 100, "n": 9}, "wdtGapMax": {"max_us": 52000, "from": "0x1",
+            "to": "0x2"}, "slotLate": 3, "arpResolve": 2, "arpProbe": 2, "arpProbeFailed": 0, "arpResolved": 2,
+            "arpTimeout": 0, "arpDestIpSent": 2, "arpDropped": 1, "udpSendFailed": 0}
+    sent = [0, int(0.05 * s), int(0.1 * s), int(2.5 * s)]
+    r = arp.burst_result(perf, sent, 0, int(2.4 * s))
+    assert r["reply_ms"] == 2400.0 and r["sent"] == 4 and r["sent_until_reply"] == 3
+    assert r["loop_max_us"] == 41500 and r["wdt_gap_max_us"] == 52000 and r["arpProbe"] == 2
+    none = arp.burst_result({}, [], 0, None)
+    assert none["reply_ms"] is None and none["sent_until_reply"] is None and none["loop_max_us"] is None
+    line = arp.burst_line([r, none])
+    assert line.startswith("1/2 runs answered") and "loop max 41500 us" in line and "wdtGapMax 52000 us" in line
 
 
 def test_nic_names_without_nic_b():

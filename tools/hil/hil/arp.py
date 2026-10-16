@@ -9,6 +9,7 @@ bench captures both adapters with tcpdump (filter: ether host <board MAC> or arp
 polls their link status, records the probes P0-P6 with the AD2 in consecutive segments
 and logs the OSC messages per adapter (sockets scoped with IP_BOUND_IF). The verdicts
 are RECORD only, judged from the capture; what the OSC sockets receive is recorded too.
+A board without P5 (STEP400) runs the same steps; the P5 metrics are then empty.
 
 Steps (--step):
   check  NIC A: restart, /setDestIp, position list reports, /getVersion
@@ -24,10 +25,15 @@ Steps (--step):
          packets from the client, NIC A only
   fix    T1: the client swapped; F1 /setDestIp from the new adapter repairs it, F2
          (--commands-only) a command alone does not
+  link   NIC A only: the board's Ethernet cable unplugged and plugged in (human); the
+         resolution starts once the link is back and the reports resume after it
   resolve, silence
          A1-A4 of TASK_arp_resolve: --quiet-s of silence, then /setDestIp (resolve) or
          /getVersion (silence), --count times, through [network] bound_if; counts the
          replies and reads 'p' after each. No AD2, no capture, no NIC A / B: any model
+  burst  C8 through [network] bound_if, any model: 'R', /setDestIp every 50 ms until
+         /destIp (at least --burst-s), then 'p' (loop, wdtGapMax, the probes), --count
+         times
 """
 
 from __future__ import annotations
@@ -53,9 +59,12 @@ from .osc import OscError, OscLink
 BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 ETH_ARP, ETH_IPV4 = 0x0806, 0x0800
 ARP_REQUEST, ARP_REPLY = 1, 2
-STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2", "n1", "n2", "gap", "fix", "resolve", "silence")
+STEPS = ("check", "e1", "e2a", "e2b", "c1", "c2", "n1", "n2", "gap", "fix", "link", "resolve", "silence", "burst")
 # Steps without AD2, capture and NIC A / B (cmd_arp_reach()): the query and its reply.
-REACH_STEPS = {"resolve": ("/setDestIp", "/destIp"), "silence": ("/getVersion", "/version")}
+REACH_STEPS = {"resolve": ("/setDestIp", "/destIp"), "silence": ("/getVersion", "/version"),
+               "burst": ("/setDestIp", "/destIp")}
+# Steps that capture NIC A only (NIC B need not be attached).
+NIC_A_STEPS = ("gap", "link")
 # USB serial commands of the candidate fixes (HIL_PROBE builds, src/diagnosis.cpp).
 FIX_COMMANDS = {"c1": "N", "c2": "U"}
 FIX_DONE = re.compile(r"HIL: (.+?) in (\d+) us")
@@ -180,7 +189,7 @@ def link_transitions(samples: list[tuple[float, str, str]]) -> list[tuple[float,
 def capture_nics(step: str, nic: dict[str, str]) -> dict[str, str]:
     """The adapters captured by a step: `gap` uses NIC A only, so it also runs when NIC B
     is not attached (its tcpdump would fail); the other steps capture both."""
-    return {"A": nic["A"]} if step == "gap" else dict(nic)
+    return {"A": nic["A"]} if step in NIC_A_STEPS else dict(nic)
 
 
 def nic_names(info: dict[str, dict]) -> dict[str, str]:
@@ -308,6 +317,7 @@ def h1_verdict(after: dict, client_ip: str) -> dict:
 PERF_ARP = ("arpResolve", "arpProbe", "arpProbeFailed", "arpResolved", "arpTimeout", "arpDestIpSent", "arpDropped")
 ARP_PROBE_INTERVAL_S = 0.15  # src/arpResolve.h
 ARP_RESOLVE_TIMEOUT_S = 2.0  # src/arpResolve.h
+ARP_RX_GAP_S = 1.5  # src/arpResolve.h
 DISCARD_PORT = 9
 
 
@@ -323,12 +333,25 @@ def is_probe(f: Frame, board_mac: str, client_ip: str) -> bool:
     return f.src == board_mac and f.ip_dst == client_ip and f.udp_dport == DISCARD_PORT
 
 
-def expected_resolutions(packets: list[tuple[float, str, str | None]]) -> list[float]:
+def expected_resolutions(packets: list[tuple[float, str, str | None]], dest: str | None = None,
+                         dest_set: bool = False) -> list[float]:
     """The firmware rule (src/arpResolve.h) applied to the packets received by the board,
-    (time s, source IP, OSC address) in time order: every /setDestIp starts a resolution,
-    from any address and also from the destIp already set. Returns their times. The
-    resolutions at the start and on a change of the ID come from no packet."""
-    return [t for t, _, osc in packets if osc == "/setDestIp"]
+    (time s, source IP, OSC address) in time order, from destIp `dest` (isDestIpSet
+    `dest_set`) at the start: a /setDestIp starts a resolution when isDestIpSet is false,
+    when it comes from another address than destIp, or after a gap of ARP_RX_GAP_S or more
+    in the packets from destIp (or none yet). Every packet from destIp (as after the
+    packet) is recorded. Returns the times of the /setDestIp that start one. The
+    resolutions at the start and after the link came up come from no packet."""
+    out = []
+    rec_ip, rec_t = None, None
+    for t, src, osc in packets:
+        if osc == "/setDestIp":
+            if not dest_set or src != dest or rec_ip != src or t - rec_t >= ARP_RX_GAP_S:
+                out.append(t)
+            dest, dest_set = src, True
+        if src == dest:
+            rec_ip, rec_t = src, t
+    return out
 
 
 def refresh_sequences(frames: list[Frame], board_mac: str, board_ip: str, client_ip: str) -> list[dict]:
@@ -570,7 +593,10 @@ class SegmentRecorder:
                         f"data {cap.digital.duration:.3f} s for {short + cap.digital.duration:.3f} s host time"
                         ] * (short > self.MAX_SHORT_S)) + " (not used)")
                     continue
-                r, w = analyze.pulse_widths(analyze.bit_edges(cap.digital, probe[5]))
+                if probe[5] >= 0:
+                    r, w = analyze.pulse_widths(analyze.bit_edges(cap.digital, probe[5]))
+                else:  # no P5 (STEP400): no send pulses
+                    r, w = np.zeros(0), np.zeros(0)
                 self.segments.append({"name": name, "t0": t0, "t1": t0 + cap.digital.duration,
                                       "p1": analyze.bit_edges(cap.digital, probe[1]).rise + t0,
                                       "p5_rise": r + t0, "p5_width": w})
@@ -812,8 +838,8 @@ class ArpRun:
         every("/setDestIp", 1.0, 30, 0.5)
         time.sleep(0.5)
         self.read_perf("gap a")
-        self.event("b /getVersion every 2.0 s for 20 s", phase="gap b")
-        every("/getVersion", 2.0, 10, 1.5)
+        self.event("b /setDestIp every 2.0 s for 20 s", phase="gap b")
+        every("/setDestIp", 2.0, 10, 1.5)
         time.sleep(0.5)
         self.read_perf("gap b")
         self.event("c 3 s silence, then /getVersion every 10 ms x 10", phase="gap c")
@@ -825,6 +851,34 @@ class ArpRun:
         time.sleep(0.5)
         self.read_perf("gap d")
         lk.send("/setPositionListReportInterval", 0)
+
+    def run_link(self) -> None:
+        """The board's Ethernet cable unplugged and plugged in by a human (NIC A, reports
+        on): the firmware prints 'Ethernet link down' / 'up'; 'p' and the destination MAC
+        5 s after the link is back."""
+        self.dest_macs = []
+        self.establish()
+        self.read_perf("link before")
+        t0 = time.monotonic_ns()
+        seen: dict = {}
+
+        def changed() -> bool:
+            if "down" not in seen and self.b.ser.wait_for(r"Ethernet link down", t0, 0) is not None:
+                seen["down"] = self.event("link: 'Ethernet link down' on USB serial")
+            if ("down" in seen and "up" not in seen
+                    and self.b.ser.wait_for(r"Ethernet link up", int(seen["down"] * 1e9), 0) is not None):
+                seen["up"] = self.event("link: 'Ethernet link up' on USB serial", phase="link up")
+            return "up" in seen
+
+        self.event("link: cable unplug requested", phase="link down")
+        if not self.b.operator("link: unplug the Ethernet cable of the board, wait 3 s, plug it in again",
+                               done=changed, timeout=600.0):
+            raise DiagError("no 'Ethernet link down' then 'Ethernet link up' on USB serial")
+        changed()
+        time.sleep(5.0)
+        self.read_perf("link after")
+        self.read_dest_mac("link after the link came back")
+        self.b.link.send("/setPositionListReportInterval", 0)
 
     def read_dest_mac(self, label: str) -> dict:
         """Destination MAC address from 's' and 'T' (firmware with destMac)."""
@@ -989,9 +1043,9 @@ def phase_line(name: str, ph: dict) -> str:
             f"matched {m['matched']} of {m['a']} frames seen in the AD2 time); app {ph['app_rx']}")
 
 
-# Resolutions per pattern: one per /setDestIp (gap 0: the first one, more if connect()
-# had to resend it; gap a: the heartbeat), none from a gap in the packets.
-GAP_NOMINAL = {"gap 0": 1, "gap a": 30, "gap b": 0, "gap c": 0, "gap d": 0}
+# Resolutions per pattern (src/arpResolve.h): gap 0 the first /setDestIp; a: /setDestIp
+# every 1.0 s, none; b: every 2.0 s, each; c, d: /getVersion after a silence, none.
+GAP_NOMINAL = {"gap 0": 1, "gap a": 0, "gap b": 10, "gap c": 0, "gap d": 0}
 
 
 def gap_items(res: dict, frames: list[Frame], rec: SegmentRecorder) -> list[Item]:
@@ -1001,7 +1055,8 @@ def gap_items(res: dict, frames: list[Frame], rec: SegmentRecorder) -> list[Item
     board_mac, board_ip, client = res["board_mac"], res["board_ip"], res["client_ip"]
     packets = [(f.t, f.ip_src, f.osc) for f in frames
                if f.dst == board_mac and f.ip_dst == board_ip and f.udp_dport is not None]
-    expected = np.array(expected_resolutions(packets))
+    init = res.get("gap_initial") or {}
+    expected = np.array(expected_resolutions(packets, init.get("destIp"), init.get("canSendMsgBeforeDestIp", False)))
     dummies = np.array([f.t for f in frames if is_refresh_dummy(f, board_mac)])
     seqs = refresh_sequences(frames, board_mac, board_ip, client)
     _, p5r, p5w = rec.arrays()
@@ -1104,6 +1159,32 @@ def fix_items(res: dict, frames: list[Frame], names: dict[str, str]) -> list[Ite
     return items
 
 
+def link_items(res: dict, frames: list[Frame], names: dict[str, str]) -> list[Item]:
+    """Judges the link step: once the link is back, one resolution (the dummy, a probe to
+    NIC A), ended by the probe, and the reports to NIC A after it."""
+    board_mac, client = res["board_mac"], res["client_ip"]
+    mac_a = {n: m for m, n in names.items()}["NIC A"]
+    ev = {e["phase"]: e["t"] for e in res["events"] if e.get("phase")}
+    t_req, t_up = ev.get("link down"), ev.get("link up")
+    if t_req is None or t_up is None:
+        return [Item("arp link", "FAIL", "the link change was not seen on USB serial")]
+    after = [f for f in frames if f.t >= t_req]
+    dummies = [f for f in after if is_refresh_dummy(f, board_mac)]
+    probe = next((f for f in after if is_probe(f, board_mac, client)), None)
+    reports = [f for f in after if probe is not None and f.t > probe.t and f.src == board_mac and f.dst == mac_a
+               and f.osc == "/positionList"]
+    perf = res["perf"].get("link after", {})
+    dm = next((d for d in res.get("dest_macs", [])), None)
+    ok = (len(dummies) == 1 and probe is not None and len(reports) > 0 and perf.get("arpResolve") == 1
+          and perf.get("arpResolved") == 1 and dm is not None and dm["s"] == mac_a and dm["T"] == mac_a)
+    ms = lambda f: None if f is None else round((f.t - t_up) * 1e3, 1)  # noqa: E731
+    return [Item("arp link", "PASS" if ok else "FAIL", (
+        f"from 'Ethernet link up' (USB serial, ms): dummy {[ms(f) for f in dummies]}, probe {ms(probe)}, first report "
+        f"after the probe {ms(reports[0]) if reports else None} ({len(reports)} reports); 'p' arpResolve "
+        f"{perf.get('arpResolve')}, arpProbe {perf.get('arpProbe')}, arpResolved {perf.get('arpResolved')}, "
+        f"arpDropped {perf.get('arpDropped')}; destination MAC {dm and dm['s']} / {dm and dm['T']}"))]
+
+
 def rng(values) -> str:
     v = [x for x in values if x is not None]
     return "-" if not v else f"{min(v):.2f}-{max(v):.2f}"
@@ -1145,7 +1226,7 @@ def cmd_arp(cfg: Config, args) -> int:
                 {"check": run.run_check, "e1": run.run_e1, "e2a": run.run_e2a, "e2b": run.run_e2b,
                  "c1": lambda: run.run_fix("c1"), "c2": lambda: run.run_fix("c2"),
                  "n1": lambda: run.run_normal("c1"), "n2": lambda: run.run_normal("c2"),
-                 "gap": run.run_gap,
+                 "gap": run.run_gap, "link": run.run_link,
                  "fix": lambda: run.run_fix_swap(args.commands_only)}[args.step]()
             except Exception as ex:  # keep the logs and summarize what was recorded
                 items.append(Item(f"arp-{args.step}-error", "FAIL", f"{type(ex).__name__}: {ex}"))
@@ -1192,6 +1273,8 @@ def cmd_arp(cfg: Config, args) -> int:
         items += gap_items(res, frames, rec)
     if args.step == "fix":
         items += fix_items(res, frames, names)
+    if args.step == "link":
+        items += link_items(res, frames, names)
     items.append(recorded("arp AD2", "; ".join(
         f"{g['name']} {g['duration_s']:.0f} s: P1 {g['p1_vs_osc_tx']['b']} for {g['p1_vs_osc_tx']['a']} OSC sent, "
         f"matched {g['p1_vs_osc_tx']['matched']}" for g in res["ad2_segments"]) + (
@@ -1260,6 +1343,8 @@ def cmd_arp_reach(cfg: Config, args) -> int:
     from . import commands
     from .checks import SerialLog
 
+    if args.step == "burst":
+        return cmd_arp_burst(cfg, args)
     address, reply = REACH_STEPS[args.step]
     iface = cfg.bound_if or "default"
     out = commands.new_result_dir(f"arp_{args.step}_{iface}" + (f"_{args.label}" if args.label else ""))
@@ -1310,6 +1395,91 @@ def cmd_arp_reach(cfg: Config, args) -> int:
     res["trials"] = trials
     res["summary"] = reach_summary(trials, args.window)
     item = recorded(f"arp {args.step} {iface}", reach_line(res["summary"]))
+    res["items"] = [item.to_dict()]
+    commands.write_json(out / "summary.json", res)
+    print(f"{item.id:24s} {item.verdict:6s} {item.detail}")
+    print(out)
+    return 0
+
+
+def burst_line(runs: list[dict]) -> str:
+    """One line over the burst runs: replies, sends until the reply, the longest loop
+    interval and watchdog gap, the probes and resolutions."""
+    def r(key, sub=None):
+        v = [x[key] if sub is None else (x[key] or {}).get(sub) for x in runs]
+        v = [x for x in v if x is not None]
+        return "-" if not v else (f"{min(v)}-{max(v)}" if min(v) != max(v) else f"{v[0]}")
+    got = sum(1 for x in runs if x["reply_ms"] is not None)
+    return (f"{got}/{len(runs)} runs answered, /destIp {r('reply_ms')} ms after 'R', /setDestIp sent until it "
+            f"{r('sent_until_reply')}; loop max {r('loop_max_us')} us, wdtGapMax {r('wdt_gap_max_us')} us, slotLate "
+            f"{r('slotLate')}; arpResolve {r('arpResolve')}, arpProbe {r('arpProbe')}, arpProbeFailed "
+            f"{r('arpProbeFailed')}, arpTimeout {r('arpTimeout')}, arpDropped {r('arpDropped')}")
+
+
+def burst_result(perf: dict, sent_ns: list[int], t_r_ns: int, reply_ns: int | None) -> dict:
+    """One burst run from 'p' after it, the send times, the time of 'R' and of /destIp."""
+    out = {"reply_ms": None if reply_ns is None else round((reply_ns - t_r_ns) / 1e6, 1),
+           "sent": len(sent_ns),
+           "sent_until_reply": None if reply_ns is None else sum(1 for t in sent_ns if t <= reply_ns),
+           "loop_max_us": (perf.get("loop") or {}).get("max_us"),
+           "wdt_gap_max_us": (perf.get("wdtGapMax") or {}).get("max_us"),
+           "slotLate": perf.get("slotLate")}
+    out.update({k: perf.get(k) for k in PERF_ARP + ("udpSendFailed",)})
+    return out
+
+
+def cmd_arp_burst(cfg: Config, args) -> int:
+    """C8 through [network] bound_if: 'R', then /setDestIp every 50 ms until /destIp comes
+    and at least --burst-s, 1 s, then 'p' (from the start of the firmware: loop, wdtGapMax
+    of a HIL_PROBE build, the probes). --count runs."""
+    from . import commands
+    from .checks import SerialLog
+
+    iface = cfg.bound_if or "default"
+    out = commands.new_result_dir(f"arp_burst_{iface}" + (f"_{args.label}" if args.label else ""))
+    res: dict = {"step": "burst", "bound_if": cfg.bound_if, "local_ip": cfg.local_ip, "board_ip": cfg.board_ip,
+                 "count": args.count, "burst_s": args.burst_s, "period_s": 0.05}
+    ser = SerialLog(cfg.serial_port)
+    link = commands.open_link(cfg)
+    runs: list[dict] = []
+    t0_ns = time.monotonic_ns()
+    ser.open()
+    link.open()
+    try:
+        commands.connect_board(link)
+        res["firmware"] = commands.firmware_version(link)
+        print(f"  firmware {res['firmware']}, from {cfg.local_ip} ({iface})", flush=True)
+        for k in range(args.count):
+            t_r = ser.write("R")
+            sent: list[int] = []
+            reply = None
+            end = time.monotonic() + 20.0
+            min_end = time.monotonic() + args.burst_s
+            while time.monotonic() < end and (reply is None or time.monotonic() < min_end):
+                try:
+                    sent.append(link.send("/setDestIp").t_ns)
+                except OSError:  # no route while the board's link is down
+                    pass
+                e = link.wait_for("/destIp", 0.05, t_r)
+                if e is not None and reply is None:
+                    reply = e
+                time.sleep(max(0.0, 0.05 - (time.monotonic_ns() - (sent[-1] if sent else 0)) / 1e9))
+            time.sleep(1.0)
+            ser.reconnect(30.0)
+            try:
+                text = ser.command("p", until=r"wdtGapMax\s+\d+ us\s+from 0x[0-9A-Fa-f]+ to 0x[0-9A-Fa-f]+")
+            except DiagError:  # product build: no wdtGapMax
+                text = ser.command("p", until=r"(arpDropped|arpRefreshFailed)\s+\d+")
+            r = burst_result(parse_perf(text), sent, t_r, reply.t_ns if reply else None)
+            runs.append(r)
+            print(f"  [{k + 1}/{args.count}] {r}", flush=True)
+    finally:
+        ser.save(out / "serial_log.txt", t0_ns)
+        link.save_log(out / "osc_log.jsonl")
+        link.close()
+        ser.close()
+    res["runs"] = runs
+    item = recorded(f"arp burst {iface}", burst_line(runs))
     res["items"] = [item.to_dict()]
     commands.write_json(out / "summary.json", res)
     print(f"{item.id:24s} {item.verdict:6s} {item.detail}")

@@ -7,7 +7,10 @@
 // failure the destination is unreachable: the messages to it are dropped (not queued) for
 // SEND_BACKOFF_MS from the failure. The first message after that is sent (one retry): a
 // success resumes the sends, a failure pauses them again for SEND_BACKOFF_MS from this
-// failure. A packet received from the destination resumes the sends at once.
+// failure. A packet received from the destination resumes the sends at once. While the
+// MAC address of the destination is being resolved (arpResolve.h), the messages to it are
+// dropped before this pause is consulted, and the pause is cleared at the start of the
+// resolution and set as after a failure when the resolution gives up.
 //
 // One destination is tracked (the firmware sends unicast to destIp only); a failure to
 // another address replaces it. The broadcast address is never paused (no ARP).
@@ -46,5 +49,9 @@ SendBackoffEvent sendBackoffSent(SendBackoff &b, uint32_t ip, bool ok, uint32_t 
 
 // A packet was received from ip.
 SendBackoffEvent sendBackoffReceived(SendBackoff &b, uint32_t ip);
+
+// Resumes the sends at once, without an event (the resolution of the MAC address of the
+// destination takes over, arpResolve.h).
+void sendBackoffClear(SendBackoff &b);
 
 #endif

@@ -95,14 +95,20 @@ void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port);
 void sendBackoffOnReceive(const IPAddress &ip);
 // Sends one byte to 255.255.255.255:9 (discard), P5 high: the next send to destIp goes
 // to another destination IP than the send before, so the W5500 resolves its MAC address
-// again (arpRefresh.h). Returns the result of endPacket().
+// again (arpResolve.h). Returns the result of endPacket().
 bool sendArpRefreshDummy();
-// A packet was received from ip (before any reply): after a gap of 1.5 s or more in the
-// packets from destIp, sends the dummy broadcast (arpRefresh.h).
-void arpRefreshOnReceive(const IPAddress &ip);
+// Starts the resolution of the MAC address of destIp (arpResolve.h): sends the dummy
+// broadcast, and the messages to destIp are dropped until a probe succeeds or 2 s pass.
+// holdDestIp: from /setDestIp, the reply /destIp (last argument destIpUpdated) is sent
+// once the resolution ends. Called on /setDestIp and by initEthernet() if isDestIpSet.
+void startArpResolve(bool holdDestIp, bool destIpUpdated);
+// Called every housekeeping run: sends the probes of the resolution (each blocks up to
+// about 41 ms when it fails) and the held /destIp.
+void updateArpResolve();
+bool isArpResolvePending();
 // Reads Sn_DHAR of the UDP socket: the MAC address the last send went to. After a send to
 // destIp it is the MAC address the W5500 resolved by ARP for destIp; after a broadcast
-// (/booted, the ARP refresh dummy) and before the first send ff:ff:ff:ff:ff:ff (measured).
+// (/booted, sendArpRefreshDummy()) and before the first send ff:ff:ff:ff:ff:ff (measured).
 // Returns false and all zeros if the socket is not open. For the diagnosis only (s, T):
 // one SPI transfer to the W5500, not to be called from loop().
 bool readDestMac(uint8_t out[6]);

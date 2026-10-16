@@ -39,7 +39,6 @@ bool OSCMsgReceive()
     {
         PROBE_HIGH(1);
         sendBackoffOnReceive(Udp.remoteIP()); // before any reply
-        arpRefreshOnReceive(Udp.remoteIP());  // before any reply (arpRefresh.h)
         if (size > OSC_RX_BUFFER_SIZE)
         {
             // Too large: the rest of the packet is discarded by the next parsePacket().
@@ -102,19 +101,18 @@ bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
 }
 
 #pragma region config_commands_osc_listener
+// The reply /destIp is sent once the MAC address of the new destIp is resolved, also for
+// the same address (a new device may have it, arpResolve.h).
 void setDestIp(OscMessage &msg)
 {
     bool bIpUpdated = false;
-    OscWriter newMes("/destIp");
     for (auto i = 0; i < 4; i++)
     {
         bIpUpdated |= (destIp[i] != Udp.remoteIP()[i]);
-        newMes.add(Udp.remoteIP()[i]);
     }
     destIp = Udp.remoteIP();
-    newMes.add((int32_t)bIpUpdated);
-    sendOscMessage(newMes, destIp, outPort);
     isDestIpSet = true;
+    startArpResolve(true, bIpUpdated);
 }
 
 void getVersion(OscMessage &msg)

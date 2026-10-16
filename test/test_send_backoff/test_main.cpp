@@ -141,6 +141,16 @@ void test_wrap_of_millis()
     TEST_ASSERT_TRUE(sendBackoffShouldSend(b, DEST, 500));  // 1000 ms after
 }
 
+void test_clear_resumes_without_an_event()
+{
+    SendBackoff b = pausedAt(5000);
+    sendBackoffClear(b);
+    TEST_ASSERT_FALSE(b.paused);
+    TEST_ASSERT_TRUE(sendBackoffShouldSend(b, DEST, 5001));
+    // a later failure pauses again as the first one
+    TEST_ASSERT_EQUAL(SEND_BACKOFF_PAUSED, sendBackoffSent(b, DEST, false, 5100));
+}
+
 int main(int argc, char **argv)
 {
     UNITY_BEGIN();
@@ -156,5 +166,6 @@ int main(int argc, char **argv)
     RUN_TEST(test_broadcast_is_never_paused);
     RUN_TEST(test_failure_to_another_address_replaces_the_paused_one);
     RUN_TEST(test_wrap_of_millis);
+    RUN_TEST(test_clear_resumes_without_an_event);
     return UNITY_END();
 }

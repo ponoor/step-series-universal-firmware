@@ -875,6 +875,7 @@ void printStatusAsJson() {
 		readDestMac(dm);
 		JsonArray destMac = board["destMac"].to<JsonArray>();
 		for (uint8_t i = 0; i < 6; i++) destMac.add(dm[i]);
+		board["arpPending"] = isArpResolvePending(); // resolving the MAC address of destIp (arpResolve.h)
 #ifdef HAVE_SD
 		board["sdInitialized"] = sdInitializeSucceeded;
 		board["configLoaded"] = configFileParseSucceeded;

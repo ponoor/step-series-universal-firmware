@@ -37,3 +37,8 @@ SendBackoffEvent sendBackoffReceived(SendBackoff &b, uint32_t ip)
     b.paused = false;
     return SEND_BACKOFF_RESUMED;
 }
+
+void sendBackoffClear(SendBackoff &b)
+{
+    b.paused = false;
+}

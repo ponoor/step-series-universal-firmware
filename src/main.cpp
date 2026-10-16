@@ -586,6 +586,7 @@ void loop()
                 myId = t;
                 initEthernet();
             }
+            updateArpResolve();
             if (isWaitingSendBootMsg)
             {
                 sendBootMsg(currentTimeMillis);

@@ -8,7 +8,7 @@
 #include "resetCause.h"
 #include "perfStats.h"
 #include "sendBackoff.h"
-#include "arpRefresh.h"
+#include "arpResolve.h"
 #include "idOffset.h"
 #include "elapsedMs.h"
 #include <stdarg.h>
@@ -265,7 +265,9 @@ void safeSystemReset(uint16_t minWaitMs) {
 // (not measured) when the destination does not answer ARP. With RTR 20 ms and RCR 2 one send to such a
 // destination blocked 40.8 ms on the HIL bench (STEP800), i.e. RTR x RCR (measured; the
 // earlier estimate RTR x (RCR + 1) = 60 ms was not reached). sendOscMessage() then pauses
-// the sends to that destination (sendBackoff.h).
+// the sends to that destination (sendBackoff.h). The resolution of the MAC address of
+// destIp (arpResolve.h) tries the ARP every 150 ms for up to 2 s instead of waiting longer
+// in one send.
 // Ethernet 2.0.2 setRetransmissionTimeout()/setRetransmissionCount() write the W5100
 // register addresses (0x0017/0x0019), which are SIR/SIMR and the upper byte of RTR on
 // the W5500. On the W5500, write RTR (0x0019-0x001A, 100 us units) and RCR (0x001B) directly.
@@ -319,6 +321,8 @@ void initEthernet() {
     setEthernetRetransmission(W5500_RETRANSMISSION_TIMEOUT_MS, W5500_RETRANSMISSION_COUNT);
     Udp.begin(inPort);
     dbgPrint("New IP: %d.%d.%d.%d\n", myIp[0], myIp[1], myIp[2], myIp[3]);
+    if (isDestIpSet)
+        startArpResolve(false, false);
 }
 
 void sendBootMsg(uint32_t _currentTime) {
@@ -547,6 +551,8 @@ bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatu
 }
 
 static SendBackoff sendBackoff;
+static ArpResolve arpResolve;
+static bool heldDestIpUpdated; // the last argument of the held /destIp
 
 static void printSendBackoffEvent(SendBackoffEvent event, const IPAddress &ip) {
     if (event == SEND_BACKOFF_PAUSED)
@@ -567,6 +573,10 @@ void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
         return;
     }
     const uint32_t ipRaw = (uint32_t)ip;
+    if (!arpResolveShouldSend(arpResolve, ipRaw)) {
+        perfStats.arpDroppedCount++;
+        return;
+    }
     if (!sendBackoffShouldSend(sendBackoff, ipRaw, millis())) {
         perfStats.udpSendDroppedCount++;
         return;
@@ -613,14 +623,64 @@ bool readDestMac(uint8_t out[6]) {
     return true;
 }
 
-static ArpRefresh arpRefresh;
+static void sendDestIp(bool ipUpdated) {
+    OscWriter newMes("/destIp");
+    for (auto i = 0; i < 4; i++)
+        newMes.add(destIp[i]);
+    newMes.add((int32_t)ipUpdated);
+    sendOscMessage(newMes, destIp, outPort);
+}
 
-void arpRefreshOnReceive(const IPAddress &ip) {
-    if (!arpRefreshReceived(arpRefresh, (uint32_t)ip, (uint32_t)destIp, isDestIpSet, millis()))
+void startArpResolve(bool holdDestIp, bool destIpUpdated) {
+    if (holdDestIp)
+        heldDestIpUpdated = destIpUpdated;
+    sendBackoffClear(sendBackoff); // the resolution manages the sends to destIp
+    arpResolveStart(arpResolve, (uint32_t)destIp, holdDestIp, millis());
+    perfStats.arpResolveCount++;
+    sendArpRefreshDummy();
+}
+
+void updateArpResolve() {
+    switch (arpResolvePoll(arpResolve, millis())) {
+    case ARP_RESOLVE_PROBE: {
+        // 1 byte to port 9 (discard), not through sendBackoff: the W5500 tries the ARP.
+        static const uint8_t probe = 0;
+        perfStats.arpProbeCount++;
+        PROBE_HIGH(5);
+        Udp.beginPacket(destIp, 9);
+        Udp.write(&probe, 1);
+        const bool ok = Udp.endPacket();
+        PROBE_LOW(5);
+        if (!arpResolveProbeResult(arpResolve, ok)) {
+            perfStats.arpProbeFailedCount++;
+            return;
+        }
+        perfStats.arpResolvedCount++;
+        break;
+    }
+    case ARP_RESOLVE_TIMEOUT:
+        perfStats.arpTimeoutCount++;
+        dbgPrint("Warning: destination %d.%d.%d.%d did not answer ARP in %lu ms\n",
+                 destIp[0], destIp[1], destIp[2], destIp[3], (unsigned long)ARP_RESOLVE_TIMEOUT_MS);
+        if (!arpResolve.replyHeld) {
+            // As after a failed send: the next message to destIp is tried 1 s later.
+            printSendBackoffEvent(sendBackoffSent(sendBackoff, (uint32_t)destIp, false, millis()), destIp);
+            return;
+        }
+        break;
+    default:
         return;
-    perfStats.arpRefreshCount++;
-    if (!sendArpRefreshDummy())
-        perfStats.arpRefreshFailedCount++;
+    }
+    // Resolved or given up. After the timeout the held /destIp is one more try of the
+    // ARP; a failure pauses the sends as usual (sendBackoff.h).
+    if (arpResolveTakeReply(arpResolve)) {
+        perfStats.arpDestIpSentCount++;
+        sendDestIp(heldDestIpUpdated);
+    }
+}
+
+bool isArpResolvePending() {
+    return arpResolve.pending;
 }
 
 void sendThreeInt(const char *address, int32_t data1, int32_t data2, int32_t data3) {

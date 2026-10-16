@@ -34,8 +34,13 @@ void perfStatsPrint()
     dbgPrint("reportClockRealign %lu\n", (unsigned long)s.reportClockRealignCount);
     dbgPrint("udpSendFailed  %lu\n", (unsigned long)s.udpSendFailedCount);
     dbgPrint("udpSendDropped %lu\n", (unsigned long)s.udpSendDroppedCount);
-    dbgPrint("arpRefresh     %lu\n", (unsigned long)s.arpRefreshCount);
-    dbgPrint("arpRefreshFailed %lu\n", (unsigned long)s.arpRefreshFailedCount);
+    dbgPrint("arpResolve     %lu\n", (unsigned long)s.arpResolveCount);
+    dbgPrint("arpProbe       %lu\n", (unsigned long)s.arpProbeCount);
+    dbgPrint("arpProbeFailed %lu\n", (unsigned long)s.arpProbeFailedCount);
+    dbgPrint("arpResolved    %lu\n", (unsigned long)s.arpResolvedCount);
+    dbgPrint("arpTimeout     %lu\n", (unsigned long)s.arpTimeoutCount);
+    dbgPrint("arpDestIpSent  %lu\n", (unsigned long)s.arpDestIpSentCount);
+    dbgPrint("arpDropped     %lu\n", (unsigned long)s.arpDroppedCount);
 #ifdef HIL_PROBE
     uint32_t gapUs, gapFrom, gapTo;
     watchdogGapTake(gapUs, gapFrom, gapTo);

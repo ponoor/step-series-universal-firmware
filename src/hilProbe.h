@@ -60,10 +60,10 @@ void hilPrintDriversAtBoot(); // 'D'
 void hilDriverStandbyTest();
 
 // Candidate fixes for a client replaced by another MAC address with the same IP
-// (tools/hil "arp"; C2 is the product fix, arpRefresh.h). Each prints
+// (tools/hil "arp"; C2 is used by the product fix, arpResolve.h). Each prints
 // "HIL: ... in <us> us".
 void hilReopenUdp();      // 'N' (C1): Udp.stop(), Udp.begin(inPort)
-void hilSendOtherDest();  // 'U' (C2): sendArpRefreshDummy(), 1 byte to 255.255.255.255:9
+void hilSendOtherDest();  // 'U' (C2): sendArpRefreshDummy(), 1 byte to 255.255.255.255:9, no resolution started
 
 // OUTSET / OUTCLR / OUTTGL only (no read-modify-write), so the probes can be used
 // from interrupt handlers. A channel without a pin is a constant false condition, so

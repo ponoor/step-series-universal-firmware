@@ -478,7 +478,144 @@ def section3(b: Bench):
         b.send("/setMark", m, 0)
 
 
-SECTIONS = {"s1": section1, "s2": section2, "s3": section3}
+# ---------------------------------------------------------------------------------
+# section 4: variables and registers (feature/osc-small-fixes)
+# ---------------------------------------------------------------------------------
+def accfromraw(raw): return (raw & 0xFFF) * 14.551915
+def maxfromraw(raw): return (raw & 0x3FF) * 15.258789
+def minfromraw(raw): return ((raw & 0xFFF) + 0.5) * 0.23841858
+def fsfromraw(raw): return ((raw & 0x3FF) + 1.0) * 15.258789
+
+
+def section4(b: Bench):
+    n = b.n
+    m = 1
+    b.send("/reportError", 1)
+    b.hiz()
+
+    def cfg_var(section, key, i=0):
+        return b.config_json()[section][key][i]
+
+    # --- /setStallThreshold keeps the variable
+    b.send("/setStallThreshold", m, 12)
+    b.case("s4 /setStallThreshold 1 12: the saved STALL_TH follows", cfg_var("voltageMode", "STALL_TH") == 12, cfg_var("voltageMode", "STALL_TH"))
+    b.send("/setStallThreshold", 255, 9)
+    cj = b.config_json()["voltageMode"]["STALL_TH"]
+    b.case("s4 /setStallThreshold 255 9: every saved STALL_TH follows", all(v == 9 for v in cj), cj)
+
+    # --- /setPositionReportInterval (one motor) clears the list interval
+    b.send("/setPositionListReportInterval", 100)
+    ar = b.config_json()["alarmAndReport"]
+    b.case("s4 /setPositionListReportInterval 100: the saved list interval is 100", ar["reportPositionListInterval"] == 100, ar["reportPositionListInterval"])
+    b.send("/setPositionReportInterval", m, 100)
+    ar = b.config_json()["alarmAndReport"]
+    b.case("s4 /setPositionReportInterval 1 100 afterwards: the saved list interval is 0, motor 1 interval 100",
+           ar["reportPositionListInterval"] == 0 and ar["reportPositionInterval"][0] == 100, (ar["reportPositionListInterval"], ar["reportPositionInterval"]))
+    b.send("/setPositionReportInterval", 255, 0)
+
+    # --- /getKval returns the settings
+    b.send("/setKval", m, 31, 32, 33, 34)
+    b.case("s4 /getKval returns the settings", b.kval(m) == [31, 32, 33, 34], b.kval(m))
+    b.send("/setKval", m, 0, 0, 0, 0)
+    if b.is400:
+        b.send("/setTval", m, 11, 12, 13, 14)
+        b.case("s4 /getTval returns the settings (voltage mode: the registers are not written)", b.tval(m) == [11, 12, 13, 14], b.tval(m))
+        mA = b.ask("/getTval_mA", m, reply="/tval_mA")
+        b.case("s4 /getTval_mA from the settings", all(abs(a - (t + 1) * 78.125) < 0.01 for a, t in zip(mA, [11, 12, 13, 14])), mA)
+        # /setDecayModeParam: TON_MIN, TOFF_MIN are 7 bit
+        b.hiz(m)
+        b.send("/setDecayModeParam", m, 5, 20, 30)
+        for args in ((5, 128, 30), (5, 20, 200), (5, -1, 30)):
+            t = b.send("/setDecayModeParam", m, *args)
+            b.case(f"s4 /setDecayModeParam 1 {args}: CommandIgnored, unchanged",
+                   b.errors(t) == [("/error/command", ["CommandIgnored", "1"])] and b.ask("/getDecayModeParam", m, reply="/decayModeParam") == [5, 20, 30], (b.errors(t),))
+        t = b.send("/setDecayModeParam", m, 255, 127, 127)
+        b.case("s4 /setDecayModeParam 1 255 127 127: accepted", not b.errors(t) and b.ask("/getDecayModeParam", m, reply="/decayModeParam") == [255, 127, 127], b.errors(t))
+
+    # --- Raw setters update the variables, and resetMotorDriver gives the same register values back
+    def raw_state():
+        sp = b.spraw(m)
+        mn = b.ask("/getMinSpeed", m, reply="/minSpeed")[0]
+        fs = b.ask("/getFullstepSpeed", m, reply="/fullstepSpeed")[0]
+        return {"acc": sp[0], "dec": sp[1], "max": sp[2], "min": round(mn / 0.23841858), "fs": round(fs / 15.258789 - 0.5)}
+
+    def cycle(name, cmd, key, value, var_key, var_expected):
+        b.hiz(m)
+        t = b.send(cmd, m, value)
+        before = raw_state()[key]
+        sp = b.config_json()["speedProfile"][var_key][0]
+        b.send("/resetMotorDriver", m, wait=0.4)
+        after = raw_state()[key]
+        want = value & {"acc": 0xFFF, "dec": 0xFFF, "max": 0x3FF, "min": 0xFFF, "fs": 0x3FF}[key]
+        ok = (not b.errors(t)) and before == want and after == want and abs(sp - var_expected) < 0.02
+        b.case(f"s4 {cmd} {value}: register {want}, the saved {var_key} {sp:.4f}, the register after /resetMotorDriver {after}", ok,
+               {"errors": b.errors(t), "before": before, "after": after, "want": want, "saved": sp, "expected": var_expected})
+
+    for v in (2, 138, 300, 4000):
+        cycle("acc", "/setAccRaw", "acc", v, "acc", accfromraw(v))
+    for v in (2, 138, 300, 4000):
+        cycle("dec", "/setDecRaw", "dec", v, "dec", accfromraw(v))
+    for v in (1, 65, 500, 1023):
+        cycle("max", "/setMaxSpeedRaw", "max", v, "maxSpeed", maxfromraw(v))
+    for v in (0, 1, 1076, 1077, 1081, 2000, 4095):
+        cycle("min", "/setMinSpeedRaw", "min", v, "minSpeed", minfromraw(v))
+    for v in (0, 39, 537, 538, 700, 1023):
+        cycle("fs", "/setFullstepSpeedRaw", "fs", v, "fullStepSpeed", fsfromraw(v))
+    # /setSpeedProfileRaw
+    b.hiz(m)
+    t = b.send("/setSpeedProfileRaw", m, 321, 654, 99)
+    b.send("/resetMotorDriver", m, wait=0.4)
+    s = raw_state()
+    sp = b.config_json()["speedProfile"]
+    ok = not b.errors(t) and (s["acc"], s["dec"], s["max"]) == (321, 654, 99) and abs(sp["acc"][0] - accfromraw(321)) < 0.02 and abs(sp["dec"][0] - accfromraw(654)) < 0.02 and abs(sp["maxSpeed"][0] - maxfromraw(99)) < 0.02
+    b.case("s4 /setSpeedProfileRaw 321 654 99: variables and registers (also after /resetMotorDriver)", ok, (b.errors(t), s, sp["acc"][0]))
+    # /setMinSpeedRaw: bit 12 (LSPD_OPT) is not set from the Raw value
+    b.hiz(m)
+    b.send("/setMinSpeedRaw", m, 0x1005)
+    lso = b.ask("/getLowSpeedOptimizeThreshold", m, reply="/lowSpeedOptimizeThreshold")
+    b.case("s4 /setMinSpeedRaw 0x1005: LSPD_OPT stays off, MIN_SPEED 5", not lso[1] and raw_state()["min"] == 5, (lso, raw_state()["min"]))
+    # with the low speed optimization on, the variable only (as /setMinSpeed)
+    b.send("/enableLowSpeedOptimize", m, 1)
+    b.send("/setMinSpeedRaw", m, 123)
+    lso = b.ask("/getLowSpeedOptimizeThreshold", m, reply="/lowSpeedOptimizeThreshold")
+    sp = b.config_json()["speedProfile"]["minSpeed"][0]
+    b.case("s4 /setMinSpeedRaw 123 while the low speed optimization is on: the register keeps the threshold (LSPD_OPT on), the variable follows",
+           bool(lso[1]) and abs(sp - minfromraw(123)) < 0.02, (lso, sp))
+    b.send("/enableLowSpeedOptimize", m, 0)
+    b.case("s4   after /enableLowSpeedOptimize 0 the register has MIN_SPEED 123", raw_state()["min"] == 123, raw_state()["min"])
+    b.send("/setMinSpeed", 255, 0.0)
+    b.send("/setSpeedProfile", 255, 1000.0, 1000.0, 400.0)
+    b.send("/setFullstepSpeed", 255, 602.7)
+
+    # --- /goUntilRaw with a speed beyond 20 bits: no error, the speed is the largest
+    b.hiz(m)
+    b.send("/setSpeedProfile", m, 59000.0, 59000.0, 15000.0)
+    t = b.send("/goUntilRaw", m, 0, 2000000000, wait=0.6)
+    spd = abs(b.ask("/getSpeed", m, reply="/speed")[0])
+    b.case("s4 /goUntilRaw 1 0 2000000000: no error, running at most 15610 step/s", not b.errors(t) and 0 < spd <= 15611, (b.errors(t), spd))
+    b.send("/softHiZ", m, wait=0.8)
+    b.hiz(m)
+    t = b.send("/goUntilRaw", m, 0, -2147483647, wait=0.4)
+    b.case("s4 /goUntilRaw 1 0 -2147483647: no error", not b.errors(t), b.errors(t))
+    b.send("/softHiZ", m, wait=0.8)
+    b.hiz()
+    b.send("/setSpeedProfile", 255, 1000.0, 1000.0, 400.0)
+
+    # --- the brake rejects: the replies
+    if b.cfg.board.name in ("step800", "step400"):
+        b.hiz(m)
+        b.send("/enableElectromagnetBrake", m, 1, wait=0.3)
+        t = b.send("/enableServoMode", m, 1)
+        b.case("s4 /enableServoMode 1 1 with the brake engaged: BrakeEngaged", b.errors(t) == [("/error/command", ["BrakeEngaged", "1"])], b.errors(t))
+        b.send("/activate", m, 1, wait=1.0)
+        t = b.send("/resetMotorDriver", m)
+        b.case("s4 /resetMotorDriver 1 with the brake released: CommandIgnored", b.errors(t) == [("/error/command", ["CommandIgnored", "1"])], b.errors(t))
+        b.send("/hardHiZ", m, wait=1.0)
+        b.send("/enableElectromagnetBrake", m, 0, wait=0.3)
+        b.hiz()
+
+
+SECTIONS = {"s1": section1, "s2": section2, "s3": section3, "s4": section4}
 
 
 def git_sha() -> str:

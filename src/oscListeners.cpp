@@ -9,6 +9,7 @@
 #include "oscRouter.h"
 #include "oscArgs.h"
 #include "goToDirection.h"
+#include "rawSpeed.h"
 #include "perfStats.h"
 #include "resetCause.h"
 #include "hilProbe.h"
@@ -531,7 +532,10 @@ void setPositionReportInterval(OscMessage &msg)
         reportPosition[motorID - MOTOR_ID_FIRST] = bEnable;
         reportPositionInterval[motorID - MOTOR_ID_FIRST] = interval;
         if (bEnable)
+        {
             reportPositionList = false;
+            reportPositionListInterval = 0; // else loadConfig() makes the list report again
+        }
     }
     else if (motorID == MOTOR_ID_ALL)
     {
@@ -914,6 +918,7 @@ void setStallThreshold(OscMessage &msg)
     {
         motorID -= MOTOR_ID_FIRST;
         stepper[motorID].setParam(STALL_TH, threshold);
+        stallThreshold[motorID] = threshold;
         getStallThreshold(motorID);
     }
     else if (motorID == MOTOR_ID_ALL)
@@ -921,6 +926,7 @@ void setStallThreshold(OscMessage &msg)
         for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
         {
             stepper[i].setParam(STALL_TH, threshold);
+            stallThreshold[i] = threshold;
             getStallThreshold(i);
         }
     }
@@ -1129,10 +1135,12 @@ void getBemfParam(uint8_t motorId)
 void setDecayModeParam(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint8_t
-        tFast = constrain(getInt(msg, 1), 0, 255),
-        tOnMin = constrain(getInt(msg, 2), 0, 255),
-        tOffMin = constrain(getInt(msg, 3), 0, 255);
+    uint8_t tFast = constrain(getInt(msg, 1), 0, 255);
+    // TON_MIN and TOFF_MIN are 7 bit (T_FAST 8 bit)
+    int32_t tOnMin = getInt(msg, 2);
+    int32_t tOffMin = getInt(msg, 3);
+    if (!acceptTarget(motorID, (0 <= tOnMin && tOnMin <= 127) && (0 <= tOffMin && tOffMin <= 127)))
+        return;
     // T_FAST, TON_MIN, TOFF_MIN: WH
     applyToMotors(motorID, WRITE_HIZ, [=](uint8_t i) {
         fastDecaySetting[i] = tFast;
@@ -1676,11 +1684,13 @@ void getKval(uint8_t motorID)
     }
     OscWriter newMes("/kval");
     newMes.add((int32_t)motorID);
+    // The settings, as saved. The registers hold them in the voltage mode only; in the
+    // current mode (STEP400) they are applied by /setVoltageMode.
     uint8_t motorId = motorID - MOTOR_ID_FIRST;
-    newMes.add((int32_t)stepper[motorId].getHoldKVAL());
-    newMes.add((int32_t)stepper[motorId].getRunKVAL());
-    newMes.add((int32_t)stepper[motorId].getAccKVAL());
-    newMes.add((int32_t)stepper[motorId].getDecKVAL());
+    newMes.add((int32_t)kvalHold[motorId]);
+    newMes.add((int32_t)kvalRun[motorId]);
+    newMes.add((int32_t)kvalAcc[motorId]);
+    newMes.add((int32_t)kvalDec[motorId]);
     sendOscMessage(newMes, destIp, outPort);
 }
 #pragma endregion kval_commands_osc_listener
@@ -1847,11 +1857,12 @@ void getTval(uint8_t motorID)
     }
     OscWriter newMes("/tval");
     newMes.add((int32_t)motorID);
+    // The settings, as saved (see getKval()): the registers hold them in the current mode only.
     uint8_t motorId = motorID - MOTOR_ID_FIRST;
-    newMes.add((int32_t)stepper[motorId].getHoldTVAL());
-    newMes.add((int32_t)stepper[motorId].getRunTVAL());
-    newMes.add((int32_t)stepper[motorId].getAccTVAL());
-    newMes.add((int32_t)stepper[motorId].getDecTVAL());
+    newMes.add((int32_t)tvalHold[motorId]);
+    newMes.add((int32_t)tvalRun[motorId]);
+    newMes.add((int32_t)tvalAcc[motorId]);
+    newMes.add((int32_t)tvalDec[motorId]);
     sendOscMessage(newMes, destIp, outPort);
 }
 float TvalToCurrent(uint8_t tval)
@@ -1866,10 +1877,10 @@ void getTval_mA(uint8_t motorId)
     }
     OscWriter newMes("/tval_mA");
     newMes.add((int32_t)motorId + MOTOR_ID_FIRST);
-    newMes.add(TvalToCurrent(stepper[motorId].getHoldTVAL()));
-    newMes.add(TvalToCurrent(stepper[motorId].getRunTVAL()));
-    newMes.add(TvalToCurrent(stepper[motorId].getAccTVAL()));
-    newMes.add(TvalToCurrent(stepper[motorId].getDecTVAL()));
+    newMes.add(TvalToCurrent(tvalHold[motorId]));
+    newMes.add(TvalToCurrent(tvalRun[motorId]));
+    newMes.add(TvalToCurrent(tvalAcc[motorId]));
+    newMes.add(TvalToCurrent(tvalDec[motorId]));
     sendOscMessage(newMes, destIp, outPort);
 }
 void getTval_mA(OscMessage &msg)
@@ -2033,11 +2044,14 @@ void setSpeedProfileRaw(OscMessage &msg)
     uint16_t _accRaw = getInt(msg, 1);
     uint16_t _decRaw = getInt(msg, 2);
     uint16_t _maxSpeedRaw = getInt(msg, 3);
-    // ACC, DEC: WS (MAX_SPEED: WR)
+    // ACC, DEC: WS (MAX_SPEED: WR). The variables get the value of the Raw one (rawSpeed.h).
     applyToMotors(motorID, WRITE_STOPPED, [=](uint8_t i) {
         stepper[i].setAccRaw(_accRaw);
         stepper[i].setDecRaw(_decRaw);
         stepper[i].setMaxSpeedRaw(_maxSpeedRaw);
+        acc[i] = accFromRaw(_accRaw);
+        dec[i] = decFromRaw(_decRaw);
+        maxSpeed[i] = maxSpeedFromRaw(_maxSpeedRaw);
     });
 }
 
@@ -2045,41 +2059,36 @@ void setMaxSpeedRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].setMaxSpeedRaw(t);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setMaxSpeedRaw(t);
-        }
-    }
+    // MAX_SPEED: WR
+    applyToMotors(motorID, WRITE_ALWAYS, [t](uint8_t i) {
+        stepper[i].setMaxSpeedRaw(t);
+        maxSpeed[i] = maxSpeedFromRaw(t);
+    });
 }
 void setMinSpeedRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint16_t t = getInt(msg, 1);
-    // MIN_SPEED: WS
-    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) { stepper[i].setMinSpeedRaw(t); });
+    uint16_t t = getInt(msg, 1) & 0x0FFF; // LSPD_OPT (bit 12) is set by /enableLowSpeedOptimize only
+    // MIN_SPEED (WS) is written only while the low speed optimization is disabled, as
+    // /setMinSpeed does (the register holds the optimization threshold then)
+    applyToMotors(
+        motorID, [](uint8_t i) { return lowSpeedOptimizeEnable[i] ? WRITE_ALWAYS : WRITE_STOPPED; },
+        [t](uint8_t i) {
+            minSpeed[i] = minSpeedFromRaw(t);
+            if (!lowSpeedOptimizeEnable[i])
+                stepper[i].setMinSpeedRaw(t);
+        });
 }
 
 void setFullstepSpeedRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].setFullSpeedRaw(t);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setFullSpeedRaw(t);
-        }
-    }
+    // FS_SPD: WR
+    applyToMotors(motorID, WRITE_ALWAYS, [t](uint8_t i) {
+        stepper[i].setFullSpeedRaw(t);
+        fullStepSpeed[i] = fullStepSpeedFromRaw(t);
+    });
 }
 
 void setAccRaw(OscMessage &msg)
@@ -2087,14 +2096,20 @@ void setAccRaw(OscMessage &msg)
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
     // ACC: WS
-    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) { stepper[i].setAccRaw(t); });
+    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) {
+        stepper[i].setAccRaw(t);
+        acc[i] = accFromRaw(t);
+    });
 }
 void setDecRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
     // DEC: WS
-    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) { stepper[i].setDecRaw(t); });
+    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) {
+        stepper[i].setDecRaw(t);
+        dec[i] = decFromRaw(t);
+    });
 }
 
 void getSpeed(OscMessage &msg)
@@ -2574,7 +2589,8 @@ void goUntilRaw(OscMessage& msg) {
     bool action = getBool(msg, 1);
     int32_t speed = getInt(msg, 2);
     bool dir = speed > 0;
-    speed = abs(speed);
+    // SPEED is 20 bit (as for /runRaw)
+    speed = (speed == INT32_MIN || abs(speed) > 0xFFFFF) ? 0xFFFFF : abs(speed);
     if(isCorrectMotorId(motorID)) {
         motorID -= MOTOR_ID_FIRST;
         if (goUntilStartConditions(motorID)) {

@@ -236,7 +236,172 @@ def section1(b: Bench):
     b.send("/setKval", 255, 0, 0, 0, 0)
 
 
-SECTIONS = {"s1": section1}
+# ---------------------------------------------------------------------------------
+# section 2: write conditions of the driver registers (feature/driver-register-write-guard)
+# ---------------------------------------------------------------------------------
+def section2(b: Bench):
+    n = b.n
+    NOT_HIZ, NOT_STOPPED = "MotorNotHiZ", "MotorNotStopped"
+
+    def only(t, motors, name):
+        """The errors since t are exactly this error (name) for these motors (one each)."""
+        return sorted(b.errors(t)) == sorted(("/error/command", [name, str(m)]) for m in motors)
+
+    def var(section, key, m):
+        return b.config_json()[section][key][m - 1]
+
+    b.send("/reportError", 1)
+    b.hiz()
+    b.send("/setSpeedProfile", 255, 1000.0, 1000.0, 400.0)
+    b.send("/setMinSpeed", 255, 0.0)
+    b.send("/setMicrostepMode", 255, 7)
+    b.send("/setHomeSwMode", 255, 1)
+
+    # --- WH: STEP_MODE, CONFIG (SW_MODE), BEMF / decay parameters: energized and stopped -> rejected
+    b.energize(1)
+    ms0, hs0 = b.microstep(1), b.homesw_mode(1)
+    t = b.send("/setMicrostepMode", 1, 3)
+    b.case("s2 /setMicrostepMode 1 3 while energized: MotorNotHiZ only", only(t, [1], NOT_HIZ), b.errors(t))
+    b.case("s2   register and saved variable unchanged", b.microstep(1) == ms0 and var("driverSettings", "stepMode", 1) == ms0,
+           (b.microstep(1), var("driverSettings", "stepMode", 1), ms0))
+    t = b.send("/setHomeSwMode", 1, 0)
+    b.case("s2 /setHomeSwMode 1 0 while energized: MotorNotHiZ only", only(t, [1], NOT_HIZ), b.errors(t))
+    b.case("s2   register and saved variable unchanged", b.homesw_mode(1) == hs0 and var("driverSettings", "homeSwMode", 1) == bool(hs0),
+           (b.homesw_mode(1), var("driverSettings", "homeSwMode", 1), hs0))
+    bemf0 = b.ask("/getBemfParam", 1, reply="/bemfParam")
+    t = b.send("/setBemfParam", 1, 500, 10, 20, 30)
+    b.case("s2 /setBemfParam 1 ... while energized: MotorNotHiZ only, nothing written",
+           only(t, [1], NOT_HIZ) and b.ask("/getBemfParam", 1, reply="/bemfParam") == bemf0
+           and var("voltageMode", "INT_SPEED", 1) == bemf0[0], (b.errors(t), b.ask("/getBemfParam", 1, reply="/bemfParam"), bemf0))
+    if b.is400:
+        dec0 = b.ask("/getDecayModeParam", 1, reply="/decayModeParam")
+        t = b.send("/setDecayModeParam", 1, 5, 6, 7)
+        b.case("s2 /setDecayModeParam 1 5 6 7 while energized: MotorNotHiZ only, unchanged",
+               only(t, [1], NOT_HIZ) and b.ask("/getDecayModeParam", 1, reply="/decayModeParam") == dec0, b.errors(t))
+
+        t2 = b.send("/setCurrentMode", 1)
+        b.send("/setKval", 1, 40, 41, 42, 43)
+        b.case("s2 /setCurrentMode 1 while energized: MotorNotHiZ, the mode stays voltage (/setKval still writes the registers)",
+               only(t2, [1], NOT_HIZ) and b.kval(1) == [40, 41, 42, 43], (b.errors(t2), b.kval(1)))
+    # while running: WH is rejected as well
+    b.run_motor(1)
+    t = b.send("/setMicrostepMode", 1, 3)
+    b.case("s2 /setMicrostepMode 1 3 while running: MotorNotHiZ only", only(t, [1], NOT_HIZ), b.errors(t))
+    b.send("/softStop", 1, wait=1.5)
+
+    # --- HiZ: applied
+    b.hiz(1)
+    t = b.send("/setMicrostepMode", 1, 3)
+    b.case("s2 /setMicrostepMode 1 3 while HiZ: applied, no error",
+           not b.errors(t) and b.microstep(1) == 3 and var("driverSettings", "stepMode", 1) == 3, (b.errors(t), b.microstep(1)))
+    t = b.send("/setHomeSwMode", 1, 0)
+    b.case("s2 /setHomeSwMode 1 0 while HiZ: applied, no error",
+           not b.errors(t) and b.homesw_mode(1) == 0 and var("driverSettings", "homeSwMode", 1) is False, (b.errors(t), b.homesw_mode(1)))
+    t = b.send("/setBemfParam", 1, 500, 10, 20, 30)
+    b.case("s2 /setBemfParam 1 500 10 20 30 while HiZ: applied", not b.errors(t) and b.ask("/getBemfParam", 1, reply="/bemfParam") == [500, 10, 20, 30],
+           (b.errors(t), b.ask("/getBemfParam", 1, reply="/bemfParam")))
+    b.send("/setMicrostepMode", 1, 7)
+    b.send("/setHomeSwMode", 1, 1)
+
+    # --- WS: ACC, DEC, MIN_SPEED, EL_POS while running -> rejected; stopped (even energized) -> applied
+    b.send("/setSpeedProfile", 1, 1000.0, 1000.0, 400.0)
+    b.send("/setMinSpeed", 1, 10.0)
+    sp0, raw0 = b.sp(1), b.spraw(1)
+    min0 = b.ask("/getMinSpeed", 1, reply="/minSpeed")
+    b.run_motor(1)
+    cases = [
+        ("/setAcc 1 2000.0", ("/setAcc", 1, 2000.0)),
+        ("/setDec 1 2000.0", ("/setDec", 1, 2000.0)),
+        ("/setMinSpeed 1 50.0", ("/setMinSpeed", 1, 50.0)),
+        ("/setSpeedProfile 1 2000 2000 500", ("/setSpeedProfile", 1, 2000.0, 2000.0, 500.0)),
+        ("/setAccRaw 1 300", ("/setAccRaw", 1, 300)),
+        ("/setDecRaw 1 300", ("/setDecRaw", 1, 300)),
+        ("/setMinSpeedRaw 1 40", ("/setMinSpeedRaw", 1, 40)),
+        ("/setSpeedProfileRaw 1 300 300 50", ("/setSpeedProfileRaw", 1, 300, 300, 50)),
+        ("/enableLowSpeedOptimize 1 1", ("/enableLowSpeedOptimize", 1, 1)),
+    ]
+    for name, msg in cases:
+        t = b.send(*msg)
+        same = b.sp(1) == sp0 and b.spraw(1) == raw0 and b.ask("/getMinSpeed", 1, reply="/minSpeed") == min0
+        want = NOT_STOPPED
+        b.case(f"s2 {name} while running: {want} only, registers unchanged", only(t, [1], want) and same, (b.errors(t), same))
+    # the variables did not change either (G)
+    cj = b.config_json()
+    b.case("s2   saved acc / dec / minSpeed unchanged by the rejected commands",
+           abs(cj["speedProfile"]["acc"][0] - 1000.0) < 1e-3 and abs(cj["speedProfile"]["dec"][0] - 1000.0) < 1e-3
+           and abs(cj["speedProfile"]["minSpeed"][0] - 10.0) < 1e-3 and cj["voltageMode"]["lowSpeedOptimizeEnable"][0] in (False, 0),
+           {k: cj["speedProfile"][k][0] for k in ("acc", "dec", "minSpeed")})
+    # WR registers are written while running
+    t = b.send("/setMaxSpeed", 1, 300.0)
+    b.case("s2 /setMaxSpeed 1 300 while running: applied (WR)", not b.errors(t) and abs(b.sp(1)[2] - 300.0) < 16, (b.errors(t), b.sp(1)))
+    t = b.send("/setKval", 1, 30, 31, 32, 33)
+    b.case("s2 /setKval 1 ... while running: applied (WR)", not b.errors(t) and b.kval(1) == [30, 31, 32, 33], (b.errors(t), b.kval(1)))
+    t = b.send("/setStallThreshold", 1, 12)
+    b.case("s2 /setStallThreshold 1 12 while running: no error", not b.errors(t), b.errors(t))
+    b.send("/softStop", 1, wait=2.0)
+    st = b.status(1)
+    b.case("s2   the motor stopped (MOT_STATUS 0)", (st & 0x60) == 0, hex(st))
+    # stopped but energized -> WS applied
+    t = b.send("/setAcc", 1, 2000.0)
+    b.case("s2 /setAcc 1 2000 stopped and energized: applied, no error", not b.errors(t) and abs(b.sp(1)[0] - 2000.0) < 10, (b.errors(t), b.sp(1)))
+    t = b.send("/setSpeedProfile", 1, 1500.0, 1500.0, 400.0)
+    b.case("s2 /setSpeedProfile 1 1500 1500 400 stopped: applied", not b.errors(t) and abs(b.sp(1)[1] - 1500.0) < 10, (b.errors(t), b.sp(1)))
+    t = b.send("/setMinSpeed", 1, 20.0)
+    b.case("s2 /setMinSpeed 1 20 stopped: applied", not b.errors(t) and abs(b.ask("/getMinSpeed", 1, reply="/minSpeed")[0] - 20.0) < 1.0, (b.errors(t),))
+    t = b.send("/enableLowSpeedOptimize", 1, 1)
+    lso = b.ask("/getLowSpeedOptimizeThreshold", 1, reply="/lowSpeedOptimizeThreshold")
+    b.case("s2 /enableLowSpeedOptimize 1 1 stopped and energized: applied (LSPD_OPT)", not b.errors(t) and bool(lso[1]), (b.errors(t), lso))
+    t = b.send("/enableLowSpeedOptimize", 1, 0)
+    lso = b.ask("/getLowSpeedOptimizeThreshold", 1, reply="/lowSpeedOptimizeThreshold")
+    b.case("s2 /enableLowSpeedOptimize 1 0 stopped: applied", not b.errors(t) and not lso[1], (b.errors(t), lso))
+    t = b.send("/setAccRaw", 1, 200)
+    b.case("s2 /setAccRaw 1 200 stopped: applied", not b.errors(t) and b.spraw(1)[0] == 200, (b.errors(t), b.spraw(1)))
+    # HiZ after running: applied
+    b.hiz(1)
+    t = b.send("/setAcc", 1, 900.0)
+    b.case("s2 /setAcc 1 900 while HiZ: applied", not b.errors(t) and abs(b.sp(1)[0] - 900.0) < 10, (b.errors(t), b.sp(1)))
+
+    # --- 255: per motor
+    b.hiz()
+    b.send("/setMicrostepMode", 255, 7)
+    b.energize(2)
+    t = b.send("/setMicrostepMode", 255, 4)
+    ms = [b.microstep(i) for i in range(1, n + 1)]
+    want = [7 if i == 2 else 4 for i in range(1, n + 1)]
+    b.case("s2 /setMicrostepMode 255 4 with motor 2 energized: MotorNotHiZ 2 only, the others applied", only(t, [2], NOT_HIZ) and ms == want, (b.errors(t), ms))
+    b.run_motor(3)
+    t = b.send("/setAcc", 255, 777.0)
+    acc = [b.sp(i)[0] for i in range(1, n + 1)]
+    ok = only(t, [3], NOT_STOPPED) and all(abs(a - 777.0) < 10 for i, a in enumerate(acc, 1) if i != 3) and abs(acc[2] - 777.0) > 10
+    b.case("s2 /setAcc 255 777 with motor 3 running: MotorNotStopped 3 only, the others applied (motor 2 energized, stopped)", ok, (b.errors(t), acc))
+    b.send("/hardHiZ", 3)
+    # --- all or nothing for a motor: /setSpeedProfile on a running motor writes none of acc, dec, max
+    b.run_motor(4)
+    sp4 = b.sp(4)
+    t = b.send("/setSpeedProfile", 4, 3000.0, 3000.0, 100.0)
+    b.case("s2 /setSpeedProfile on a running motor: none of acc / dec / max is written", only(t, [4], NOT_STOPPED) and b.sp(4) == sp4, (b.errors(t), b.sp(4), sp4))
+    # --- the re-application after /resetMotorDriver (HiZ right after the reset) is not blocked
+    b.hiz()
+    b.send("/setMicrostepMode", 255, 5)
+    b.send("/setSpeedProfile", 255, 1200.0, 1300.0, 350.0)
+    b.send("/setBemfParam", 255, 600, 11, 22, 33)
+    b.send("/setKval", 255, 50, 51, 52, 53)
+    b.energize(2)
+    t = b.send("/resetMotorDriver", 255, wait=0.8)
+    spall = [b.sp(i) for i in range(1, n + 1)]
+    ok = (not b.errors(t) and all(b.microstep(i) == 5 for i in range(1, n + 1)) and all(b.kval(i) == [50, 51, 52, 53] for i in range(1, n + 1))
+          and all(abs(s[0] - 1200.0) < 10 and abs(s[1] - 1300.0) < 10 for s in spall)
+          and all(b.ask("/getBemfParam", i, reply="/bemfParam") == [600, 11, 22, 33] for i in range(1, n + 1)))
+    b.case("s2 /resetMotorDriver 255 (motor 2 energized): every setting re-applied, no error", ok, (b.errors(t), spall[:2]))
+    b.hiz()
+    b.send("/setSpeedProfile", 255, 1000.0, 1000.0, 400.0)
+    b.send("/setMinSpeed", 255, 0.0)
+    b.send("/setMicrostepMode", 255, 7)
+    b.send("/setBemfParam", 255, 1032, 25, 41, 41)
+    b.send("/setKval", 255, 0, 0, 0, 0)
+
+
+SECTIONS = {"s1": section1, "s2": section2}
 
 
 def git_sha() -> str:

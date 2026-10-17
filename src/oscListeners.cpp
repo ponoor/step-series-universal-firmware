@@ -130,6 +130,59 @@ static bool acceptTarget(uint8_t motorID, bool valueValid)
     return true;
 }
 
+// Write conditions of the driver registers (the register map of the datasheets):
+//   WH  writable only while the outputs are HiZ
+//   WS  writable only while the motor is stopped or the outputs are HiZ
+// The driver ignores a write that does not meet them (and flags NOTPERF_CMD) while the
+// variable of the firmware changes, so the register and the saved value differ. A command
+// that writes such a register checks the condition first, reading the STATUS register now
+// (the HiZ[] and busy[] of the poll are up to a few ms old), and applies nothing to a
+// motor that does not meet it. GetParam: GetStatus would clear the latched flags.
+enum WriteCondition
+{
+    WRITE_ALWAYS,
+    WRITE_HIZ,    // WH
+    WRITE_STOPPED // WS
+};
+static bool writeAllowed(uint8_t motorId, WriteCondition condition)
+{
+    if (condition == WRITE_ALWAYS)
+        return true;
+    const uint16_t status = stepper[motorId].getParam(REG_STATUS);
+    if (status & STATUS_HIZ)
+        return true;
+    if (condition == WRITE_STOPPED && (status & STATUS_MOT_STATUS) == 0)
+        return true;
+    sendCommandError(motorId + MOTOR_ID_FIRST, condition == WRITE_HIZ ? ERROR_MOTOR_NOT_HIZ : ERROR_MOTOR_NOT_STOPPED);
+    return false;
+}
+// Calls apply(motorId) for the motor of an OSC motor ID, or for each motor that meets the
+// condition for 255; a motor that does not gets the error and is left alone.
+// condition(motorId) gives the condition of each motor.
+template <class Condition, class Apply>
+static void applyToMotors(uint8_t motorID, Condition condition, Apply apply)
+{
+    if (isCorrectMotorId(motorID))
+    {
+        const uint8_t motorId = motorID - MOTOR_ID_FIRST;
+        if (writeAllowed(motorId, condition(motorId)))
+            apply(motorId);
+    }
+    else if (motorID == MOTOR_ID_ALL)
+    {
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        {
+            if (writeAllowed(i, condition(i)))
+                apply(i);
+        }
+    }
+}
+template <class Apply>
+static void applyToMotors(uint8_t motorID, WriteCondition condition, Apply apply)
+{
+    applyToMotors(motorID, [condition](uint8_t) { return condition; }, apply);
+}
+
 bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
 {
     int32_t diff = stepper[motorId].getPos() - targetPos;
@@ -729,19 +782,19 @@ void setMicrostepMode(OscMessage &msg)
     uint8_t motorID = getInt(msg, 0);
     uint8_t value = getInt(msg, 1);
     value = constrain(value, STEP_FS, STEP_FS_128); // 0-7
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].configStepMode(value);
-        microStepMode[motorID - MOTOR_ID_FIRST] = value;
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    // STEP_MODE: WH
+    applyToMotors(motorID, WRITE_HIZ, [value](uint8_t i) {
+#ifdef DRIVER_POWERSTEP01
+        // The current mode of the PowerSTEP01 goes up to 1/16 microstep.
+        if (isCurrentMode[i] && value > STEP_SEL_1_16)
         {
-            stepper[i].configStepMode(value);
-            microStepMode[i] = value;
+            sendCommandError(i + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
+            return;
         }
-    }
+#endif
+        stepper[i].configStepMode(value);
+        microStepMode[i] = value;
+    });
 }
 
 void getMicrostepMode(OscMessage &msg)
@@ -788,19 +841,11 @@ void setHomeSwMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t value = (getBool(msg, 1)) ? SW_USER : SW_HARD_STOP;
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].setSwitchMode(value);
-        homeSwMode[motorID - MOTOR_ID_FIRST] = (value > 0);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setSwitchMode(value);
-            homeSwMode[i] = (value > 0);
-        }
-    }
+    // SW_MODE of CONFIG: WH
+    applyToMotors(motorID, WRITE_HIZ, [value](uint8_t i) {
+        stepper[i].setSwitchMode(value);
+        homeSwMode[i] = (value > 0);
+    });
 }
 #if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
 void getLimitSwMode(OscMessage &msg)
@@ -977,22 +1022,14 @@ void setLowSpeedOptimizeThreshold(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _lowSpdOptThreshold = getFloat(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        lowSpeedOptimizeThreshold[motorID] = _lowSpdOptThreshold;
-        if (lowSpeedOptimizeEnable[motorID])
-            stepper[motorID].setMinSpeed(_lowSpdOptThreshold);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
+    // MIN_SPEED (WS) is written only while the optimization is enabled
+    applyToMotors(
+        motorID, [](uint8_t i) { return lowSpeedOptimizeEnable[i] ? WRITE_STOPPED : WRITE_ALWAYS; },
+        [_lowSpdOptThreshold](uint8_t i) {
             lowSpeedOptimizeThreshold[i] = _lowSpdOptThreshold;
             if (lowSpeedOptimizeEnable[i])
                 stepper[i].setMinSpeed(_lowSpdOptThreshold);
-        }
-    }
+        });
 }
 void getLowSpeedOptimizeThreshold(OscMessage &msg)
 {
@@ -1028,36 +1065,19 @@ void enableLowSpeedOptimize(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     bool state = getBool(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        stepper[motorID].setLoSpdOpt(state);
-        lowSpeedOptimizeEnable[motorID] = state;
+    // LSPD_OPT and MIN_SPEED: WS
+    applyToMotors(motorID, WRITE_STOPPED, [state](uint8_t i) {
+        stepper[i].setLoSpdOpt(state);
+        lowSpeedOptimizeEnable[i] = state;
         if (state)
         {
-            stepper[motorID].setMinSpeed(lowSpeedOptimizeThreshold[motorID]);
+            stepper[i].setMinSpeed(lowSpeedOptimizeThreshold[i]);
         }
         else
         {
-            stepper[motorID].setMinSpeed(minSpeed[motorID]);
+            stepper[i].setMinSpeed(minSpeed[i]);
         }
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setLoSpdOpt(state);
-            lowSpeedOptimizeEnable[i] = state;
-            if (state)
-            {
-                stepper[i].setMinSpeed(lowSpeedOptimizeThreshold[i]);
-            }
-            else
-            {
-                stepper[i].setMinSpeed(minSpeed[i]);
-            }
-        }
-    }
+    });
 }
 
 void setBemfParam(OscMessage &msg)
@@ -1068,32 +1088,17 @@ void setBemfParam(OscMessage &msg)
         stSlp = constrain(getInt(msg, 2), 0, 255),
         fnSlpAcc = constrain(getInt(msg, 3), 0, 255),
         fnSlpDec = constrain(getInt(msg, 4), 0, 255);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        intersectSpeed[motorID] = intSpeed;
-        startSlope[motorID] = stSlp;
-        accFinalSlope[motorID] = fnSlpAcc;
-        decFinalSlope[motorID] = fnSlpDec;
-        stepper[motorID].setParam(INT_SPD, intersectSpeed[motorID]);
-        stepper[motorID].setParam(ST_SLP, startSlope[motorID]);
-        stepper[motorID].setParam(FN_SLP_ACC, accFinalSlope[motorID]);
-        stepper[motorID].setParam(FN_SLP_DEC, decFinalSlope[motorID]);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            intersectSpeed[i] = intSpeed;
-            startSlope[i] = stSlp;
-            accFinalSlope[i] = fnSlpAcc;
-            decFinalSlope[i] = fnSlpDec;
-            stepper[i].setParam(INT_SPD, intersectSpeed[i]);
-            stepper[i].setParam(ST_SLP, startSlope[i]);
-            stepper[i].setParam(FN_SLP_ACC, accFinalSlope[i]);
-            stepper[i].setParam(FN_SLP_DEC, decFinalSlope[i]);
-        }
-    }
+    // INT_SPD, ST_SLP, FN_SLP_ACC, FN_SLP_DEC: WH
+    applyToMotors(motorID, WRITE_HIZ, [=](uint8_t i) {
+        intersectSpeed[i] = intSpeed;
+        startSlope[i] = stSlp;
+        accFinalSlope[i] = fnSlpAcc;
+        decFinalSlope[i] = fnSlpDec;
+        stepper[i].setParam(INT_SPD, intersectSpeed[i]);
+        stepper[i].setParam(ST_SLP, startSlope[i]);
+        stepper[i].setParam(FN_SLP_ACC, accFinalSlope[i]);
+        stepper[i].setParam(FN_SLP_DEC, decFinalSlope[i]);
+    });
 }
 void getBemfParam(OscMessage &msg)
 {
@@ -1134,28 +1139,15 @@ void setDecayModeParam(OscMessage &msg)
         tFast = constrain(getInt(msg, 1), 0, 255),
         tOnMin = constrain(getInt(msg, 2), 0, 255),
         tOffMin = constrain(getInt(msg, 3), 0, 255);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        fastDecaySetting[motorID] = tFast;
-        minOnTime[motorID] = tOnMin;
-        minOffTime[motorID] = tOffMin;
-        stepper[motorID].setParam(T_FAST, fastDecaySetting[motorID]);
-        stepper[motorID].setParam(TON_MIN, minOnTime[motorID]);
-        stepper[motorID].setParam(TOFF_MIN, minOffTime[motorID]);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            fastDecaySetting[i] = tFast;
-            minOnTime[i] = tOnMin;
-            minOffTime[i] = tOffMin;
-            stepper[i].setParam(T_FAST, fastDecaySetting[i]);
-            stepper[i].setParam(TON_MIN, minOnTime[i]);
-            stepper[i].setParam(TOFF_MIN, minOffTime[i]);
-        }
-    }
+    // T_FAST, TON_MIN, TOFF_MIN: WH
+    applyToMotors(motorID, WRITE_HIZ, [=](uint8_t i) {
+        fastDecaySetting[i] = tFast;
+        minOnTime[i] = tOnMin;
+        minOffTime[i] = tOffMin;
+        stepper[i].setParam(T_FAST, fastDecaySetting[i]);
+        stepper[i].setParam(TON_MIN, minOnTime[i]);
+        stepper[i].setParam(TOFF_MIN, minOffTime[i]);
+    });
 }
 void getDecayModeParam(OscMessage &msg)
 {
@@ -1913,29 +1905,15 @@ void setSpeedProfile(OscMessage &msg)
     float _acc = getFloat(msg, 1);
     float _dec = getFloat(msg, 2);
     float _maxSpeed = getFloat(msg, 3);
-
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        stepper[motorID].setAcc(_acc);
-        stepper[motorID].setDec(_dec);
-        stepper[motorID].setMaxSpeed(_maxSpeed);
-        acc[motorID] = _acc;
-        dec[motorID] = _dec;
-        maxSpeed[motorID] = _maxSpeed;
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setAcc(_acc);
-            stepper[i].setDec(_dec);
-            stepper[i].setMaxSpeed(_maxSpeed);
-            acc[i] = _acc;
-            dec[i] = _dec;
-            maxSpeed[i] = _maxSpeed;
-        }
-    }
+    // ACC, DEC: WS (MAX_SPEED: WR). Nothing is written to a motor that is running.
+    applyToMotors(motorID, WRITE_STOPPED, [=](uint8_t i) {
+        stepper[i].setAcc(_acc);
+        stepper[i].setDec(_dec);
+        stepper[i].setMaxSpeed(_maxSpeed);
+        acc[i] = _acc;
+        dec[i] = _dec;
+        maxSpeed[i] = _maxSpeed;
+    });
 }
 
 void setMaxSpeed(OscMessage &msg)
@@ -1962,26 +1940,16 @@ void setMinSpeed(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _minSpeed = getFloat(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        minSpeed[motorID] = _minSpeed;
-        if (!lowSpeedOptimizeEnable[motorID])
-        {
-            stepper[motorID].setMinSpeed(_minSpeed);
-        }
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
+    // MIN_SPEED (WS) is written only while the low speed optimization is disabled
+    applyToMotors(
+        motorID, [](uint8_t i) { return lowSpeedOptimizeEnable[i] ? WRITE_ALWAYS : WRITE_STOPPED; },
+        [_minSpeed](uint8_t i) {
             minSpeed[i] = _minSpeed;
             if (!lowSpeedOptimizeEnable[i])
             {
                 stepper[i].setMinSpeed(_minSpeed);
             }
-        }
-    }
+        });
 }
 
 void getMinSpeed(OscMessage &msg)
@@ -2048,39 +2016,21 @@ void setAcc(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _acc = getFloat(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        stepper[motorID].setAcc(_acc);
-        acc[motorID] = _acc;
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setAcc(_acc);
-            acc[i] = _acc;
-        }
-    }
+    // ACC: WS
+    applyToMotors(motorID, WRITE_STOPPED, [_acc](uint8_t i) {
+        stepper[i].setAcc(_acc);
+        acc[i] = _acc;
+    });
 }
 void setDec(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     float _dec = getFloat(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        stepper[motorID].setDec(_dec);
-        dec[motorID] = _dec;
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setDec(_dec);
-            dec[i] = _dec;
-        }
-    }
+    // DEC: WS
+    applyToMotors(motorID, WRITE_STOPPED, [_dec](uint8_t i) {
+        stepper[i].setDec(_dec);
+        dec[i] = _dec;
+    });
 }
 
 void setSpeedProfileRaw(OscMessage &msg)
@@ -2089,22 +2039,12 @@ void setSpeedProfileRaw(OscMessage &msg)
     uint16_t _accRaw = getInt(msg, 1);
     uint16_t _decRaw = getInt(msg, 2);
     uint16_t _maxSpeedRaw = getInt(msg, 3);
-
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].setAccRaw(_accRaw);
-        stepper[motorID - MOTOR_ID_FIRST].setDecRaw(_decRaw);
-        stepper[motorID - MOTOR_ID_FIRST].setMaxSpeedRaw(_maxSpeedRaw);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setAccRaw(_accRaw);
-            stepper[i].setDecRaw(_decRaw);
-            stepper[i].setMaxSpeedRaw(_maxSpeedRaw);
-        }
-    }
+    // ACC, DEC: WS (MAX_SPEED: WR)
+    applyToMotors(motorID, WRITE_STOPPED, [=](uint8_t i) {
+        stepper[i].setAccRaw(_accRaw);
+        stepper[i].setDecRaw(_decRaw);
+        stepper[i].setMaxSpeedRaw(_maxSpeedRaw);
+    });
 }
 
 void setMaxSpeedRaw(OscMessage &msg)
@@ -2127,17 +2067,8 @@ void setMinSpeedRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].setMinSpeedRaw(t);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setMinSpeedRaw(t);
-        }
-    }
+    // MIN_SPEED: WS
+    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) { stepper[i].setMinSpeedRaw(t); });
 }
 
 void setFullstepSpeedRaw(OscMessage &msg)
@@ -2161,33 +2092,15 @@ void setAccRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].setAccRaw(t);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setAccRaw(t);
-        }
-    }
+    // ACC: WS
+    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) { stepper[i].setAccRaw(t); });
 }
 void setDecRaw(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
     uint16_t t = getInt(msg, 1);
-    if (isCorrectMotorId(motorID))
-    {
-        stepper[motorID - MOTOR_ID_FIRST].setDecRaw(t);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            stepper[i].setDecRaw(t);
-        }
-    }
+    // DEC: WS
+    applyToMotors(motorID, WRITE_STOPPED, [t](uint8_t i) { stepper[i].setDecRaw(t); });
 }
 
 void getSpeed(OscMessage &msg)
@@ -3182,9 +3095,11 @@ void getServoParam(OscMessage &msg)
 
 #pragma region PowerSTEP01_config_osc_listener
 #ifdef DRIVER_POWERSTEP01
+// Applies the voltage mode to a motor whose outputs are HiZ (the writes are WH: STEP_MODE,
+// CONFIG, ST_SLP, FN_SLP_*). isCurrentMode[] changes only if STEP_MODE has the mode.
+// The explicit stepper.hardHiZ() is not used: it would stop a running motor.
 void setVoltageMode(uint8_t motorId)
 {
-    // stepper[motorId].hardHiZ();
     stepper[motorId].setPWMFreq(PWM_DIV_1, PWM_MUL_0_75);
     stepper[motorId].setHoldKVAL(kvalHold[motorId]);
     stepper[motorId].setRunKVAL(kvalRun[motorId]);
@@ -3194,28 +3109,20 @@ void setVoltageMode(uint8_t motorId)
     stepper[motorId].setParam(FN_SLP_ACC, accFinalSlope[motorId]);
     stepper[motorId].setParam(FN_SLP_DEC, decFinalSlope[motorId]);
     stepper[motorId].setVoltageMode();
-    isCurrentMode[motorId] = false;
+    if (stepper[motorId].getParam(STEP_MODE) & STEP_MODE_CM_VM)
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
+    else
+        isCurrentMode[motorId] = false;
 }
 void setVoltageMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        setVoltageMode(motorID);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            setVoltageMode(i);
-        }
-    }
+    applyToMotors(motorID, WRITE_HIZ, [](uint8_t i) { setVoltageMode(i); });
 }
 
+// As setVoltageMode(uint8_t). Also called by resetMotorDriver(), right after the reset.
 void setCurrentMode(uint8_t motorId)
 {
-    // stepper[motorId].hardHiZ();
     stepper[motorId].setPredictiveControl(CONFIG_PRED_ENABLE);
     stepper[motorId].setSwitchingPeriod(5);
     if (stepper[motorId].getStepMode() > STEP_SEL_1_16)
@@ -3231,23 +3138,15 @@ void setCurrentMode(uint8_t motorId)
     stepper[motorId].setParam(TON_MIN, minOnTime[motorId]);
     stepper[motorId].setParam(TOFF_MIN, minOffTime[motorId]);
     stepper[motorId].setCurrentMode();
-    isCurrentMode[motorId] = true;
+    if (stepper[motorId].getParam(STEP_MODE) & STEP_MODE_CM_VM)
+        isCurrentMode[motorId] = true;
+    else
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
 }
 void setCurrentMode(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    if (isCorrectMotorId(motorID))
-    {
-        motorID -= MOTOR_ID_FIRST;
-        setCurrentMode(motorID);
-    }
-    else if (motorID == MOTOR_ID_ALL)
-    {
-        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-        {
-            setCurrentMode(i);
-        }
-    }
+    applyToMotors(motorID, WRITE_HIZ, [](uint8_t i) { setCurrentMode(i); });
 }
 #endif
 
@@ -3259,6 +3158,9 @@ void setElPos(OscMessage &msg)
     if (!acceptTarget(motorID, (0 <= newFullStep && newFullStep <= 3) && (0 <= newMicroStep && newMicroStep <= 127)))
         return;
     uint16_t newElPos = (newFullStep << 7) | newMicroStep;
+    // Not guarded: EL_POS has no variable, and the L6470 does not take the write while it
+    // holds the motor either (measured, TASK_osc_fixes REPORT), which the datasheet lists
+    // as WS; the driver reports it with CommandIgnored (NOTPERF_CMD).
     if (isCorrectMotorId(motorID))
     {
         stepper[motorID - MOTOR_ID_FIRST].setElPos(newElPos);

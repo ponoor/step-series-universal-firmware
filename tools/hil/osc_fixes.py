@@ -19,7 +19,7 @@ from pathlib import Path
 HIL = Path(__file__).resolve().parent
 sys.path.insert(0, str(HIL))
 from hil import config  # noqa: E402
-from hil.commands import open_link, connect_board, preflight, firmware_version  # noqa: E402
+from hil.commands import open_ad2, open_link, connect_board, preflight, firmware_version  # noqa: E402
 from hil.diag import SerialDiag  # noqa: E402
 
 SETTLE = 0.15
@@ -401,7 +401,84 @@ def section2(b: Bench):
     b.send("/setKval", 255, 0, 0, 0, 0)
 
 
-SECTIONS = {"s1": section1, "s2": section2}
+# ---------------------------------------------------------------------------------
+# section 3: the direction of /goTo, /goHome, /goMark (feature/goto-direction)
+# ---------------------------------------------------------------------------------
+def section3(b: Bench):
+    """The home switch (DIO15 of the AD2) is pressed; motion towards homingDirection is prohibited.
+    No motor is needed: the driver counts the steps."""
+    ad2 = b.ad2
+    m = 1
+    HOME, ERR = "HomeSwActivating", "/error/command"
+
+    def attempt(label, send, start, sign, target, allowed):
+        """allowed: the command starts the motion (direction sign), moving to target when it is near,
+        else HomeSwActivating and no motion."""
+        b.hiz(m)
+        b.send("/setPosition", m, start)
+        t = b.send(*send, wait=0.3)
+        errs = b.errors(t)
+        if allowed and target is not None and abs(target - start) <= 3000:
+            time.sleep(1.0)
+            pos = b.position(m)
+            ok = not errs and abs(pos - target) <= 2
+        elif allowed:
+            pos = b.position(m)
+            ok = not errs and (pos - start) * sign > 0  # moving the right way
+        else:
+            time.sleep(0.2)
+            pos = b.position(m)
+            ok = errs == [(ERR, [HOME, str(m)])] and pos == start
+        b.case(label + (": allowed" if allowed else ": HomeSwActivating"), ok,
+               {"errors": errs, "position": pos, "start": start, "target": target})
+        b.send("/softStop", m, wait=0.4)
+
+    b.send("/reportError", 1)
+    b.hiz()
+    b.send("/setSpeedProfile", m, 20000.0, 20000.0, 15000.0)
+    b.send("/setProhibitMotionOnHomeSw", m, 1)
+    ad2.release()
+    time.sleep(0.3)
+    try:
+        for homing_dir in (0, 1):  # 0 = REV, 1 = FWD
+            b.send("/setHomingDirection", m, homing_dir)
+            ad2.press("home")
+            time.sleep(0.4)
+            sw = b.ask("/getHomeSw", m, reply="/homeSw")
+            b.case(f"s3 homingDirection {homing_dir}: the pressed home switch reads as active", sw[0] == 1, sw)
+            toward = +1 if homing_dir == 1 else -1  # sign of the motion towards the switch
+            for dist in (100, 2047, 2049, 100000, 2097151):
+                for sign, name in ((toward, "towards the switch"), (-toward, "away from the switch")):
+                    target = sign * dist
+                    attempt(f"s3 homingDirection {homing_dir}: /goTo {target:+d} from 0 ({name})",
+                            ("/goTo", m, target), 0, sign, target, sign != toward)
+            # the shortest way wraps: from 0, +3,000,000 is -1,194,304 in 22 bits
+            for target, sign in ((3000000, -1), (-3000000, +1)):
+                attempt(f"s3 homingDirection {homing_dir}: /goTo {target:+d} from 0 (the shortest way is {'REV' if sign < 0 else 'FWD'})",
+                        ("/goTo", m, target), 0, sign, None, sign != toward)
+            # /goHome: from +200 the way is REV, from -200 FWD
+            for start in (200, -200):
+                sign = -1 if start > 0 else +1
+                attempt(f"s3 homingDirection {homing_dir}: /goHome from {start:+d} ({'REV' if sign < 0 else 'FWD'})",
+                        ("/goHome", m), start, sign, 0, sign != toward)
+            # /goMark: mark at +300, from 0 the way is FWD; mark at -300 REV
+            for mark in (300, -300):
+                sign = +1 if mark > 0 else -1
+                b.send("/setMark", m, mark)
+                attempt(f"s3 homingDirection {homing_dir}: /goMark (mark {mark:+d}) from 0 ({'FWD' if sign > 0 else 'REV'})",
+                        ("/goMark", m), 0, sign, mark, sign != toward)
+            ad2.release()
+            time.sleep(0.3)
+        # the switch released: everything is allowed
+        b.send("/setHomingDirection", m, 0)
+        attempt("s3 switch released: /goTo -100 from 0", ("/goTo", m, -100), 0, -1, -100, True)
+    finally:
+        ad2.release()
+        b.hiz()
+        b.send("/setMark", m, 0)
+
+
+SECTIONS = {"s1": section1, "s2": section2, "s3": section3}
 
 
 def git_sha() -> str:
@@ -420,9 +497,14 @@ def main() -> int:
     cfg = config.load(a.config)
     pre = preflight(cfg)
     names = [s.strip() for s in a.sections.split(",") if s.strip()]
-    with open_link(cfg) as link:
+    ad2_needed = "s3" in names
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        link = stack.enter_context(open_link(cfg))
         connect_board(link)
         b = Bench(cfg, link)
+        if ad2_needed:
+            b.ad2 = stack.enter_context(open_ad2(cfg))
         version = firmware_version(link)
         print("board", cfg.board.name, "firmware", version)
         for s in names:

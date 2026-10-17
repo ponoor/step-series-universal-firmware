@@ -8,6 +8,7 @@
 #include "packedTransfer.h"
 #include "oscRouter.h"
 #include "oscArgs.h"
+#include "goToDirection.h"
 #include "perfStats.h"
 #include "resetCause.h"
 #include "hilProbe.h"
@@ -185,14 +186,7 @@ static void applyToMotors(uint8_t motorID, WriteCondition condition, Apply apply
 
 bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
 {
-    int32_t diff = stepper[motorId].getPos() - targetPos;
-    bool dir = diff > 0;
-    bool bLongPath = ((uint32_t)abs(diff)) >> 11 > 0;
-    if (bLongPath)
-    {
-        dir = !dir;
-    }
-    return dir;
+    return goToDirection(stepper[motorId].getPos(), targetPos);
 }
 
 #pragma region config_commands_osc_listener

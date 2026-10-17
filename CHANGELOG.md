@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-17
+
+Requires the driver libraries v1.2.0: Ponoor PowerSTEP01 Library 1.2.0 (STEP400) and Ponoor L6470 Library 1.2.0 (STEP800). OSC addresses are compatible with v2.1.0.
+
 ### Behavior changes
 
 These changes are visible to OSC clients.

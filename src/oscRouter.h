@@ -19,11 +19,15 @@
 #include "oscParser.h"
 
 typedef void (*OscHandler)(OscMessage &msg);
+// Checks the arguments of msg against the route's args (oscArgs.h) and reports the error.
+// Returns false if the handler must not be called.
+typedef bool (*OscArgValidator)(OscMessage &msg, const char *args);
 
 struct OscRoute
 {
     const char *address;
     OscHandler handler;
+    const char *args; // see oscRoutes.h
 };
 
 // Bytes reserved before and after the packet in the receive buffer.
@@ -49,8 +53,10 @@ enum OscDispatchResult
 class OscRouter
 {
 public:
-    // index must have room for count entries. Sorts the index by address.
-    void begin(const OscRoute *routes, uint8_t count, uint8_t *index);
+    // index must have room for count entries. Sorts the index by address. With a
+    // validator, a handler is called only if the validator returns true for its args.
+    void begin(const OscRoute *routes, uint8_t count, uint8_t *index,
+               OscArgValidator validator = nullptr);
     // Calls the matching handler(s) of a message without errors.
     OscDispatchResult dispatch(OscMessage &msg) const;
     // Exact-match lookup, or -1.
@@ -60,6 +66,8 @@ private:
     const OscRoute *routes = nullptr;
     uint8_t count = 0;
     uint8_t *index = nullptr;
+    OscArgValidator validator = nullptr;
+    void call(const OscRoute &route, OscMessage &msg) const;
 };
 
 #endif

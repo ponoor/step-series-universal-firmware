@@ -7,6 +7,7 @@
 #include "diagnosis.h"
 #include "packedTransfer.h"
 #include "oscRouter.h"
+#include "oscArgs.h"
 #include "perfStats.h"
 #include "resetCause.h"
 #include "hilProbe.h"
@@ -16,7 +17,7 @@ static uint8_t oscRxStorage[OSC_RX_GUARD_BEFORE + OSC_RX_BUFFER_SIZE + OSC_RX_GU
 static uint8_t *const oscRxBuffer = oscRxStorage + OSC_RX_GUARD_BEFORE;
 static OscMessage msgIN;
 
-#define OSC_ROUTE(address, handler) {address, handler},
+#define OSC_ROUTE(address, handler, args) {address, handler, args},
 static const OscRoute oscRoutes[] = {
 #include "oscRoutes.h"
 };
@@ -26,9 +27,34 @@ static_assert(OSC_ROUTE_COUNT <= 255, "the route index is uint8_t");
 static uint8_t oscRouteIndex[OSC_ROUTE_COUNT];
 static OscRouter oscRouter;
 
+// Arguments missing or of the wrong type, or a motor ID that does not fit in a byte: the
+// handler is not called and nothing is applied (the arguments of each route: oscRoutes.h).
+static bool validateOscArgs(OscMessage &msg, const char *args)
+{
+    int32_t badMotorId = 0;
+    switch (oscCheckArgs(msg, args, NUM_OF_MOTOR, &badMotorId))
+    {
+    case OSC_ARGS_OK:
+        return true;
+    case OSC_ARGS_MISSING:
+        if (reportErrors)
+            sendOneDatum("/error/osc", "MissingArgument");
+        break;
+    case OSC_ARGS_WRONG_TYPE:
+        if (reportErrors)
+            sendOneDatum("/error/osc", "WrongDataType");
+        break;
+    case OSC_ARGS_BAD_MOTOR_ID:
+        if (reportErrors)
+            sendTwoData("/error/command", commandErrorText[ERROR_MOTORID_NOTMATCH], badMotorId);
+        break;
+    }
+    return false;
+}
+
 void initOscRouter()
 {
-    oscRouter.begin(oscRoutes, OSC_ROUTE_COUNT, oscRouteIndex);
+    oscRouter.begin(oscRoutes, OSC_ROUTE_COUNT, oscRouteIndex, validateOscArgs);
 }
 
 bool OSCMsgReceive()
@@ -87,6 +113,21 @@ bool isCorrectMotorId(uint8_t motorID)
         sendCommandError(motorID, ERROR_MOTORID_NOTMATCH);
     }
     return bCorrectId;
+}
+
+// For a command with a value to check (the arguments are present, see validateOscArgs()):
+// true if it may be applied. A motor ID that is neither a motor nor 255 gets
+// MotorIdNotMatch, a value out of range CommandIgnored (as /setBrakeTransitionDuration).
+static bool acceptTarget(uint8_t motorID, bool valueValid)
+{
+    if (!isCorrectMotorId(motorID) && motorID != MOTOR_ID_ALL)
+        return false;
+    if (!valueValid)
+    {
+        sendCommandError(motorID, ERROR_COMMAND_IGNORED);
+        return false;
+    }
+    return true;
 }
 
 bool checkGoToDirection(uint8_t motorId, int32_t targetPos)
@@ -432,9 +473,11 @@ void enableStallReport(OscMessage &msg)
 void setPositionReportInterval(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    int16_t interval = getInt(msg, 1);
+    int32_t interval = getInt(msg, 1);
     if (interval < 0)
-        interval = 0;
+        interval = 0; // 0 disables the report
+    if (!acceptTarget(motorID, interval <= 0xFFFF))
+        return;
     bool bEnable = interval > 0;
     if (isCorrectMotorId(motorID))
     {
@@ -459,9 +502,14 @@ void setPositionReportInterval(OscMessage &msg)
 }
 void setPositionListReportInterval(OscMessage &msg)
 {
-    int16_t interval = getInt(msg, 0);
+    int32_t interval = getInt(msg, 0);
     if (interval < 0)
-        interval = 0;
+        interval = 0; // 0 disables the report
+    if (interval > 0xFFFF)
+    {
+        sendCommandError(MOTOR_ID_ALL, ERROR_COMMAND_IGNORED);
+        return;
+    }
     bool bEnable = interval > 0;
     reportPositionList = bEnable;
     reportPositionListInterval = interval;
@@ -1254,7 +1302,9 @@ void getBrakeStatus(OscMessage &msg)
 void setGoUntilTimeout(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint32_t timeout = getInt(msg, 1);
+    int32_t timeout = getInt(msg, 1);
+    if (!acceptTarget(motorID, timeout >= 0))
+        return;
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -1286,7 +1336,9 @@ void getGoUntilTimeout(OscMessage &msg)
 void setReleaseSwTimeout(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint32_t timeout = getInt(msg, 1);
+    int32_t timeout = getInt(msg, 1);
+    if (!acceptTarget(motorID, timeout >= 0))
+        return;
     if (isCorrectMotorId(motorID))
     {
         motorID -= MOTOR_ID_FIRST;
@@ -2652,7 +2704,7 @@ bool releaseSw(uint8_t motorId, bool action, bool dir) {
 }
 void releaseSw(OscMessage& msg) {
     uint8_t motorID = getInt(msg, 0);
-    uint8_t action = getInt(msg, 1);
+    bool action = getBool(msg, 1);
     bool dir = getBool(msg, 2);
     if(isCorrectMotorId(motorID)) {
         motorID -= MOTOR_ID_FIRST;
@@ -3078,12 +3130,8 @@ void setServoParam(OscMessage &msg)
         _kp = getFloat(msg, 1),
         _ki = getFloat(msg, 2),
         _kd = getFloat(msg, 3);
-    if (_kp <= 0.0f)
-        _kp = 0.0f;
-    if (_ki <= 0.0f)
-        _ki = 0.0f;
-    if (_kd <= 0.0f)
-        _kd = 0.0f;
+    if (!acceptTarget(motorID, (_kp >= 0.0f) && (_ki >= 0.0f) && (_kd >= 0.0f)))
+        return;
     if (isCorrectMotorId(motorID))
     {
         kP[motorID - MOTOR_ID_FIRST] = _kp;
@@ -3206,10 +3254,10 @@ void setCurrentMode(OscMessage &msg)
 void setElPos(OscMessage &msg)
 {
     uint8_t motorID = getInt(msg, 0);
-    uint8_t newFullStep = getInt(msg, 1);
-    uint8_t newMicroStep = getInt(msg, 2);
-    newFullStep = constrain(newFullStep, 0, 3);
-    newMicroStep = constrain(newMicroStep, 0, 127);
+    int32_t newFullStep = getInt(msg, 1);
+    int32_t newMicroStep = getInt(msg, 2);
+    if (!acceptTarget(motorID, (0 <= newFullStep && newFullStep <= 3) && (0 <= newMicroStep && newMicroStep <= 127)))
+        return;
     uint16_t newElPos = (newFullStep << 7) | newMicroStep;
     if (isCorrectMotorId(motorID))
     {

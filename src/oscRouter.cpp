@@ -27,11 +27,13 @@ bool oscRouteMatches(const char *receivedAddress, const char *routeAddress)
     return (patternOffset > 0) && (receivedAddress[patternOffset] == '/');
 }
 
-void OscRouter::begin(const OscRoute *routes_, uint8_t count_, uint8_t *index_)
+void OscRouter::begin(const OscRoute *routes_, uint8_t count_, uint8_t *index_,
+                      OscArgValidator validator_)
 {
     routes = routes_;
     count = count_;
     index = index_;
+    validator = validator_;
     // insertion sort, once at startup
     for (uint8_t i = 0; i < count; i++)
     {
@@ -62,6 +64,12 @@ int OscRouter::find(const char *address) const
     return -1;
 }
 
+void OscRouter::call(const OscRoute &route, OscMessage &msg) const
+{
+    if (validator == nullptr || validator(msg, route.args))
+        route.handler(msg);
+}
+
 OscDispatchResult OscRouter::dispatch(OscMessage &msg) const
 {
     const char *address = msg.getAddress();
@@ -70,7 +78,7 @@ OscDispatchResult OscRouter::dispatch(OscMessage &msg) const
     const int i = find(address);
     if (i >= 0)
     {
-        routes[i].handler(msg);
+        call(routes[i], msg);
         return OSC_DISPATCH_FAST;
     }
     bool matched = false;
@@ -78,7 +86,7 @@ OscDispatchResult OscRouter::dispatch(OscMessage &msg) const
     {
         if (oscRouteMatches(address, routes[k].address))
         {
-            routes[k].handler(msg);
+            call(routes[k], msg);
             matched = true;
         }
     }

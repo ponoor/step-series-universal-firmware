@@ -18,7 +18,7 @@ void tearDown() {}
 #define HAVE_BRAKE
 #define DRIVER_POWERSTEP01
 #define HAVE_LIMIT_ADC
-#define OSC_ROUTE(address, handler) address,
+#define OSC_ROUTE(address, handler, args) address,
 static const char *const fullNames[] = {
 #include "oscRoutes.h"
 };
@@ -261,7 +261,7 @@ static void readsFirst(OscMessage &m) { seen.push_back(m.getInt(0)); }
 
 void test_shared_message_in_slow_path()
 {
-    OscRoute routes[] = {{"/aa", readsPastEnd}, {"/ab", readsFirst}};
+    OscRoute routes[] = {{"/aa", readsPastEnd, ""}, {"/ab", readsFirst, ""}};
     uint8_t index[2];
     OscRouter router;
     router.begin(routes, 2, index);
@@ -272,6 +272,43 @@ void test_shared_message_in_slow_path()
     TEST_ASSERT_EQUAL(2, (int)seen.size());
     TEST_ASSERT_EQUAL_INT32(9, seen[0]);
     TEST_ASSERT_EQUAL_INT32(0, seen[1]);
+}
+
+static std::vector<std::string> validated;
+static bool rejectMn(OscMessage &, const char *args)
+{
+    validated.push_back(args);
+    return strcmp(args, "mn") != 0;
+}
+
+void test_validator_blocks_the_handler()
+{
+    OscRoute routes[] = {{"/aa", readsFirst, "m"}, {"/ab", readsFirst, "mn"}};
+    uint8_t index[2];
+    OscRouter router;
+    router.begin(routes, 2, index, rejectMn);
+    const uint8_t packet[] = {'/', 'a', 'a', 0, ',', 'i', 0, 0, 0, 0, 0, 9};
+    msg.decode(packet, sizeof(packet));
+    seen.clear();
+    validated.clear();
+    TEST_ASSERT_EQUAL(OSC_DISPATCH_FAST, router.dispatch(msg));
+    TEST_ASSERT_EQUAL(1, (int)seen.size());
+    TEST_ASSERT_EQUAL_STRING("m", validated[0].c_str());
+    const uint8_t packet2[] = {'/', 'a', 'b', 0, ',', 'i', 0, 0, 0, 0, 0, 9};
+    msg.decode(packet2, sizeof(packet2));
+    seen.clear();
+    validated.clear();
+    TEST_ASSERT_EQUAL(OSC_DISPATCH_FAST, router.dispatch(msg)); // routed, the handler is not called
+    TEST_ASSERT_EQUAL(0, (int)seen.size());
+    TEST_ASSERT_EQUAL_STRING("mn", validated[0].c_str());
+    // pattern addresses: the validator is asked once per matching route
+    const uint8_t packet3[] = {'/', 'a', '?', 0, ',', 'i', 0, 0, 0, 0, 0, 9};
+    msg.decode(packet3, sizeof(packet3));
+    seen.clear();
+    validated.clear();
+    TEST_ASSERT_EQUAL(OSC_DISPATCH_SLOW, router.dispatch(msg));
+    TEST_ASSERT_EQUAL(2, (int)validated.size());
+    TEST_ASSERT_EQUAL(1, (int)seen.size());
 }
 
 void test_unclosed_bracket_is_safe()
@@ -303,5 +340,6 @@ int main(int, char **)
     RUN_TEST(test_ifdef_disabled);
     RUN_TEST(test_shared_message_in_slow_path);
     RUN_TEST(test_unclosed_bracket_is_safe);
+    RUN_TEST(test_validator_blocks_the_handler);
     return UNITY_END();
 }

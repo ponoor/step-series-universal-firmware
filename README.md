@@ -25,7 +25,7 @@ STEP400 and STEP800 are updated through the USB bootloader: build and upload wit
 
 **Before updating a running system, read the compatibility notes of the new version in [CHANGELOG.md](CHANGELOG.md).** Some versions change the behavior of OSC commands or add error replies.
 
-The configuration (`config.txt` or a `.json` file on the microSD card) is kept across updates. The board reads `config.txt` first; if it is missing or invalid, it uses the alphabetically first valid `.json` file.
+The configuration (`config.txt` or a `.json` file on the microSD card) is kept across updates. See [microSD card](#microsd-card) for the card format and which file is read.
 
 ## Configuration tool
 
@@ -35,6 +35,21 @@ The configuration (`config.txt` or a `.json` file on the microSD card) is kept a
 - Load and save configuration files on your computer without a board (works in any browser).
 
 Open the file locally in the browser. It replaces the earlier offline configuration tools for STEP400 and STEP800.
+
+## microSD card
+
+The board reads its configuration from a microSD card and saves the configuration to it (`/saveConfig`, or the configuration tool). The card is read once, at start-up: insert it before powering on, or reset the board after inserting it.
+
+- **Format the card as FAT16 or FAT32.** exFAT is not supported. Cards of 64 GB or more (SDXC) are formatted as exFAT by default; format them as FAT32 (e.g. macOS Disk Utility, "MS-DOS (FAT)"). The board reports an exFAT card as `No SD card` and does not read or change anything on it. This is the same for the PlatformIO and the Arduino IDE builds.
+- **Which file is read**, in this order:
+  1. `config.txt` in the root directory.
+  2. If `config.txt` is missing or cannot be parsed: the alphabetically first `*.json` file in the root directory (the extension is not case sensitive). If that file is not valid (not JSON, or without `information.configVersion`), the defaults are used; the next `.json` file is not tried.
+  3. The defaults, when there is no card or no valid file.
+- Files and directories whose name starts with `.` are ignored. This includes the `._*` files that macOS writes next to every file it copies to a FAT card, and `.Trashes`. Subdirectories are not searched.
+- Long file names work (the path of the file can be up to 63 characters). A `.json` file can be named for the product or the setup, e.g. `B_long_descriptive_name_STEP800_24V.json`.
+- **Saving** writes the configuration to the file that was read (`config.txt` when none was read). The USB serial command `F<path>` selects another file (the path starts with `/` and ends with `.json` or `.txt`). The configuration is written to a hidden temporary file `.<name>.tmp` in the same directory first, and replaces the saved file when it has been written. If the save fails (the card or the root directory is full, the directory does not exist, a write error), the existing file stays as it was and the reply is `SD open failed`; without a usable card the reply is `No SD card`. The save takes about 0.1 s (up to about 0.3 s over the USB serial `{` command, which includes the transfer); the watchdog is stopped for that time. The first save after a card was inserted can take longer (up to about 0.7 s was measured).
+- If the card is removed while the board is running, saves fail with `SD open failed` and the board goes on with the configuration it read at start-up. Reset the board after inserting the card again.
+- A FAT16 root directory holds at most 512 entries (a long file name takes several); keep it small, or use FAT32.
 
 ## Building
 
@@ -67,7 +82,7 @@ Install these libraries with the Library Manager:
 | [Ponoor PowerSTEP01 Library](https://github.com/ponoor/Ponoor_PowerSTEP01_Library) | 1.2.0 or later | STEP400, STEP100 |
 | [Ponoor L6470 Library](https://github.com/ponoor/Ponoor_L6470_Library) | 1.2.0 or later | STEP800, STEP200 |
 | [Ethernet](https://github.com/arduino-libraries/Ethernet) | 2.0.2 or later | |
-| [SdFat](https://github.com/greiman/SdFat) (Bill Greiman) | 2.2.3 or later | |
+| [SdFat](https://github.com/greiman/SdFat) (Bill Greiman) | 2.2.3 or later | FAT16 / FAT32 (the sketch sets `SDFAT_FILE_TYPE` 1 in `sdConfig.h`) |
 | [ArduinoJson](https://arduinojson.org/) | 7.4.1 or later (7.x) | |
 
 The OSC parser and the watchdog are part of the firmware; the CNMAT OSC library and Adafruit SleepyDog are no longer needed.

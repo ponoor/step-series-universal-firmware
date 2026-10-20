@@ -101,6 +101,7 @@ These changes are visible to OSC clients.
   - STEP400: `/setFullstepSpeed` and `/setFullstepSpeedRaw` keep the BOOST_MODE bit of the FS_SPD register. They cleared it before. The firmware does not set BOOST_MODE, so this is not visible unless the bit is set by other means.
   - `/goUntilRaw` clamps the speed to 20 bits (`0xFFFFF`), like `/runRaw`. Larger values were sent as is, and the driver ignored the upper bits.
 - SD card: files whose name starts with `.` are not candidates for the configuration file. The alphabetically first `*.json` is the one that is read, and when it is invalid the defaults are used; the hidden files `._name.json` that macOS writes next to each file it copies to a FAT card (they are not JSON) came first and so hid every valid `.json` file after them (with a `config.txt` that failed to parse, or none). `config.txt` is read as before.
+- SD card: the values of a `.json` file that is not accepted are no longer applied. A first `.json` without `information.configVersion` was reported as not loaded (`/configName` open 0, parse 0), but its values were still used (`configName` showed its name; any other setting in it would have been applied). The same for a `config.txt` that failed to parse in the middle. Now the defaults are used, as with no card. The priority is unchanged: `config.txt`, then the first valid `.json` (a first `.json` that is invalid ends the search: the defaults).
 
 ### Changed
 

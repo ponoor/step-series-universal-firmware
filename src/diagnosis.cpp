@@ -1310,33 +1310,70 @@ void saveRawConfigToSd(const char* json, size_t len) {
 // so each operation terminates on its own — the watchdog provides no additional safety
 // here. Re-enabling after file.close() restores normal protection.
 //
-// Uses O_RDWR|O_CREAT (no O_APPEND, no O_TRUNC):
-//   SD.remove() deletes the old file → O_RDWR|O_CREAT creates a fresh file at
-//   position 0 with fileSize_=0 → final directory entry has the exact byte count
-//   of the new JSON → no old-file tail bytes → PC reads a clean compact JSON file.
+// The configuration is written to a temporary file in the same directory, closed, and only
+// then replaces the saved file (sd.remove() of the old file, sd.rename() of the new one),
+// so a save that fails while it writes (card full, directory full, a path that cannot be
+// created, a write error) leaves the saved file as it was. The file is created at
+// position 0 with fileSize_=0, so its directory entry has the exact byte count of the new
+// JSON: no old-file tail bytes, and a PC reads a clean compact JSON file.
+//
+// The name of the temporary file starts with '.', so loadConfig() never takes a file left
+// by a power cut for a configuration (findFirstValidJson() skips such names).
+// A power cut between sd.remove() and sd.rename() leaves no file with the saved name, only
+// the temporary one; there is no recovery at start-up.
+static void sdTempName(char* tmp, size_t size) {
+	const char* slash = strrchr(configFilename, '/'); // configFilename starts with '/'
+	const size_t dirLen = slash ? (size_t)(slash - configFilename) + 1 : 0;
+	const char* base = configFilename + dirLen;
+	const char* suffix = ".tmp";
+	const size_t baseLen = strlen(base);
+	size_t n = dirLen;
+	memcpy(tmp, configFilename, dirLen);
+	tmp[n++] = '.';
+	if (n + baseLen + strlen(suffix) < size) {
+		memcpy(tmp + n, base, baseLen);
+		n += baseLen;
+		memcpy(tmp + n, suffix, strlen(suffix) + 1);
+	} else {
+		// A name too long for the buffer: a fixed one (the directory is the same).
+		strcpy(tmp + n, "sdcfg.tmp");
+	}
+}
+
 static bool sdSaveConfig() {
 #ifdef HAVE_SD
 	if (!sdInitializeSucceeded) {
 		return false;
 	}
+	char tmp[MAX_CONFIG_FILENAME + 16];
+	sdTempName(tmp, sizeof(tmp));
 	// The first write to the card can take long (the save measured 82-86 ms by /saveConfig
 	// on the HIL bench, but the card's own delays are not bounded); the watchdog (early
 	// warning about 250 ms, WATCHDOG_TIMEOUT_MS) is off until the file is closed, then
 	// enabled again.
 	Watchdog.disable();
-	sd.remove(configFilename);
+	bool ok = false;
+	bool renameFailed = false;
+	sd.remove(tmp); // a temporary file left by an earlier save
 	File32 file;
-	file.open(configFilename, O_RDWR | O_CREAT);
-	if (!file.isOpen()) {
-		Watchdog.enable(WATCHDOG_TIMEOUT_MS);
-		return false;
+	file.open(tmp, O_RDWR | O_CREAT);
+	if (file.isOpen()) {
+		file.print(F("{"));
+		serializeConfigSectionsTo(file);
+		file.println(F("}"));
+		ok = !file.getWriteError();
+		ok = file.close() && ok;
 	}
-	file.print(F("{"));
-	serializeConfigSectionsTo(file);
-	file.println(F("}"));
-	file.close();
+	if (ok) {
+		sd.remove(configFilename);
+		ok = sd.rename(tmp, configFilename);
+		renameFailed = !ok; // the saved file is gone: keep the temporary one
+	}
+	if (!ok && !renameFailed) {
+		sd.remove(tmp);
+	}
 	Watchdog.enable(WATCHDOG_TIMEOUT_MS);
-	return true;
+	return ok;
 #else
 	return false;
 #endif

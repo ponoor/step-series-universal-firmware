@@ -100,6 +100,7 @@ These changes are visible to OSC clients.
   - STEP400: a maximum speed of 0 is written as 1 (the register value 0 is reserved) by `/setMaxSpeed`, `/setSpeedProfile` and the `maxSpeed` setting of the config file. `/setMaxSpeedRaw 0` still writes 0. STEP800 is unchanged.
   - STEP400: `/setFullstepSpeed` and `/setFullstepSpeedRaw` keep the BOOST_MODE bit of the FS_SPD register. They cleared it before. The firmware does not set BOOST_MODE, so this is not visible unless the bit is set by other means.
   - `/goUntilRaw` clamps the speed to 20 bits (`0xFFFFF`), like `/runRaw`. Larger values were sent as is, and the driver ignored the upper bits.
+- SD card: files whose name starts with `.` are not candidates for the configuration file. The alphabetically first `*.json` is the one that is read, and when it is invalid the defaults are used; the hidden files `._name.json` that macOS writes next to each file it copies to a FAT card (they are not JSON) came first and so hid every valid `.json` file after them (with a `config.txt` that failed to parse, or none). `config.txt` is read as before.
 
 ### Changed
 

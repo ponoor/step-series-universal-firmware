@@ -20,6 +20,10 @@ static bool findFirstValidJson(JsonDocument& doc) {
         entry.getName(candidateName + 1, MAX_CONFIG_FILENAME - 1);
         entry.close();
 
+        // Hidden files: the AppleDouble files (._name.json) that macOS writes next to
+        // every file it copies to the card, .Trashes, ...
+        if (candidateName[1] == '.') continue;
+
         char* dot = strrchr(candidateName, '.');
         if (!dot || strcasecmp(dot, ".json") != 0) continue;
 

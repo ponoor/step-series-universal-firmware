@@ -9,7 +9,7 @@
 	#include "WProgram.h"
 #endif
 
-#include <Adafruit_SleepyDog.h>
+#include "watchdog.h"
 #include "boardsDef.h"
 #include "globals.h"
 #include "loadConfig.h"
@@ -22,13 +22,13 @@ void printConfigurations();
 void printTitle(String title);
 void showBoolResult(String title, bool val);
 template <class T>
-T printAllData(String title, T* val);
+void printAllData(String title, T* val);
 
 void printAllBools(String title, bool* val);
 void printIpAddress(String title, IPAddress ip);
 void boldHeader(String header);
 void printHeader(String header);
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 void testBrake();
 #endif
 

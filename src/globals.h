@@ -11,6 +11,8 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include "boardsDef.h"
+#include "brakeControl.h"
+#include "latchedReport.h"
 #ifdef DRIVER_POWERSTEP01
 #include <Ponoor_PowerSTEP01Library.h>
 #elif defined(DRIVER_L6470)
@@ -27,7 +29,22 @@
 extern const uint8_t firmwareVersion[3]; // defined in boardsDef.h
 extern int8_t loadedConfigVersion[2];
 extern const uint8_t applicableConfigVersion[2]; // defined in boardsDef.h
-#define STATUS_POLL_PERIOD   10 // [ms]
+extern uint8_t resetCause;    // ResetCause (resetCause.h), sent with /booted
+extern uint8_t resetCauseRaw; // raw MCU register value, diagnosis output only
+// loop() runs its periodic tasks in slots scheduled on micros(). Every slot: status read,
+// brake, limit switches, homing timeouts, servo update. Every HOUSEKEEPING_SLOTS slots
+// (10 ms): position reports, Tx/Rx LEDs, DIP switch, boot message, watchdog reset.
+#define SLOT_PERIOD_US       5000 // [us]
+#define HOUSEKEEPING_SLOTS   2
+#define HOUSEKEEPING_PERIOD_MS (SLOT_PERIOD_US * HOUSEKEEPING_SLOTS / 1000) // [ms]
+static_assert(HOUSEKEEPING_PERIOD_MS * 1000 == SLOT_PERIOD_US * HOUSEKEEPING_SLOTS,
+              "the housekeeping period must be a whole number of milliseconds");
+// Watchdog: the early warning (brakes engaged, then reset; watchdog.h) comes this long
+// after the last Watchdog.reset(): 256 WDT cycles (about 250 ms), the period 512 cycles
+// (about 500 ms). At least twice and 100 ms more than the longest interval between two
+// resets in normal operation: 117.4 ms measured (TASK_fault_reset, STEP800, /get* 255 with
+// 276 replies to a reachable destination; the loop resets the watchdog every 10 ms).
+#define WATCHDOG_TIMEOUT_MS  250 // [ms] early warning; enable() rounds down to a power of two of cycles
 
 
 // Tx, Rx LED
@@ -48,10 +65,11 @@ extern bool configProductApplicable;
 
 // Motor drivers
 #ifdef DRIVER_POWERSTEP01
-extern powerSTEP stepper[]; // boardsSpecific.cpp
+typedef powerSTEP MotorDriver;
 #else
-extern AutoDriver stepper[]; // boardsSpecific.cpp
+typedef AutoDriver MotorDriver;
 #endif
+extern MotorDriver stepper[]; // boardsSpecific.cpp
 #define MOTOR_ID_ALL    255
 #define MOTOR_ID_FIRST  1
 #define MOTOR_ID_LAST   NUM_OF_MOTOR
@@ -67,7 +85,14 @@ extern IPAddress
     subnet;
 const IPAddress broadcastIp(255, 255, 255, 255);
 extern unsigned int inPort, outPort, outPort_from_config;
-extern EthernetUDP Udp;
+// EthernetUDP that gives the socket number (protected in the library), for reading the
+// socket registers of the W5500 (readDestMac()). Otherwise the same as EthernetUDP.
+class StepUdp : public EthernetUDP
+{
+public:
+    uint8_t socketIndex() const { return sockindex; } // MAX_SOCK_NUM: not open
+};
+extern StepUdp Udp;
 extern bool
     isDestIpSet,
     isMyIpAddId,
@@ -77,6 +102,8 @@ extern bool
     isWaitingSendBootMsg,
     reportErrors;
 #define BOOT_MSG_WAIT_TIME  1000    //[ms], The waiting duration for sending a boot message after Ethernet has been linked
+#define W5500_RETRANSMISSION_TIMEOUT_MS 20 // [ms], W5500 RTR (see setEthernetRetransmission())
+#define W5500_RETRANSMISSION_COUNT      2  // W5500 RCR; a send to an address without ARP reply blocks 20 ms x 2 (measured 40.8 ms)
 
 // Motor settings.
 #ifdef DRIVER_POWERSTEP01
@@ -86,15 +113,12 @@ extern bool
 // Brake
 #ifdef HAVE_BRAKE
 extern uint8_t brakeOut;
-extern uint8_t brakeStatus[NUM_OF_MOTOR];
-enum {
-    BRAKE_ENGAGED = 0,
-    BRAKE_DISENGAGE_WAITING, // motor excited
-    BRAKE_DISENGAGED,
-    BRAKE_MOTORHIZ_WAITING // brake closed
-};
+extern BrakeState brakeStatus[NUM_OF_MOTOR]; // brakeControl.h
 extern uint32_t brakeTransitionTrigTime[NUM_OF_MOTOR];
-extern bool bBrakeDecWaiting[NUM_OF_MOTOR]; // Waiting deceleration for the brake engaging procedure
+// false from a brake action (state change or driver command) until the next status read
+extern bool brakeStatusFresh[NUM_OF_MOTOR];
+// Homing at startup waits for the brake release (setup())
+extern bool homingAtStartupPending[NUM_OF_MOTOR];
 #endif
 
 // BUSY clear waiting for cascading GOTO, GOTO_DIR, GOHOME, and GOMARK
@@ -134,20 +158,15 @@ enum {
 #endif
     ERROR_GOUNTIL_TIMEOUT,
     ERROR_RELEASESW_TIMEOUT,
-    ERROR_IN_SERVO_MODE
+    ERROR_IN_SERVO_MODE,
+    ERROR_BRAKE_RELEASE_FAILED,
+    ERROR_BRAKE_ENGAGED_ON_HIZ,
+    ERROR_SERVO_MODE_CANCELLED_ON_HIZ,
+    ERROR_MOTOR_NOT_HIZ,     // register writable only while the outputs are HiZ (WH)
+    ERROR_MOTOR_NOT_STOPPED, // register writable only while the motor is stopped or HiZ (WS)
+    ERROR_COUNT // number of error codes, keep last
 };
-const String commandErrorText[8] = {
-    F("CommandIgnored"),
-    F("MotorIdNotMatch"),
-    F("BrakeEngaged"),
-    F("HomeSwActivating"),
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-    F("LimitSwActivating"),
-#endif
-    F("GoUntilTimeout"),
-    F("ReleaseSwTimeout"),
-    F("InServoMode")
-};
+extern const char *const commandErrorText[]; // globals.cpp, ERROR_COUNT entries
 // These values will be initialized at loadConfig()
 extern bool
     busy[NUM_OF_MOTOR],
@@ -183,6 +202,8 @@ extern bool
     bProhibitMotionOnLimitSw[NUM_OF_MOTOR],
 #endif
     bHomingAtStartup[NUM_OF_MOTOR];
+// Rate limit of /overCurrent and /stall (latchedReport.h)
+extern LatchedReport overCurrentReport[NUM_OF_MOTOR], stallReport[NUM_OF_MOTOR];
 extern uint32_t
     goUntilTimeout[NUM_OF_MOTOR],
     releaseSwTimeout[NUM_OF_MOTOR];
@@ -227,9 +248,10 @@ extern float
     fullStepSpeed[NUM_OF_MOTOR];
 
 // Servo mode
-constexpr uint32_t servoPollPeriod = 10; // [ms]
+constexpr uint32_t servoPollPeriod = 5; // [ms], the slot period (loop())
 extern int32_t targetPosition[NUM_OF_MOTOR];
 extern float kP[NUM_OF_MOTOR], kI[NUM_OF_MOTOR], kD[NUM_OF_MOTOR];
 extern boolean isServoMode[NUM_OF_MOTOR];
+void resetServoState(uint8_t motorId); // main.cpp
 #endif
 

@@ -1,0 +1,152 @@
+# HIL test bench configuration.
+# Copy to bench.toml (gitignored) and edit. Keys left out use the defaults shown here.
+# STEP400: copy bench.step400.example.toml instead (see there).
+
+[board]
+# Board model: "step800" (STEP800_R1) or "step400" (STEP400_R1). The bench stops if the
+# firmware name ('s') or the HIL probe map ('P') of the board does not match it.
+model = "step800"
+# DIP switch ID of the STEP800. With the firmware defaults (no config file on the SD
+# card), the network settings follow from it:
+#   IP address    10.0.0.100 + id    (myIp, isMyIpAddId = true)
+#   receive port  50000              (inPort, the ID is not added)
+#   send port     50100 + id         (outPort, isOutPortAddId = true)
+#   subnet        255.255.255.0
+# A config file on the SD card (config.txt, or the first *.json) can change all of
+# these; then set ip / in_port / out_port explicitly.
+id = 1
+# ip = "10.0.0.101"
+# in_port = 50000
+# out_port = 50101
+# The firmware sends replies only after /setDestIp (unless canSendMsgBeforeDestIp is
+# set in the config file). The bench sends /setDestIp at start and checks that the
+# reply names this Mac. The Mac needs an address in the board's subnet (10.0.0.x).
+
+[serial]
+# USB serial port of the STEP800. Empty: auto-detect /dev/cu.usbmodem* (it is an error
+# if there is none or more than one).
+port = ""
+
+[motor]
+# Motor (1-8) connected to the test axis.
+test_axis = 1
+# The bench assumes that no motor (and no brake) is connected: only OUT1A of the test
+# axis goes to Scope 1. The excitation detection ([excitation]) relies on this: a
+# turning motor would add back-EMF to the floating OUT1A and could read as excited.
+# If a motor is connected, review the excitation detection before trusting INV-1/2.
+motor_connected = false
+
+[ad2]
+# Path of the WaveForms runtime. Empty: /Library/Frameworks/dwf.framework/dwf, then
+# /Applications/WaveForms.app/Contents/Frameworks/dwf.framework/dwf.
+# The environment variable DWF_LIBRARY overrides this.
+dwf_library = ""
+# Serial number of the Analog Discovery 2. Empty: the first one found.
+serial_number = ""
+# Device configuration (buffer sizes); -1 = the default configuration.
+configuration = -1
+
+[ad2.dio]
+# AD2 DIO number connected to the brake output of each motor, index 0 = motor 1.
+# Measured with the 'b' serial command (Task 3): motor n is on J2 pin n (DIO n-1).
+brake = [0, 1, 2, 3, 4, 5, 6, 7]
+# AD2 DIO number of each probe, index 0 = P0.
+probes = [8, 9, 10, 11, 12, 13, 14]
+# Home switch of the test axis (open-drain, low = pressed). Must be 15; the bench
+# refuses to drive any other pin.
+home_sw = 15
+# Limit switch of the test axis: STEP400 only (14). -1 on the STEP800, where DIO14 is P6.
+limit_sw = -1
+# DIO on the board's 3.3 V, -1 = none (STEP800: 3.3 V on Scope 2 for the power-up test).
+v33 = -1
+
+[ad2.scope]
+# Scope channels (1 or 2).
+out1a = 1   # OUT1A of the test axis
+v33 = 2     # 3.3 V of the board (power-up test only)
+# Scope channel connected to probe P0 (in parallel with DIO8), 0 = none. Each recording
+# with the Scope and Digital In is aligned from the P0 edges seen by both, because their
+# start times differ by up to a few hundred microseconds from one recording to the
+# next (Task 3). Scope 2 is moved to 3.3 V only for the power-up test.
+p0_ref = 2
+# Input range in volts peak-to-peak: 50 = +/-25 V.
+range_vpp = 50.0
+
+[timing]
+# Processing time measurement (hil.py timing).
+digital_rate = 1e6
+duration = 60.0
+# Load: servo mode on all motors, /setTargetPositionList at target_rate_hz (a sine
+# around the current position on the test axis, 0 on the others), position reports
+# of all motors every position_report_ms (20 ms: the load of STATUS chapter 7; change
+# it per run with --position-report-ms or --position-list-report-ms).
+target_rate_hz = 100.0
+sine_amplitude = 1280   # microsteps (10 full steps at 1/128)
+sine_period = 2.0       # seconds
+position_report_ms = 20
+
+[brake]
+# Brake scenarios (hil.py brake). 1 MHz: P4 pulses are about 10 us and are missed at
+# 100 kHz.
+digital_rate = 1e6
+# Two Scope channels (OUT1A, P0). At 500 kS/s with Digital In at 1 MHz, the Scope lost
+# samples in 4 of 10 recordings of 6 s (2 reported, 2 silent buffer drops); at 200 kS/s
+# none in 10 (Task 5). The excitation is then judged mostly by clamp_v: the PWM pulses
+# (under 3 us at KVAL 16) are only partly sampled.
+analog_rate = 2e5
+transition_ms = 100
+# Allowed brake output delay added to transition_ms for INV-2 and to the checks.
+# Measured (brake fix, Task 5): a command that changes the output directly (/hardHiZ,
+# /free, /activate 0 on a stopped motor) changes it 0.23-0.33 ms after its P1 rise.
+# Changes made by the status read come up to one read period later: with the 10 ms
+# status poll the release after /activate 1 came 101.4-109.5 ms after the command for a
+# 100 ms transition; with the 5 ms slots, 99.8-105.4 ms. 20 ms = the 10 ms poll period
+# + loop jitter + one excitation window (1 ms), kept for the 5 ms slots. (It was 30 ms
+# when the STEP800 output followed the second getMyId(), 10-20 ms after the command.)
+latency_allowance_ms = 20
+kval = 16
+max_speed = 200.0
+position_poll_ms = 20
+
+[excitation]
+# Excitation detection on OUT1A (measured in Task 3, KVAL 16, 12 V):
+#   energized, phase A positive half-cycle: PWM 0-12 V, about 48 edges/ms (23.4 kHz)
+#   energized, other half-cycle or EL_POS 0: OUT1A held at 0 V (B bridge switches)
+#   HiZ: OUT1A floats at about 1.8 V, no edges
+# A window is excited if it has at least min_edges comparator transitions, or if its
+# median voltage is below clamp_v.
+level_v = 3.0
+hysteresis_v = 1.0
+window_ms = 1.0
+min_edges = 10
+clamp_v = 0.9
+# Before each brake scenario (brake engaged, motor HiZ) the median of OUT1A must be in
+# this range, or the scenario is aborted as a wiring problem. Task 3 measured HiZ medians
+# of 1.81-1.83 V (p1-p99 within 0.01 V).
+hiz_median_v = [1.5, 2.1]
+
+[sync]
+# Scope start minus Digital In start, in seconds, used only when ad2.scope.p0_ref = 0.
+# It is not constant (Task 3 measured -395 to +26 us), so prefer p0_ref.
+scope_minus_digital_s = 0.0
+
+[arp]
+# hil.py arp: the client is replaced by another adapter with the same IP address.
+# Two USB-LAN adapters of this Mac, both set to client_ip / 255.255.255.0 (no router),
+# never connected at the same time. Their MAC addresses are read with ifconfig.
+nic_a = "en9"
+nic_b = "en7"
+client_ip = "10.0.0.10"
+# E2 a: an alias address of NIC B, added and removed by a human.
+alias_ip = "10.0.0.11"
+# /setPositionListReportInterval while the client is swapped (ms).
+report_ms = 100
+# Length of each AD2 recording (P0-P6, 1 MHz); the recordings follow each other.
+segment_s = 30.0
+
+# Optional: this Mac's address and interface to the board, when another interface (e.g. Wi-Fi)
+# is on the same subnet and would be used otherwise. Wi-Fi can answer the board's ARP too late
+# (the W5500 waits 40 ms), so replies are lost after each pause of 1.5 s (ARP refresh).
+# [network]
+# local_ip = "10.0.0.10"
+# bound_if = "en9"

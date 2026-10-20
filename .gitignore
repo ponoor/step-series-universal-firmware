@@ -14,3 +14,14 @@ tmpclaude-*
 *.tmp
 *.tmp.*
 claude_temp_*
+platformio_local.ini
+TASK_*.md
+*-plan.md
+.DS_Store
+.claude/settings.local.json
+# HIL test bench (tools/hil)
+tools/hil/bench.toml
+tools/hil/results/
+tools/hil/.venv
+tools/hil/.pytest_cache/
+__pycache__/

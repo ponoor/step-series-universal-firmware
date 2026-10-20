@@ -1,4 +1,6 @@
 #include "boardsSpecific.h"
+#include "packedTransfer.h"
+#include "hilProbe.h"
 #include "wiring_private.h" // pinPeripheral() function
 
 #if defined(STEP400_R1) || defined(STEP400_PROTO_R4) || defined(STEP400_PROTO_R3)
@@ -72,20 +74,79 @@ void initDipSw()
 #endif
 }
 
+#if defined(STEP800_R1)
+// Shift register chain: MOSI -> 74HC165 (DIP switch) -> 74HC595 (brake outputs) -> MISO.
+// The latch (PIN_DIPSW_LATCH) is the SH/LD of the 74HC165 and the RCK of the 74HC595.
+// The first latch loads the DIP switch; after the two bytes, brakeOut is in the shift
+// register of the 74HC595 and the second latch puts it on the outputs.
+static uint8_t exchangeShiftRegisters()
+{
+    PROBE_HIGH(4);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+    shiftRegisterSPI.transfer(brakeOut);
+    const uint8_t dipSw = shiftRegisterSPI.transfer(0);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+    PROBE_LOW(4);
+    return dipSw;
+}
+#endif
+
 #ifdef HAVE_BRAKE
-void initBrake()
+// First thing in setup(): engages every brake output before the drivers are reset.
+// Mainly for a restart that did not engage the brakes first (watchdog, reset button,
+// brown-out): the MCU reset puts the drivers in standby, while the brakes keep their
+// state until here.
+void initBrakeOutputsEngaged()
+{
+#ifdef STEP400_R1
+    // The pins float (Brake Board pull-down: engaged) until here.
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        digitalWrite(brakePin[i], LOW);
+        pinMode(brakePin[i], OUTPUT);
+    }
+#elif defined(STEP800_R1)
+    // The 74HC595 keeps its output register through an MCU reset (G is tied to GND),
+    // while the shift register is cleared (SHIFTOUT_ENABLE floats and R3 pulls it down).
+    // Latch the cleared shift register: all outputs low. initBrake() enables the shift
+    // register afterwards. (At power-up the outputs are released until here; the
+    // bootloader takes most of that time.)
+    digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, LOW);
+    pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    pinMode(PIN_DIPSW_LATCH, OUTPUT);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+#endif
+}
+
+// Watchdog early warning: engages every brake output without SPI, so it does not matter
+// what the interrupted code was doing.
+void engageAllBrakeOutputsFromIsr()
 {
 #ifdef STEP400_R1
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
-    {
-        pinMode(brakePin[i], OUTPUT);    
-    }
+        digitalWrite(brakePin[i], LOW);
 #elif defined(STEP800_R1)
+    // SHIFTOUT_ENABLE low clears the shift register of the 74HC595 at once; the latch
+    // then puts the zeros on the outputs.
+    digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, LOW);
+    digitalWrite(PIN_DIPSW_LATCH, HIGH);
+    brakeOut = 0;
+#endif
+}
+
+void initBrake()
+{
+#if defined(STEP800_R1)
     pinMode(PIN_BRAKE_SHIFTOUT_ENABLE, OUTPUT);
     digitalWrite(PIN_BRAKE_SHIFTOUT_ENABLE, HIGH);
 #endif
 }
 
+// HIGH: released, LOW: engaged. The output changes at once.
 void setBrake(uint8_t motorId, bool state)
 {
 #ifdef STEP400_R1
@@ -99,8 +160,7 @@ void setBrake(uint8_t motorId, bool state)
     {
         bitClear(brakeOut, motorId);
     }
-#elif defined(STEP400_R1)
-    digitalWrite(brakePin[motorId], state);
+    exchangeShiftRegisters();
 #endif
 }
 
@@ -115,11 +175,7 @@ uint8_t getMyId()
         _id |= (!digitalRead(dipSwPin[i])) << i;
     }
 #elif defined(STEP800_R1)
-    digitalWrite(PIN_DIPSW_LATCH, LOW);
-    digitalWrite(PIN_DIPSW_LATCH, HIGH);
-    shiftRegisterSPI.transfer(brakeOut);
-    _id = shiftRegisterSPI.transfer(0);
-    _id = ~_id;
+    _id = ~exchangeShiftRegisters();
 #elif defined(STEP800_PROTO_R3)
     byte shiftInByte[3];
     digitalWrite(PIN_DIPSW_LATCH, LOW);
@@ -167,18 +223,23 @@ void initLimitSw()
 #endif
 void checkLimitSw()
 {
+#ifdef HAVE_LIMIT_ADC
+    uint32_t adcOut[NUM_OF_MOTOR];
+    readAllParams(ADC_OUT, adcOut);
+#endif
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         bool t;
 #ifdef HAVE_LIMIT_ADC
-        t = (stepper[i].getParam(ADC_OUT) < 15U);
+        t = (adcOut[i] < 15U);
 #elif defined(HAVE_LIMIT_GPIO)
         t = !digitalRead(limitSwPin[i]);
 #endif
         if (limitSwState[i] != t)
         {
             limitSwState[i] = !limitSwState[i];
-            if (limitSwState[i] && (limitSwMode[i] == SW_HARD_STOP))
+            // Not to a HiZ motor: HardStop would energize it.
+            if (limitSwState[i] && (limitSwMode[i] == SW_HARD_STOP) && !HiZ[i])
             {
                 stepper[i].hardStop();
             }

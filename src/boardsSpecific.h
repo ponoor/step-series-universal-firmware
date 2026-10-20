@@ -28,6 +28,8 @@ void initDipSw();
 uint8_t getMyId();
 
 #ifdef HAVE_BRAKE
+void initBrakeOutputsEngaged();
+void engageAllBrakeOutputsFromIsr();
 void initBrake();
 void setBrake(uint8_t motorId, bool state);
 #endif

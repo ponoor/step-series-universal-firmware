@@ -2,9 +2,8 @@
 #include "wiring_private.h" // pinPeripheral() function
 #include <SPI.h>
 #include <Ethernet.h>
-#include <OSCMessage.h>         // https://github.com/CNMAT/OSC
 #include <ArduinoJson.h>        //https://arduinojson.org/
-#include <Adafruit_SleepyDog.h> // https://github.com/adafruit/Adafruit_SleepyDog
+#include "watchdog.h"
 
 #include "boardsDef.h"
 #ifdef DRIVER_POWERSTEP01
@@ -19,6 +18,13 @@
 #include "loadConfig.h"
 #include "oscListeners.h"
 #include "diagnosis.h"
+#include "perfStats.h"
+#include "packedTransfer.h"
+#include "resetCause.h"
+#include "homingTimeout.h"
+#include "servoSwitch.h"
+#include "hilProbe.h"
+#include "hilFault.h"
 
 const String productName = PRODUCT_NAME;
 const char *firmwareName = FIRMWARE_NAME;
@@ -29,7 +35,7 @@ constexpr auto position_tolerance = 0; // steps
 
 // for PlatformIO
 void checkStatus();
-void updateServo(uint32_t currentTimeMicros);
+void updateServo();
 void checkHomingTimeout(uint32_t _currentTimeMillis);
 void updatePositionReport(uint32_t _currentTimeMillis);
 void updatePositionReportList(uint32_t _currentTimeMillis);
@@ -39,7 +45,16 @@ void checkLimitSw();
 
 void setup()
 {
+    resetCause = readResetCause(&resetCauseRaw); // before any other initialization
     SerialUSB.begin(9600);
+    HIL_PROBE_INIT();
+    HIL_FAULT_INIT();
+#ifdef HIL_PROBE
+    hilCaptureDriversAtBoot(driverSPI);
+#endif
+#ifdef HAVE_BRAKE
+    initBrakeOutputsEngaged(); // before the drivers are reset
+#endif
     // while (!SerialUSB); // DEBUG
 
     pinMode(ledPin, OUTPUT);
@@ -89,16 +104,27 @@ void setup()
     myId = getMyId();
     dbgPrint("myId:%ld\n", myId);
     delay(1);
+    initOscRouter();
     initEthernet();
     dbgPrint("eth ok\n");
     isWaitingSendBootMsg = bootedMsgEnable;
 
-    Watchdog.enable(100);
+    Watchdog.enable(WATCHDOG_TIMEOUT_MS);
 
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         if (bHomingAtStartup[i])
         {
+#ifdef HAVE_BRAKE
+            // Release the brake as /activate 1 does; updateBrake() starts the homing
+            // once the brake is released.
+            if (electromagnetBrakeEnable[i])
+            {
+                activate(i, true);
+                homingAtStartupPending[i] = true;
+                continue;
+            }
+#endif
             homing(i);
         }
     }
@@ -107,9 +133,17 @@ void setup()
 void checkStatus()
 {
     uint32_t t;
+    uint16_t statusList[NUM_OF_MOTOR];
+    readAllStatus(statusList);
+    const uint32_t nowMs = millis();
+#ifdef HAVE_BRAKE
+    // Read after every brake action so far; an action below makes it stale again.
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        brakeStatusFresh[i] = true;
+#endif
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        const auto status = stepper[i].getStatus();
+        const uint16_t status = statusList[i];
         // HiZ, high for HiZ
         t = (status & STATUS_HIZ) > 0;
         if (HiZ[i] != t)
@@ -117,6 +151,16 @@ void checkStatus()
             HiZ[i] = t;
             if (reportHiZ[i])
                 sendTwoData("/HiZ", i + MOTOR_ID_FIRST, (int32_t)t);
+            // The driver went HiZ by itself (overcurrent, thermal shutdown, UVLO): the
+            // commands that make it HiZ cancel the servo mode first. Cancel it here, before
+            // the servo update of this poll, whose Run would energize the driver again.
+            // Nothing is sent to the driver. With the brake enabled, updateBrake() also
+            // engages the brake and sends BrakeEngagedOnHiZ.
+            if (t && isServoMode[i])
+            {
+                isServoMode[i] = false;
+                sendCommandError(i + MOTOR_ID_FIRST, ERROR_SERVO_MODE_CANCELLED_ON_HIZ);
+            }
         }
         // BUSY, low for busy
         t = (status & STATUS_BUSY) == 0;
@@ -128,6 +172,11 @@ void checkStatus()
 
             if (!busy[i])
             {
+                // Defensive: a stop or HiZ command cancels the pending command.
+                if ((busyClearWaitStatus[i] != NONE) && (HiZ[i] || !brakeReleasedOrDisabled(i)))
+                {
+                    busyClearWaitStatus[i] = NONE;
+                }
                 if (busyClearWaitStatus[i] != NONE)
                 {
                     switch (busyClearWaitStatus[i])
@@ -178,7 +227,8 @@ void checkStatus()
             homeSwState[i] = t;
             if (reportHomeSwStatus[i])
                 getHomeSw(i);
-            if (bProhibitMotionOnHomeSw[i] && homeSwState[i] && (dir[i] == homingDirection[i]))
+            // Not to a HiZ motor: HardStop would energize it.
+            if (bProhibitMotionOnHomeSw[i] && homeSwState[i] && (dir[i] == homingDirection[i]) && !HiZ[i])
             {
                 stepper[i].hardStop();
             }
@@ -188,16 +238,17 @@ void checkStatus()
         if (t)
         {
             // This action is also done in the driver chip but required for the servo mode.
-            if (isServoMode[i] && (!homeSwMode[i]))
+            if (isServoMode[i] && (!homeSwMode[i]) && !HiZ[i])
                 stepper[i].hardStop();
             // Trigger the next sequence of the homing.
             if (homingStatus[i] == HOMING_GOUNTIL)
             {
                 if (bHoming[i])
                 {
-                    releaseSw(i, 0, !homingDirection[i]);
-                    homingStatus[i] = HOMING_RELEASESW;
-                    sendTwoData("/homingStatus", i + MOTOR_ID_FIRST, homingStatus[i]);
+                    if (releaseSw(i, 0, !homingDirection[i]))
+                        sendTwoData("/homingStatus", i + MOTOR_ID_FIRST, homingStatus[i]);
+                    else
+                        clearHomingStatus(i);
                 }
                 else
                 {
@@ -215,13 +266,6 @@ void checkStatus()
             motorStatus[i] = t;
             if (reportMotorStatus[i])
                 sendTwoData("/motorStatus", i + MOTOR_ID_FIRST, motorStatus[i]);
-#ifdef HAVE_BRAKE
-            if (bBrakeDecWaiting[i] && (motorStatus[i] == 0)) // motor stopped
-            {
-                activate(i, false);
-                bBrakeDecWaiting[i] = false;
-            }
-#endif
         }
         // CMD_ERROR, active high, latched
 #ifdef DRIVER_L6470
@@ -252,10 +296,12 @@ void checkStatus()
             if (reportThermalStatus[i])
                 sendTwoData("/thermalStatus", i + MOTOR_ID_FIRST, thermalStatus[i]);
         }
-        // OCD, active low, latched
+        // OCD, active low, latched. The latched flags are set again at every read while
+        // the condition lasts: reported at once, then at most every
+        // LATCHED_REPORT_INTERVAL_MS per motor and kind (latchedReport.h).
         t = (status & STATUS_OCD) == 0;
-        if (t && reportOCD[i])
-            sendOneDatum("/overCurrent", i + 1);
+        if (latchedReportPoll(overCurrentReport[i], t, reportOCD[i], nowMs))
+            sendOneDatum("/overCurrent", i + MOTOR_ID_FIRST);
 
         // STALL A&B, active low, latched
 #ifdef DRIVER_L6470
@@ -263,7 +309,7 @@ void checkStatus()
 #elif defined(DRIVER_POWERSTEP01)
         t = (status & (STATUS_STALL_A | STATUS_STALL_B)) >> 14;
 #endif
-        if ((t != 3) && reportStall[i])
+        if (latchedReportPoll(stallReport[i], t != 3, reportStall[i], nowMs))
             sendOneDatum("/stall", i + MOTOR_ID_FIRST);
     }
 }
@@ -272,11 +318,13 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
 {
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        if ((homingStatus[i] == HOMING_GOUNTIL) && (goUntilTimeout[i] > 0))
+        // homingStartTime can be later than the slot time (step started in this slot).
+        if (homingStatus[i] == HOMING_GOUNTIL)
         {
-            if ((uint32_t)(_currentTimeMillis - homingStartTime[i]) >= goUntilTimeout[i])
+            if (homingTimeoutElapsed(homingStartTime[i], _currentTimeMillis, goUntilTimeout[i]))
             {
-                stepper[i].hardStop();
+                if (!HiZ[i]) // HardStop would energize a HiZ motor
+                    stepper[i].hardStop();
                 sendCommandError(i + MOTOR_ID_FIRST, ERROR_GOUNTIL_TIMEOUT);
                 homingStatus[i] = HOMING_TIMEOUT;
                 if (bHoming[i])
@@ -286,11 +334,12 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
                 }
             }
         }
-        else if ((homingStatus[i] == HOMING_RELEASESW) && (releaseSwTimeout[i] > 0))
+        else if (homingStatus[i] == HOMING_RELEASESW)
         {
-            if ((uint32_t)(_currentTimeMillis - homingStartTime[i]) >= releaseSwTimeout[i])
+            if (homingTimeoutElapsed(homingStartTime[i], _currentTimeMillis, releaseSwTimeout[i]))
             {
-                stepper[i].hardStop();
+                if (!HiZ[i]) // HardStop would energize a HiZ motor
+                    stepper[i].hardStop();
                 sendCommandError(i + MOTOR_ID_FIRST, ERROR_RELEASESW_TIMEOUT);
                 homingStatus[i] = HOMING_TIMEOUT;
                 if (bHoming[i])
@@ -306,15 +355,25 @@ void checkHomingTimeout(uint32_t _currentTimeMillis)
 void updatePositionReport(uint32_t _currentTimeMillis)
 {
     static uint32_t lastPollTime[NUM_OF_MOTOR] = {0};
+    bool due[NUM_OF_MOTOR];
+    bool anyDue = false;
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        if (reportPosition[i])
+        due[i] = reportPosition[i] &&
+                 ((uint32_t)(_currentTimeMillis - lastPollTime[i]) >= reportPositionInterval[i]);
+        anyDue |= due[i];
+    }
+    if (!anyDue)
+        return;
+    // Reading every position with one packed transfer costs the same as reading one.
+    int32_t pos[NUM_OF_MOTOR];
+    readAllPositions(pos);
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (due[i])
         {
-            if ((uint32_t)(_currentTimeMillis - lastPollTime[i]) >= reportPositionInterval[i])
-            {
-                sendTwoData("/position", i + MOTOR_ID_FIRST, stepper[i].getPos());
-                lastPollTime[i] = _currentTimeMillis;
-            }
+            sendTwoData("/position", i + MOTOR_ID_FIRST, pos[i]);
+            lastPollTime[i] = _currentTimeMillis;
         }
     }
 }
@@ -329,96 +388,221 @@ void updatePositionReportList(uint32_t _currentTimeMillis)
     }
 }
 #define INTEGRAL_LIMIT 1500.0f
-void updateServo(uint32_t _currentTime)
+// Gains are tuned for a 10 ms period. Scaling the I and D terms by the period keeps
+// the same kP/kI/kD usable when servoPollPeriod changes (identity at 10 ms). At the 5 ms
+// slot it is 0.5: each update adds half as much to the integral, and the difference of
+// the error is divided by 0.5, so the continuous-time response stays about the same.
+constexpr float servoDtRatio = servoPollPeriod / 10.0f;
+
+// PID state of the servo mode, reset by resetServoState() when the servo mode is enabled.
+static float servoIntegral[NUM_OF_MOTOR] = {0.0f};
+static float servoPrevError[NUM_OF_MOTOR] = {0.0f};
+
+void resetServoState(uint8_t motorId)
 {
-    static uint32_t lastServoUpdateTime = 0;
-    static float eZ1[NUM_OF_MOTOR] = {0.0},
-                 //  eZ2[NUM_OF_MOTOR] = {0.0},
-        integral[NUM_OF_MOTOR] = {0.0};
-        if ((uint32_t)(_currentTime - lastServoUpdateTime) >= servoPollPeriod)
+    servoIntegral[motorId] = 0.0f;
+    servoPrevError[motorId] = 0.0f;
+}
+
+// Computes the run command of a motor in the servo mode from its current position.
+static void computeServoSpeed(uint8_t i, int32_t currentPos, bool &dir, float &absSpd)
+{
+    float spd = 0.0f;
+    int32_t error = targetPosition[i] - currentPos;
+    // Wrap into the ABS_POS range (22 bit, -2^21 to 2^21-1).
+    if (error > 0x1FFFFFL)
+        error -= 0x400000L;
+    else if (error < -0x200000L)
+        error += 0x400000L;
+    if (labs(error) > position_tolerance)
+    {
+        servoIntegral[i] += (((float)error + servoPrevError[i]) * 0.5f) * servoDtRatio;
+        if (servoIntegral[i] > INTEGRAL_LIMIT)
+            servoIntegral[i] = INTEGRAL_LIMIT;
+        else if (servoIntegral[i] < -INTEGRAL_LIMIT)
+            servoIntegral[i] = -INTEGRAL_LIMIT;
+        float diff = ((float)error - servoPrevError[i]) / servoDtRatio;
+
+        spd = (float)error * kP[i] + servoIntegral[i] * kI[i] + diff * kD[i];
+    }
+    servoPrevError[i] = error;
+    absSpd = fabsf(spd);
+    dir = (spd > 0.0f);
+    // The home switch and the limit switch are judged separately (servoSwitch.h).
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+    if (servoSwitchBlocks(homeSwState[i], limitSwState[i], bProhibitMotionOnHomeSw[i],
+                          bProhibitMotionOnLimitSw[i], homeSwMode[i], limitSwMode[i],
+                          homingDirection[i], dir))
+#else
+    if (servoSwitchBlocks(homeSwState[i], false, bProhibitMotionOnHomeSw[i], false,
+                          homeSwMode[i], true, homingDirection[i], dir))
+#endif
+        absSpd = 0.0f;
+}
+
+// The servo update runs once per slot (see loop()), so its period is the slot period.
+static_assert(servoPollPeriod * 1000 == SLOT_PERIOD_US,
+              "updateServo() runs in every slot: a servo period other than SLOT_PERIOD_US "
+              "needs a servo schedule separate from the slots");
+
+// One servo update. Called once per slot; the P2 pulse and the timing statistics are
+// produced on every call, also when no motor is in the servo mode.
+void updateServo()
+{
+    static uint32_t lastServoUpdateMicros = 0;
+    PROBE_HIGH(2);
+
+    const uint32_t nowMicros = micros();
+    if (lastServoUpdateMicros != 0)
+        perfAdd(perfStats.servoInterval, nowMicros - lastServoUpdateMicros);
+    lastServoUpdateMicros = nowMicros;
+
+    bool servoActive[NUM_OF_MOTOR];
+    bool anyServo = false;
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        // Defensive: the servo mode is cancelled when the brake engages.
+        servoActive[i] = isServoMode[i] && brakeReleasedOrDisabled(i);
+        anyServo |= servoActive[i];
+    }
+    if (anyServo)
+    {
+        int32_t pos[NUM_OF_MOTOR];
+        bool runDir[NUM_OF_MOTOR];
+        float absSpd[NUM_OF_MOTOR];
+        readAllPositions(pos);
+        // Motors not in the servo mode stay unprepared and receive NOP.
+        for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+        {
+            if (servoActive[i])
+            {
+                computeServoSpeed(i, pos[i], runDir[i], absSpd[i]);
+                stepper[i].prepareRun(runDir[i], absSpd[i]);
+            }
+        }
+        if (!performPreparedTransfer())
         {
             for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
             {
-                if (isServoMode[i])
-                {
-                float spd = 0.0;
-                int32_t error = targetPosition[i] - stepper[i].getPos();
-                if (error > 0x1FFFFFL)
-                    error -= 0x3FFFFFL; // wrap ABS_POS 22bit range.
-                else if (error < -0x1FFFFFL)
-                    error += 0x3FFFFFL;
-                if (labs(error) > position_tolerance)
-                {
-                    integral[i] += (((float)error + eZ1[i]) * 0.5f);
-                    if (integral[i] > INTEGRAL_LIMIT)
-                        integral[i] = INTEGRAL_LIMIT;
-                    else if (integral[i] < -INTEGRAL_LIMIT)
-                        integral[i] = -INTEGRAL_LIMIT;
-                    double diff = error - eZ1[i];
-
-                    spd = (float)error * kP[i] + integral[i] * kI[i] + diff * kD[i];
-                }
-                // eZ2[i] = eZ1[i];
-                eZ1[i] = error;
-                float absSpd = fabsf(spd);
-                bool dir = (spd > 0.0f);
-                if (homeSwState[i])
-                {
-                    if ((bProhibitMotionOnHomeSw[i] || !homeSwMode[i]) && (homingDirection[i] == dir))
-                        absSpd = 0.0f;
-                }
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-                else if (limitSwState[i])
-                {
-                    if ((bProhibitMotionOnLimitSw[i] || !limitSwMode[i]) && (homingDirection[i] != dir))
-                        absSpd = 0.0f;
-                }
-#endif
-                stepper[i].run(dir, absSpd);
-                // sendTwoData("/integral", i + MOTOR_ID_FIRST, (int32_t)integral[i]); // debug
+                if (servoActive[i])
+                    stepper[i].run(runDir[i], absSpd[i]);
             }
         }
-        lastServoUpdateTime = _currentTime;
     }
+    PROBE_LOW(2);
 }
 
 void loop()
 {
-    uint32_t currentTimeMillis = millis();
-    static uint32_t lastPollTime = 0;
+    PROBE_TOGGLE(0);
+    HIL_FAULT_LOOP_MARK();
+    static uint32_t lastLoopStartMicros = 0;
+    const uint32_t loopStartMicros = micros();
+    if (lastLoopStartMicros != 0)
+        perfAdd(perfStats.loop, loopStartMicros - lastLoopStartMicros);
+    lastLoopStartMicros = loopStartMicros;
 
-    if ((uint32_t)(currentTimeMillis - lastPollTime) >= STATUS_POLL_PERIOD)
+    // Slots every SLOT_PERIOD_US on micros() (the 1 ms steps of millis() would be 20 % of
+    // a slot). The first slot runs in the first pass. The next slot is due one period
+    // after the previous due time, so a slot that starts late is followed by a shorter
+    // interval; if it starts a whole period or more late, the schedule restarts from now
+    // (counted in perfStats). The differences are taken as int32_t, so the wrap of
+    // micros() (about 71 min) does not matter: the due time stays within one period of now.
+    static bool slotScheduled = false;
+    static uint32_t nextSlotMicros;
+    static uint8_t housekeepingSlot = 0;
+    // Clock of the position reports [ms]: advances by exactly HOUSEKEEPING_PERIOD_MS at
+    // every housekeeping run. millis() at the slot start would not do: a slot delayed by an
+    // OSC packet can start past a millisecond boundary, and the report interval measured
+    // from it to the next, punctual slot is then 1 ms short, so a report waited one more
+    // housekeeping run (30 ms instead of 20 ms). The other functions keep millis(): they
+    // compare it with times taken with millis() while OSC messages are processed.
+    static bool reportClockAligned = false;
+    static uint32_t reportClockMillis;
+    if (!slotScheduled)
     {
-#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
-        checkLimitSw();
-#endif
+        nextSlotMicros = loopStartMicros;
+        slotScheduled = true;
+    }
+    if ((int32_t)(loopStartMicros - nextSlotMicros) >= 0)
+    {
+        nextSlotMicros += SLOT_PERIOD_US;
+        if ((int32_t)(loopStartMicros - nextSlotMicros) >= 0)
+        {
+            nextSlotMicros = loopStartMicros + SLOT_PERIOD_US;
+            perfStats.slotLateCount++;
+            reportClockAligned = false; // the slots no longer follow the old schedule
+        }
+        // The functions that time in milliseconds get the time of the slot start.
+        const uint32_t currentTimeMillis = millis();
+
+        // checkStatus() first: the brake poll, the limit switches, the homing timeout and
+        // the servo update use the HiZ flags and the switch states read in this slot.
+        uint32_t t0 = micros();
+        PROBE_HIGH(3);
+        checkStatus();
+        PROBE_LOW(3);
+        perfAdd(perfStats.checkStatus, micros() - t0);
 #ifdef HAVE_BRAKE
         updateBrake(currentTimeMillis);
 #endif
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+        checkLimitSw();
+#endif
         checkHomingTimeout(currentTimeMillis);
-        updatePositionReport(currentTimeMillis);
-        if (reportPositionList)
-            updatePositionReportList(currentTimeMillis);
-        checkStatus();
-        updateRxTxLed(currentTimeMillis);
-        uint8_t t = getMyId();
-        if (myId != t)
+        // The servo update runs here, at a fixed point after the start of the slot: its
+        // start does not depend on the length of the position reports below or of the OSC
+        // packets processed in the loop, so its period stays at SLOT_PERIOD_US. It uses
+        // the status, the switch states and the brake state of this slot.
+        t0 = micros();
+        updateServo();
+        perfAdd(perfStats.updateServo, micros() - t0);
+
+        // Every HOUSEKEEPING_SLOTS slots (10 ms), after the servo update.
+        if (housekeepingSlot == 0)
         {
-            myId = t;
-            initEthernet();
+            if (!reportClockAligned)
+            {
+                reportClockMillis = currentTimeMillis;
+                reportClockAligned = true;
+            }
+            else
+            {
+                reportClockMillis += HOUSEKEEPING_PERIOD_MS; // uint32_t: wraps with millis()
+                const int32_t offset = (int32_t)(currentTimeMillis - reportClockMillis);
+                if ((offset > 20) || (offset < -20)) // not expected: the slots follow micros()
+                {
+                    reportClockMillis = currentTimeMillis;
+                    perfStats.reportClockRealignCount++;
+                }
+            }
+            updatePositionReport(reportClockMillis);
+            if (reportPositionList)
+                updatePositionReportList(reportClockMillis);
+            updateRxTxLed(currentTimeMillis);
+            uint8_t t = getMyId();
+            if (myId != t)
+            {
+                myId = t;
+                initEthernet();
+            }
+            updateArpResolve();
+            if (isWaitingSendBootMsg)
+            {
+                sendBootMsg(currentTimeMillis);
+            }
+            // Not more often: reset() waits for the previous clear to synchronize (2-3 ms).
+            Watchdog.reset();
         }
-        if (isWaitingSendBootMsg)
-        {
-            sendBootMsg(currentTimeMillis);
-        }
-        Watchdog.reset();
-        lastPollTime = currentTimeMillis;
+        if (++housekeepingSlot >= HOUSEKEEPING_SLOTS)
+            housekeepingSlot = 0;
     }
 
     if (SerialUSB.available() > 0)
     {
         diagnosisCommand(SerialUSB.read());
     }
-    OSCMsgReceive();
-    updateServo(currentTimeMillis);
+    uint32_t t0 = micros();
+    if (OSCMsgReceive())
+        perfAdd(perfStats.oscReceive, micros() - t0);
 }

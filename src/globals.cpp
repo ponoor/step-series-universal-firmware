@@ -3,7 +3,12 @@
 //
 
 #include "globals.h"
+#include "sdConfig.h"
 #include <SdFat.h>
+
+// Reset cause, read at the beginning of setup()
+uint8_t resetCause = 0;
+uint8_t resetCauseRaw = 0;
 
 // Tx, Rx LED
 bool rxLedEnabled = false, txLedEnabled = false;
@@ -20,6 +25,27 @@ bool configFileParseSucceeded = false;
 int8_t loadedConfigVersion[2] = {-1,0};
 bool configProductApplicable = false;
 
+// Command errors
+const char *const commandErrorText[] = {
+    "CommandIgnored",
+    "MotorIdNotMatch",
+    "BrakeEngaged",
+    "HomeSwActivating",
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+    "LimitSwActivating",
+#endif
+    "GoUntilTimeout",
+    "ReleaseSwTimeout",
+    "InServoMode",
+    "BrakeReleaseFailed",
+    "BrakeEngagedOnHiZ",
+    "ServoModeCancelledOnHiZ",
+    "MotorNotHiZ",
+    "MotorNotStopped"
+};
+static_assert(sizeof(commandErrorText) / sizeof(commandErrorText[0]) == ERROR_COUNT,
+              "commandErrorText must have one entry per error code");
+
 // Network
 uint8_t mac[] = { 0x60, 0x95, 0xCE, 0x10, 0x06, 0x00 },
 mac_from_config[],
@@ -33,7 +59,7 @@ IPAddress
     subnet(255, 255, 255, 0);
 unsigned int outPort, outPort_from_config;
 unsigned int inPort;
-EthernetUDP Udp;
+StepUdp Udp;
 boolean
     isDestIpSet,
     isMyIpAddId,
@@ -44,9 +70,10 @@ boolean
 boolean isWaitingSendBootMsg = false;
 #ifdef HAVE_BRAKE
 uint8_t brakeOut = 0;
-uint8_t brakeStatus[NUM_OF_MOTOR]; 
+BrakeState brakeStatus[NUM_OF_MOTOR];
 uint32_t brakeTransitionTrigTime[NUM_OF_MOTOR];
-bool bBrakeDecWaiting[NUM_OF_MOTOR];
+bool brakeStatusFresh[NUM_OF_MOTOR];
+bool homingAtStartupPending[NUM_OF_MOTOR];
 #endif
 
 // Homing
@@ -95,6 +122,7 @@ bool
 #endif
     bHomingAtStartup[NUM_OF_MOTOR];
 float homingSpeed[NUM_OF_MOTOR];
+LatchedReport overCurrentReport[NUM_OF_MOTOR], stallReport[NUM_OF_MOTOR];
 uint32_t
     goUntilTimeout[NUM_OF_MOTOR],
     releaseSwTimeout[NUM_OF_MOTOR];

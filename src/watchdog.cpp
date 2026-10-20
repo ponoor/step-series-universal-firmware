@@ -1,0 +1,137 @@
+// watchdog.cpp
+// See watchdog.h.
+
+#include "watchdog.h"
+#include <Arduino.h>
+#include "hilProbe.h"
+
+WatchdogTimer Watchdog;
+
+#ifdef HIL_PROBE
+namespace
+{
+bool gapEnabled = false; // the watchdog is enabled (reset() while disabled is not counted)
+bool gapActive = false;  // an interval is being measured
+uint32_t gapLastUs = 0;
+uint32_t gapLastCaller = 0;
+uint32_t gapMaxUs = 0;
+uint32_t gapMaxFrom = 0; // return address of the reset() call that started the longest interval
+uint32_t gapMaxTo = 0;   // and of the one that ended it
+
+void gapMark(uint32_t caller)
+{
+    if (!gapEnabled)
+        return;
+    const uint32_t now = micros();
+    if (gapActive && ((uint32_t)(now - gapLastUs) > gapMaxUs))
+    {
+        gapMaxUs = now - gapLastUs;
+        gapMaxFrom = gapLastCaller;
+        gapMaxTo = caller;
+    }
+    gapActive = true;
+    gapLastUs = now;
+    gapLastCaller = caller;
+}
+} // namespace
+
+void watchdogGapTake(uint32_t &maxUs, uint32_t &from, uint32_t &to)
+{
+    maxUs = gapMaxUs;
+    from = gapMaxFrom;
+    to = gapMaxTo;
+    gapMaxUs = 0;
+    gapMaxFrom = 0;
+    gapMaxTo = 0;
+}
+#define GAP_CALLER() ((uint32_t)__builtin_return_address(0) & ~1u)
+#endif
+
+int WatchdogTimer::enable(int earlyWarningMs)
+{
+    if (!initialized)
+    {
+        // Generic clock generator 2: OSCULP32K / 32 (DIVSEL: 2^(DIV+1)) = 1024 Hz
+        GCLK->GENDIV.reg = GCLK_GENDIV_ID(2) | GCLK_GENDIV_DIV(4);
+        GCLK->GENCTRL.reg = GCLK_GENCTRL_ID(2) | GCLK_GENCTRL_GENEN |
+                            GCLK_GENCTRL_SRC_OSCULP32K | GCLK_GENCTRL_DIVSEL;
+        while (GCLK->STATUS.bit.SYNCBUSY)
+            ;
+        GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID_WDT | GCLK_CLKCTRL_CLKEN | GCLK_CLKCTRL_GEN_GCLK2;
+        NVIC_DisableIRQ(WDT_IRQn);
+        NVIC_ClearPendingIRQ(WDT_IRQn);
+        NVIC_SetPriority(WDT_IRQn, 0); // top priority
+        NVIC_EnableIRQ(WDT_IRQn);
+        initialized = true;
+    }
+    WDT->CTRL.reg = 0; // disabled for the configuration
+    while (WDT->STATUS.bit.SYNCBUSY)
+        ;
+    // Cycles of the early warning: 8 << bits, bits 0 to 0xA (8 s); the period is the
+    // next setting (twice as long, up to 16 s).
+    const long cycles = ((long)earlyWarningMs * 1024L + 500) / 1000;
+    uint8_t bits = 0;
+    while ((bits < 0xA) && ((8L << (bits + 1)) <= cycles))
+        bits++;
+    WDT->CONFIG.reg = WDT_CONFIG_PER(bits + 1);
+    WDT->EWCTRL.reg = WDT_EWCTRL_EWOFFSET(bits);
+    WDT->INTFLAG.reg = WDT_INTFLAG_EW;
+    WDT->INTENSET.reg = WDT_INTENSET_EW;
+#ifdef HIL_PROBE
+    gapEnabled = true; // the reset() below starts an interval
+    gapActive = false;
+#endif
+    reset();
+    WDT->CTRL.bit.ENABLE = 1;
+    while (WDT->STATUS.bit.SYNCBUSY)
+        ;
+    return (int)(((8L << bits) * 1000L + 512) / 1024);
+}
+
+void WatchdogTimer::reset()
+{
+    while (WDT->STATUS.bit.SYNCBUSY)
+        ;
+    WDT->CLEAR.reg = WDT_CLEAR_CLEAR_KEY;
+#ifdef HIL_PROBE
+    gapMark(GAP_CALLER());
+#endif
+}
+
+void WatchdogTimer::clearFromIsr()
+{
+    while (WDT->STATUS.bit.SYNCBUSY)
+        ;
+    WDT->CLEAR.reg = WDT_CLEAR_CLEAR_KEY;
+}
+
+void WatchdogTimer::disable()
+{
+#ifdef HIL_PROBE
+    gapEnabled = false;
+    gapActive = false;
+#endif
+    WDT->CTRL.bit.ENABLE = 0;
+    while (WDT->STATUS.bit.SYNCBUSY)
+        ;
+    WDT->INTENCLR.reg = WDT_INTENCLR_EW;
+    WDT->INTFLAG.reg = WDT_INTFLAG_EW;
+}
+
+#ifdef HIL_PROBE
+// HIL: WDT_Handler (hilFault.cpp) records the interrupted code first, then runs this.
+extern "C" void hilWdtHandlerBody(void)
+#else
+void WDT_Handler(void)
+#endif
+{
+    WDT->INTFLAG.reg = WDT_INTFLAG_EW;
+    onWatchdogEarlyWarning();
+    PROBE_HIGH(0); // HIL: the last P0 edge marks the MCU reset (the pin floats then)
+    // Any value but the key resets the MCU at once (reset cause: watchdog).
+    while (WDT->STATUS.bit.SYNCBUSY)
+        ;
+    WDT->CLEAR.reg = 0;
+    while (true)
+        ;
+}

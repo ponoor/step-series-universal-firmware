@@ -1,0 +1,7 @@
+# Tested with Python 3.14.4. numpy 2.5 requires Python 3.12 or later.
+dwfpy==1.2.0
+python-osc==1.10.2
+pyserial==3.5
+numpy==2.5.4
+matplotlib==3.11.2
+pytest==9.1.1

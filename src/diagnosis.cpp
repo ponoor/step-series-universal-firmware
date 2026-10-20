@@ -5,6 +5,11 @@
 #include "diagnosis.h"
 #include "utils.h"
 #include <strings.h>
+#include "perfStats.h"
+#include "resetCause.h"
+#include "hilProbe.h"
+#include "hilFault.h"
+#include "oscListeners.h"
 
 String configVersionCompareString[5] = {
 	F("CONFIG_VERSION_UNDEFINED"),
@@ -32,7 +37,7 @@ void diagnosisCommand(uint8_t inByte) {
 	case 't':
 		testMotion();
 		break;
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 	case 'b':
 		testBrake();
 		break;
@@ -52,6 +57,46 @@ void diagnosisCommand(uint8_t inByte) {
 	case 'R':
 		rebootBoard();
 		break;
+	case 'p':
+		perfStatsPrint();
+		break;
+#ifdef HIL_PROBE
+	case 'P':
+		hilProbeSelfTest();
+		break;
+	case 'Z':
+		// HIL test: HardHiZ to every driver, bypassing the brake state machine, to
+		// simulate a driver that goes HiZ by itself (overcurrent, thermal, UVLO).
+		for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+			stepper[i].hardHiZ();
+		dbgPrint("HIL: hardHiZ sent to all drivers\n");
+		break;
+	case 'D':
+		hilPrintDriversAtBoot();
+		break;
+	case 'W':
+		// HIL test: hang without resetting the watchdog (early warning, then reset).
+		dbgPrint("HIL: hanging for the watchdog\n");
+		SerialUSB.flush();
+		while (true)
+			;
+		break;
+	case 'Y':
+		hilDriverStandbyTest();
+		break;
+	case 'N':
+		hilReopenUdp();
+		break;
+	case 'U':
+		hilSendOtherDest();
+		break;
+	case 'H':
+		hilFaultPrint();
+		break;
+	case 'X':
+		hilFaultTrigger();
+		break;
+#endif
 	default:
 		break;
 	}
@@ -62,7 +107,7 @@ void printMenu() {
 	dbgPrint("s: show status\n");
 	dbgPrint("c: show config\n");
 	dbgPrint("t: test motion\n");
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 	dbgPrint("b: test brake\n");
 #endif
 	dbgPrint("G: print config as JSON\n");
@@ -70,11 +115,24 @@ void printMenu() {
 	dbgPrint("{: receive config JSON\n");
 	dbgPrint("F<filename>: set save filename\n");
 	dbgPrint("R: reboot board\n");
+	dbgPrint("p: print timing stats [us] and reset them\n");
+#ifdef HIL_PROBE
+	dbgPrint("P: HIL probe self-test (ch + 1 pulses on each probe with a pin)\n");
+	dbgPrint("Z: HIL test, hardHiZ to all drivers (bypasses the brake)\n");
+	dbgPrint("D: HIL test, driver CONFIG / STATUS read at boot before the reset\n");
+	dbgPrint("Y: HIL test, driver reset line floating for 300 ms (standby), then setup\n");
+	dbgPrint("W: HIL test, hang until the watchdog resets the board\n");
+	dbgPrint("N: HIL test, reopen the UDP socket (ARP refresh candidate C1)\n");
+	dbgPrint("U: HIL test, 1 byte to 255.255.255.255:9 (ARP refresh candidate C2)\n");
+	dbgPrint("H: HIL record of the last HardFault / early warning (kept across a reset), then clear it\n");
+	dbgPrint("X: HIL test, HardFault (unaligned read)\n");
+#endif
 }
 
 void testMotion() {
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
-		if (checkMotionStartConditions(i, dir)) {
+		if (checkMotionStartConditions(i, FWD)) {
+			commitMotionStart(i);
 			stepper[i].move(FWD, 25600);
 		}
 	}
@@ -142,6 +200,12 @@ void printCurrentState() {
 	printIpAddress(F("Destination Ip"), destIp);
 	printIpAddress(F("Current My Ip"), myIp);
 	dbgPrint("Current MAC address : %02X:%02X:%02X:%02X:%02X:%02X\n",mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+	{
+		// The MAC address the last send went to (readDestMac(): FF:...:FF after a broadcast).
+		uint8_t dm[6];
+		readDestMac(dm);
+		dbgPrint("Destination MAC address : %02X:%02X:%02X:%02X:%02X:%02X\n", dm[0], dm[1], dm[2], dm[3], dm[4], dm[5]);
+	}
 	dbgPrint("Current outPort : %d\n", outPort);
 
 #ifdef HAVE_SD
@@ -154,7 +218,7 @@ void printCurrentState() {
 	uint16_t status[NUM_OF_MOTOR];
 	uint32_t temp = 0;
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++) {
-		status[i] = stepper[i].getStatus();
+		status[i] = stepper[i].getParam(REG_STATUS); // GetStatus would clear the latched flags
 		temp += status[i];
 	}
 	showBoolResult(F("Motor driver SPI connection established"), temp != 0);
@@ -162,11 +226,11 @@ void printCurrentState() {
 		for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
 		{
 			temp = 0;
-			dbgPrint("Driver ID#%d\n", i+1);
+			dbgPrint("Driver ID#%d\n", i + MOTOR_ID_FIRST);
 			temp = stepper[i].getPos();
 			dbgPrint("\tABS_POS: 0x%02X (%dstep)\n",temp, temp);
 			temp = stepper[i].getElPos();
-			dbgPrint("\tEL_POS: 0x%02X (Fullstep:%d, Microstep:%d)\n", temp, (temp>>7),(temp%0x7F));
+			dbgPrint("\tEL_POS: 0x%02X (Fullstep:%d, Microstep:%d)\n", temp, (temp>>7),(temp&0x7F));
 			temp = stepper[i].getMark();
 			dbgPrint("\tMARK: 0x%02X (%dstep)\n", temp, temp);
 			dbgPrint("\tSPEED: 0x%02X (%.1fstep/s)\n", stepper[i].getParam(SPEED), stepper[i].getSpeed());
@@ -219,34 +283,34 @@ void printCurrentState() {
 
 			temp = stepper[i].getParam(CONFIG);
 			dbgPrint("\tCONFIG: 0x%02X\n", temp);
-			dbgPrint("\t  OSC_SEL: %d\n", temp%0x7);
-			dbgPrint("\t  EXT_CLK: %d\n", (temp>>3)%0x1);
-			dbgPrint("\t  SW_MODE: %d\n", (temp>>4)%0x1);
+			dbgPrint("\t  OSC_SEL: %d\n", temp&0x7);
+			dbgPrint("\t  EXT_CLK: %d\n", (temp>>3)&0x1);
+			dbgPrint("\t  SW_MODE: %d\n", (temp>>4)&0x1);
 #ifdef DRIVER_POWERSTEP01
 			if (isCurrentMode[i])
-				dbgPrint("\t  EN_TQREG: %d\n", (temp>>5)%0x1);
+				dbgPrint("\t  EN_TQREG: %d\n", (temp>>5)&0x1);
 			else
-				dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
+				dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)&0x1);
 
-			dbgPrint("\t  OC_SD: %d\n", (temp>>7)%0x1);
-			dbgPrint("\t  UVLOVAL: %d\n", (temp>>8)%0x1);
-			dbgPrint("\t  VCCVAL: %d\n", (temp>>9)%0x1);
+			dbgPrint("\t  OC_SD: %d\n", (temp>>7)&0x1);
+			dbgPrint("\t  UVLOVAL: %d\n", (temp>>8)&0x1);
+			dbgPrint("\t  VCCVAL: %d\n", (temp>>9)&0x1);
 			if (isCurrentMode[i])
 			{
-				dbgPrint("\t  TSW: %d\n", (temp>>10)%0x1F);
-				dbgPrint("\t  PRED_EN: %d\n", (temp>>15)%0x1);
+				dbgPrint("\t  TSW: %d\n", (temp>>10)&0x1F);
+				dbgPrint("\t  PRED_EN: %d\n", (temp>>15)&0x1);
 			}
 			else{
-				dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)%0x7);
-				dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)%0x7);
+				dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)&0x7);
+				dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)&0x7);
 			}
 			
 #elif defined(DRIVER_L6470)
-			dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)%0x1);
-			dbgPrint("\t  OC_SD: %d\n", (temp>>7)%0x1);
-			dbgPrint("\t  POW_SR: %d\n", (temp>>8)%0x3);
-			dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)%0x7);
-			dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)%0x7);
+			dbgPrint("\t  EN_VSCOMP: %d\n", (temp>>5)&0x1);
+			dbgPrint("\t  OC_SD: %d\n", (temp>>7)&0x1);
+			dbgPrint("\t  POW_SR: %d\n", (temp>>8)&0x3);
+			dbgPrint("\t  F_PWM_DEC: %d\n", (temp>>10)&0x7);
+			dbgPrint("\t  F_PWM_INT: %d\n", (temp>>13)&0x7);
 #endif
 
 			dbgPrint("\tSTATUS: 0x%02X\n", status[i]);
@@ -278,6 +342,12 @@ void printCurrentState() {
 
 			t = (status[i] & STATUS_UVLO) == 0;
 			showBoolResult("\t  UVLO (Undervoltage lock out)", t);
+#ifdef DRIVER_POWERSTEP01
+			// UVLO_ADC, active low, latched: ADCIN below the ADC UVLO threshold. On the
+			// STEP400 the limit switch pulls ADCIN to GND, so a pressed limit switch shows Yes.
+			t = (status[i] & STATUS_UVLO_ADC) == 0;
+			showBoolResult("\t  UVLO_ADC (ADCIN undervoltage)", t);
+#endif
 
 #ifdef DRIVER_L6470
         	t = (status[i] & (STATUS_TH_WRN|STATUS_TH_SD)) >> 10;
@@ -293,12 +363,22 @@ void printCurrentState() {
 			case 1:
 				s = "Warning";
 				break;
+#ifdef DRIVER_L6470
+			// bit 0: TH_WRN, bit 1: TH_SD (both active low in STATUS, inverted above)
+			case 2:
+				s = "Shutdown";
+				break;
+			case 3:
+				s = "Warning and shutdown";
+				break;
+#elif defined(DRIVER_POWERSTEP01)
 			case 2:
 				s = "Bridge shutdown";
 				break;
 			case 3:
 				s = "Device shutdown";
 				break;
+#endif
 			default:
 				break;
 			}
@@ -336,9 +416,9 @@ void printCurrentState() {
 #ifdef HAVE_BRAKE
 	printAllBools(F("Electromagnetic Brake Enable"),electromagnetBrakeEnable);
 	dbgPrint("Brake status :\n");
-	String bsText[4] = {"BRAKE_ENGAGED","BRAKE_DISENGAGE_WAITING","BRAKE_DISENGAGED","BRAKE_MOTORHIZ_WAITING"};
+	const char *const bsText[BRAKE_STATE_COUNT] = {"ENGAGED","RELEASING","RELEASED","STOPPING","ENGAGING","FREE"};
 	for (uint8_t i=0; i<NUM_OF_MOTOR; i++) {
-		dbgPrint("#%d : %s\n",i+1,bsText[brakeStatus[i]].c_str());
+		dbgPrint("#%d : %d %s\n",i + MOTOR_ID_FIRST,brakeStatus[i],bsText[brakeStatus[i]]);
 	}
 #endif
 	printAllData(F("Homing status"), homingStatus);
@@ -379,7 +459,6 @@ void printConfigurations() {
 	showBoolResult(F("reportErrors"), reportErrors);
 
 	printHeader(F("Report & Alarm"));
-	printAllBools(F("reportBUSY"), reportBUSY); 
 	printAllBools(F("reportBUSY"), reportBUSY);
 	printAllBools(F("reportHiZ"), reportHiZ);
 	printAllBools(F("reportHomeSwStatus"), reportHomeSwStatus);
@@ -390,7 +469,9 @@ void printConfigurations() {
 	printAllBools(F("reportThermalStatus"), reportThermalStatus);
 	printAllBools(F("reportOCD"), reportOCD);
 	printAllBools(F("reportStall"), reportStall);
-	printAllBools(F("reportOCD"), reportOCD);
+#if defined(HAVE_LIMIT_ADC) || defined(HAVE_LIMIT_GPIO)
+	printAllBools(F("reportLimitSwStatus"), reportLimitSwStatus);
+#endif
 	printAllData(F("reportPosition Interval"), reportPositionInterval);
 	dbgPrint("reportPositionList Interval : %d\n", reportPositionListInterval);
 	printAllData("OCThreshold", overCurrentThreshold);
@@ -459,7 +540,7 @@ void showBoolResult(String title, bool val) {
 }
 
 template <class T>
-T printAllData(String title, T* val) {
+void printAllData(String title, T* val) {
 	String out;
 	printTitle(title);
 	for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
@@ -493,7 +574,7 @@ void boldHeader(String header) {
 void printHeader(String header) {
 	dbgPrint("-------------- %s --------------\n", header.c_str());
 }
-#ifdef HAVE_BRAKE
+#if defined(HAVE_BRAKE) && defined(HIL_PROBE) // test builds only: ignores the brake state
 void testBrake(){
 	static uint8_t brakeTestCount =0;
 	setBrake(brakeTestCount, LOW);
@@ -779,12 +860,22 @@ void printStatusAsJson() {
 		JsonDocument doc;
 		JsonObject board = doc.to<JsonObject>();
 		board["product"] = PRODUCT_NAME;
+		board["mcu"] = mcuName();
+		board["resetCause"] = resetCause;
+		board["resetCauseRaw"] = resetCauseRaw;
 		JsonArray fwVer = board["firmwareVersion"].to<JsonArray>();
 		for (uint8_t i = 0; i < 3; i++) fwVer.add(firmwareVersion[i]);
 		JsonArray boardMyIp = board["myIp"].to<JsonArray>();
 		for (uint8_t i = 0; i < 4; i++) boardMyIp.add(myIp[i]);
 		board["myId"] = getMyId();
 		board["linkStatus"] = Ethernet.linkStatus();
+		// MAC address the last send went to (readDestMac(): 255 x 6 after a broadcast,
+		// 0 x 6 if the socket is not open).
+		uint8_t dm[6];
+		readDestMac(dm);
+		JsonArray destMac = board["destMac"].to<JsonArray>();
+		for (uint8_t i = 0; i < 6; i++) destMac.add(dm[i]);
+		board["arpPending"] = isArpResolvePending(); // resolving the MAC address of destIp (arpResolve.h)
 #ifdef HAVE_SD
 		board["sdInitialized"] = sdInitializeSucceeded;
 		board["configLoaded"] = configFileParseSucceeded;
@@ -902,9 +993,11 @@ void receiveConfigJson() {
 		JsonArray network_dns = network["dns"];
 		JsonArray network_gateway = network["gateway"];
 		JsonArray network_subnet = network["subnet"];
+		// The address, port and MAC are the values before the ID is added (as 'G' and the
+		// SD save write them). Only the config values change; the running myIp, outPort
+		// and mac are applied by a reboot.
 		for (uint8_t i = 0; i < 4; i++) {
-			myIp[i] = network_myIp[i] | myIp[i];
-			myIp_from_config[i] = myIp[i];
+			myIp_from_config[i] = network_myIp[i] | myIp_from_config[i];
 			destIp[i] = network_destIp[i] | destIp[i];
 			dns[i] = network_dns[i] | dns[i];
 			gateway[i] = network_gateway[i] | gateway[i];
@@ -912,13 +1005,11 @@ void receiveConfigJson() {
 		}
 		isMyIpAddId = network["isMyIpAddId"] | isMyIpAddId;
 		inPort = network["inPort"] | inPort;
-		outPort = network["outPort"] | outPort;
-		outPort_from_config = outPort;
+		outPort_from_config = network["outPort"] | outPort_from_config;
 		isOutPortAddId = network["isOutPortAddId"] | isOutPortAddId;
 		JsonArray network_mac = network["mac"];
 		for (uint8_t i = 0; i < 6; i++) {
-			mac[i] = network_mac[i] | mac[i];
-			mac_from_config[i] = mac[i];
+			mac_from_config[i] = network_mac[i] | mac_from_config[i];
 		}
 		isMacAddId = network["isMacAddId"] | isMacAddId;
 		bootedMsgEnable = network["bootedMsgEnable"] | bootedMsgEnable;
@@ -1031,8 +1122,11 @@ void receiveConfigJson() {
 #endif
 			slewRate[i] = slewRateVal[slewRateNum[i]];
 #ifdef HAVE_BRAKE
-			electromagnetBrakeEnable[i] = ds_electromagnetBrakeEnable[i] | electromagnetBrakeEnable[i];
+			const bool brakeEnable = ds_electromagnetBrakeEnable[i] | electromagnetBrakeEnable[i];
+			if (!enableElectromagnetBrake(i, brakeEnable))
+				dbgPrint("Warning: electromagnetBrakeEnable of motor %d not changed (driver not HiZ, or brake not engaged)\n", i + MOTOR_ID_FIRST);
 			brakeTransitionDuration[i] = ds_brakeTransitionDuration[i] | brakeTransitionDuration[i];
+			updateFaultBrakeWait();
 #endif
 		}
 	}
@@ -1159,7 +1253,18 @@ void receiveFilename() {
 	char buf[MAX_CONFIG_FILENAME];
 	uint8_t idx = 0;
 	uint32_t t = millis();
-	while ((millis() - t) < 2000) {
+	// Typed by hand, the characters can be more than the watchdog early warning apart:
+	// reset it every 50 ms, as receiveConfigJson() does (SYNCBUSY takes 2-3 ms). The
+	// whole name is limited to 10 s, the timeout of '{', so a stream without a line end
+	// does not hold the loop with the watchdog reset.
+	const uint32_t startTime = t;
+	uint32_t lastWdtReset = t;
+	while (((millis() - t) < 2000) && ((millis() - startTime) < 10000UL)) {
+		const uint32_t now = millis();
+		if (now - lastWdtReset >= 50) {
+			Watchdog.reset();
+			lastWdtReset = now;
+		}
 		if (SerialUSB.available()) {
 			char c = SerialUSB.read();
 			if (c == '\n' || c == '\r') break;
@@ -1197,7 +1302,7 @@ void saveRawConfigToSd(const char* json, size_t len) {
 //
 // Does NOT call SD.begin(): SD.begin() sends CMD0 which resets the card internally.
 // The first writeBlock() after a CMD0 reset takes ~100-600 ms on some SD cards
-// (NAND block erase / internal GC), firing the 128 ms watchdog before the operation
+// (NAND block erase / internal GC), firing the watchdog before the operation
 // returns. The SD state from loadConfig() at boot is already valid — no re-init needed.
 //
 // Watchdog is DISABLED for the entire SD sequence and re-enabled when done.
@@ -1205,29 +1310,70 @@ void saveRawConfigToSd(const char* json, size_t len) {
 // so each operation terminates on its own — the watchdog provides no additional safety
 // here. Re-enabling after file.close() restores normal protection.
 //
-// Uses O_RDWR|O_CREAT (no O_APPEND, no O_TRUNC):
-//   SD.remove() deletes the old file → O_RDWR|O_CREAT creates a fresh file at
-//   position 0 with fileSize_=0 → final directory entry has the exact byte count
-//   of the new JSON → no old-file tail bytes → PC reads a clean compact JSON file.
+// The configuration is written to a temporary file in the same directory, closed, and only
+// then replaces the saved file (sd.remove() of the old file, sd.rename() of the new one),
+// so a save that fails while it writes (card full, directory full, a path that cannot be
+// created, a write error) leaves the saved file as it was. The file is created at
+// position 0 with fileSize_=0, so its directory entry has the exact byte count of the new
+// JSON: no old-file tail bytes, and a PC reads a clean compact JSON file.
+//
+// The name of the temporary file starts with '.', so loadConfig() never takes a file left
+// by a power cut for a configuration (findFirstValidJson() skips such names).
+// A power cut between sd.remove() and sd.rename() leaves no file with the saved name, only
+// the temporary one; there is no recovery at start-up.
+static void sdTempName(char* tmp, size_t size) {
+	const char* slash = strrchr(configFilename, '/'); // configFilename starts with '/'
+	const size_t dirLen = slash ? (size_t)(slash - configFilename) + 1 : 0;
+	const char* base = configFilename + dirLen;
+	const char* suffix = ".tmp";
+	const size_t baseLen = strlen(base);
+	size_t n = dirLen;
+	memcpy(tmp, configFilename, dirLen);
+	tmp[n++] = '.';
+	if (n + baseLen + strlen(suffix) < size) {
+		memcpy(tmp + n, base, baseLen);
+		n += baseLen;
+		memcpy(tmp + n, suffix, strlen(suffix) + 1);
+	} else {
+		// A name too long for the buffer: a fixed one (the directory is the same).
+		strcpy(tmp + n, "sdcfg.tmp");
+	}
+}
+
 static bool sdSaveConfig() {
 #ifdef HAVE_SD
 	if (!sdInitializeSucceeded) {
 		return false;
 	}
-	Watchdog.disable();   // SD first-write can take > 128 ms; re-enabled after close
-	sd.remove(configFilename);
+	char tmp[MAX_CONFIG_FILENAME + 16];
+	sdTempName(tmp, sizeof(tmp));
+	// The first write to the card can take long (the save measured 82-86 ms by /saveConfig
+	// on the HIL bench, but the card's own delays are not bounded); the watchdog (early
+	// warning about 250 ms, WATCHDOG_TIMEOUT_MS) is off until the file is closed, then
+	// enabled again.
+	Watchdog.disable();
+	bool ok = false;
+	bool renameFailed = false;
+	sd.remove(tmp); // a temporary file left by an earlier save
 	File32 file;
-	file.open(configFilename, O_RDWR | O_CREAT);
-	if (!file.isOpen()) {
-		Watchdog.enable(100);
-		return false;
+	file.open(tmp, O_RDWR | O_CREAT);
+	if (file.isOpen()) {
+		file.print(F("{"));
+		serializeConfigSectionsTo(file);
+		file.println(F("}"));
+		ok = !file.getWriteError();
+		ok = file.close() && ok;
 	}
-	file.print(F("{"));
-	serializeConfigSectionsTo(file);
-	file.println(F("}"));
-	file.close();
-	Watchdog.enable(100);
-	return true;
+	if (ok) {
+		sd.remove(configFilename);
+		ok = sd.rename(tmp, configFilename);
+		renameFailed = !ok; // the saved file is gone: keep the temporary one
+	}
+	if (!ok && !renameFailed) {
+		sd.remove(tmp);
+	}
+	Watchdog.enable(WATCHDOG_TIMEOUT_MS);
+	return ok;
 #else
 	return false;
 #endif
@@ -1260,8 +1406,14 @@ void saveCurrentConfigToSd() {
 	}
 }
 
+// SerialUSB.flush() only waits until the reply is handed to the USB controller, not until
+// the host has read it. The reset disconnects USB, and a reply still pending is lost (seen
+// without a brake wait). The config tool waits 3 s for the reply.
+static constexpr uint16_t REBOOT_REPLY_MIN_WAIT_MS = 50;
+
 void rebootBoard() {
+	// Reply first: the brakes can take up to 1 s, and the config tool waits 3 s for it.
 	SerialUSB.println(F("{\"result\":\"ok\",\"message\":\"Rebooting...\"}"));
 	SerialUSB.flush();
-	NVIC_SystemReset();
+	safeSystemReset(REBOOT_REPLY_MIN_WAIT_MS);
 }

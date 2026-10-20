@@ -4,9 +4,18 @@
 
 #include "utils.h"
 #include "oscListeners.h"
+#include "hilProbe.h"
+#include "resetCause.h"
+#include "perfStats.h"
+#include "sendBackoff.h"
+#include "arpResolve.h"
+#include "idOffset.h"
+#include "elapsedMs.h"
 #include <stdarg.h>
+#include <utility/w5100.h>
+#include "faultReset.h"
 
-char* dbgPrint_(const __FlashStringHelper* fmt, ...)
+void dbgPrint_(const __FlashStringHelper* fmt, ...)
 {
 	char buf[128]; // resulting string limited to 128 chars
 	va_list args;
@@ -18,7 +27,6 @@ char* dbgPrint_(const __FlashStringHelper* fmt, ...)
 #endif
 	va_end(args);
 	SerialUSB.print(buf);
-	return buf;
 }
 
 void turnOnRXL() {
@@ -34,9 +42,11 @@ void turnOnTXL() {
 }
 
 void updateRxTxLed(uint32_t _currentTimeMillis) {
+    // A blink can start after the slot time: a UDP send of this slot (e.g. a position
+    // report) before this call.
     if (rxLedEnabled)
     {
-        if ((uint32_t)(_currentTimeMillis - RXL_blinkStartTime) >= RXL_TXL_BLINK_DURATION)
+        if (millisElapsed(RXL_blinkStartTime, _currentTimeMillis, RXL_TXL_BLINK_DURATION))
         {
             rxLedEnabled = false;
             fastDigitalWriteHIGH(PIN_LED_RXL); // turn off
@@ -44,7 +54,7 @@ void updateRxTxLed(uint32_t _currentTimeMillis) {
     }
     if (txLedEnabled)
     {
-        if ((uint32_t)(_currentTimeMillis - TXL_blinkStartTime) >= RXL_TXL_BLINK_DURATION)
+        if (millisElapsed(TXL_blinkStartTime, _currentTimeMillis, RXL_TXL_BLINK_DURATION))
         {
             txLedEnabled = false;
             fastDigitalWriteHIGH(PIN_LED_TXL); // turn off
@@ -57,7 +67,7 @@ void sendWrongDataTypeError() {
         sendOneDatum(F("/error/osc"),"WrongDataType");
 }
 
-int getInt(OSCMessage &msg, uint8_t offset) 
+int getInt(OscMessage &msg, uint8_t offset) 
 {
 	int msgVal = 0;
 	if (msg.isFloat(offset))
@@ -74,7 +84,7 @@ int getInt(OSCMessage &msg, uint8_t offset)
 	return msgVal;
 }
 
-float getFloat(OSCMessage &msg, uint8_t offset)
+float getFloat(OscMessage &msg, uint8_t offset)
 {
 	float msgVal = 0;
 	if (msg.isFloat(offset))
@@ -91,7 +101,7 @@ float getFloat(OSCMessage &msg, uint8_t offset)
 	return msgVal;
 }
 
-bool getBool(OSCMessage &msg, uint8_t offset)
+bool getBool(OscMessage &msg, uint8_t offset)
 {
     bool msgVal = 0;
 	if (msg.isFloat(offset))
@@ -116,9 +126,9 @@ bool getBool(OSCMessage &msg, uint8_t offset)
 void sendCommandError(uint8_t motorId, uint8_t errorNum)
 {
     if (reportErrors) {
-        sendTwoData(F("/error/command"), commandErrorText[errorNum].c_str(), motorId);
+        sendTwoData(F("/error/command"), commandErrorText[errorNum], motorId);
         //if (SerialUSB)
-            //dbgPrint("/error/command %s %d\n", commandErrorText[errorNum].c_str(), motorId);
+            //dbgPrint("/error/command %s %d\n", commandErrorText[errorNum], motorId);
     }
 }
 
@@ -180,6 +190,106 @@ void resetMotorDriver(uint8_t deviceID) {
     }
 }
 
+// Watchdog early warning (interrupt, watchdog.h): the MCU resets right after this, and
+// the reset puts the drivers in standby. Engage the brakes and wait for them. No driver
+// SPI here (the interrupted code may be using it), so no hard stop.
+void onWatchdogEarlyWarning() {
+#ifdef HAVE_BRAKE
+    PROBE_HIGH(2); // HIL: early warning
+    engageAllBrakeOutputsFromIsr();
+    const uint16_t waitMs = longestBrakeWaitMs();
+    // WDT_Handler() resets the MCU as soon as this returns: the reset comes up to 1 s
+    // after the early warning. The wait can be longer than the rest of the watchdog
+    // period (the period is twice the early warning time, WATCHDOG_TIMEOUT_MS), so the
+    // watchdog is cleared every WATCHDOG_BRAKE_WAIT_CLEAR_MS meanwhile: the early warning
+    // runs, so the CPU still handles interrupts. The period resets the MCU only when the
+    // early warning cannot run (a hang with the interrupts disabled, a CPU lockup).
+    // delayMicroseconds() is a cycle loop; SysTick does not advance in this interrupt.
+    for (uint16_t ms = 0; ms < waitMs; ms++)
+    {
+        if ((ms % WATCHDOG_BRAKE_WAIT_CLEAR_MS) == 0)
+            Watchdog.clearFromIsr();
+        delayMicroseconds(1000);
+    }
+#endif
+}
+
+#ifdef HAVE_BRAKE
+uint16_t longestBrakeWaitMs() {
+    uint16_t waitMs = 0;
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (electromagnetBrakeEnable[i] && (brakeStatus[i] != BRAKE_ENGAGED))
+        {
+            const uint16_t t = min(brakeTransitionDuration[i], (uint16_t)1000);
+            if (t > waitMs)
+                waitMs = t;
+        }
+    }
+    return waitMs;
+}
+
+void updateFaultBrakeWait() {
+    faultBrakeWaitMs = longestBrakeWaitMs();
+}
+#endif
+
+void safeSystemReset(uint16_t minWaitMs) {
+    uint16_t waitMs = minWaitMs;
+#ifdef HAVE_BRAKE
+    // The MCU reset puts the drivers in standby (their STBY/RST input floats and is
+    // pulled down inside), so engage the brakes and wait for them first.
+    for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
+    {
+        if (electromagnetBrakeEnable[i] && (brakeStatus[i] != BRAKE_ENGAGED))
+        {
+            // GetParam does not clear the latched flags (GetStatus does).
+            const uint16_t status = stepper[i].getParam(REG_STATUS);
+            if (!(status & STATUS_HIZ) && (status & STATUS_MOT_STATUS))
+                stepper[i].hardStop();
+            setBrake(i, LOW);
+            const uint16_t t = min(brakeTransitionDuration[i], (uint16_t)1000);
+            if (t > waitMs)
+                waitMs = t;
+        }
+    }
+#endif
+    const uint32_t start = millis();
+    while ((uint32_t)(millis() - start) < waitMs)
+        Watchdog.reset();
+    PROBE_HIGH(0); // HIL: the last P0 edge marks the MCU reset (the pin floats then)
+    systemReset();
+}
+
+// The W5500 defaults (RTR 200 ms, RCR 8) can block Udp.endPacket() for 1.6 s or more
+// (not measured) when the destination does not answer ARP. With RTR 20 ms and RCR 2 one send to such a
+// destination blocked 40.8 ms on the HIL bench (STEP800), i.e. RTR x RCR (measured; the
+// earlier estimate RTR x (RCR + 1) = 60 ms was not reached). sendOscMessage() then pauses
+// the sends to that destination (sendBackoff.h). The resolution of the MAC address of
+// destIp (arpResolve.h) tries the ARP every 150 ms for up to 2 s instead of waiting longer
+// in one send.
+// Ethernet 2.0.2 setRetransmissionTimeout()/setRetransmissionCount() write the W5100
+// register addresses (0x0017/0x0019), which are SIR/SIMR and the upper byte of RTR on
+// the W5500. On the W5500, write RTR (0x0019-0x001A, 100 us units) and RCR (0x001B) directly.
+static void setEthernetRetransmission(uint16_t timeoutMs, uint8_t count) {
+    if (W5100.getChip() != 55) {
+        Ethernet.setRetransmissionTimeout(timeoutMs);
+        Ethernet.setRetransmissionCount(count);
+        return;
+    }
+    constexpr uint16_t W5500_RTR = 0x0019;
+    constexpr uint16_t W5500_RCR = 0x001B;
+    const uint16_t rtr = timeoutMs * 10;
+    const uint8_t rtrBytes[2] = {(uint8_t)(rtr >> 8), (uint8_t)(rtr & 0xFF)};
+    uint8_t readBack[3];
+    SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+    W5100.write(W5500_RTR, rtrBytes, 2);
+    W5100.write(W5500_RCR, count);
+    W5100.read(W5500_RTR, readBack, 3);
+    SPI.endTransaction();
+    dbgPrint("W5500 RTR:%u RCR:%u\n", (readBack[0] << 8) | readBack[1], readBack[2]);
+}
+
 void initEthernet() {
     Udp.stop();
 #ifdef PIN_W5500_RESET
@@ -192,13 +302,26 @@ void initEthernet() {
     digitalWrite(ledPin, LOW);
     delay(1);
 #endif
-    if ( isMyIpAddId ) myIp[3] = myIp_from_config[3] + myId;
-    if ( isMacAddId ) mac[5] = mac_from_config[5] + myId;
-    if ( isOutPortAddId ) outPort = outPort_from_config + myId;
+    if ( isMyIpAddId ) {
+        uint8_t last;
+        if (!addIdToIpLastByte(myIp_from_config[3], myId, last))
+            dbgPrint("Warning: IP address out of range with ID %d, ID not added\n", myId);
+        myIp[3] = last;
+    }
+    if ( isMacAddId ) mac[5] = mac_from_config[5] + myId; // wraps, still unique per ID
+    if ( isOutPortAddId ) {
+        uint16_t port;
+        if (!addIdToPort(outPort_from_config, myId, port))
+            dbgPrint("Warning: port out of range with ID %d, ID not added\n", myId);
+        outPort = port;
+    }
     Ethernet.init(PIN_W5500_CS);
     Ethernet.begin(mac, myIp, dns, gateway, subnet);
+    // Must be set after Ethernet.begin(), which resets the chip.
+    setEthernetRetransmission(W5500_RETRANSMISSION_TIMEOUT_MS, W5500_RETRANSMISSION_COUNT);
     Udp.begin(inPort);
     dbgPrint("New IP: %d.%d.%d.%d\n", myIp[0], myIp[1], myIp[2], myIp[3]);
+    requestArpResolveOnLink();
 }
 
 void sendBootMsg(uint32_t _currentTime) {
@@ -210,49 +333,181 @@ void sendBootMsg(uint32_t _currentTime) {
     else {
         if ((uint32_t)(_currentTime - linkedTime) < BOOT_MSG_WAIT_TIME) return;
     }
-    OSCMessage newMes("/booted");
-    newMes.add(myId);
-    Udp.beginPacket(broadcastIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    OscWriter newMes("/booted");
+    newMes.add(myId).add(resetCause);
+    sendOscMessage(newMes, broadcastIp, outPort);
     isWaitingSendBootMsg = false;
 }
-bool isBrakeDisEngaged(uint8_t motorId) {
 #ifdef HAVE_BRAKE
-    bool state = electromagnetBrakeEnable[motorId] && (brakeStatus[motorId] != BRAKE_DISENGAGED);
-    if (state) {
-        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_ENGAGED);
+// The holding current must be able to hold the load once the brake is released:
+// KVAL_HOLD (TVAL_HOLD in current mode) at least half of the RUN value.
+static void ensureHoldingCurrent(uint8_t motorId) {
+#ifdef DRIVER_POWERSTEP01
+    if (isCurrentMode[motorId])
+    {
+        uint8_t t = tvalRun[motorId] >> 1;
+        if (tvalHold[motorId] < t)
+        {
+            stepper[motorId].setHoldTVAL(t);
+            tvalHold[motorId] = t;
+        }
+        return;
     }
-    return !state;
-#else
-    return true;
 #endif
+    uint8_t t = kvalRun[motorId] >> 1;
+    if (kvalHold[motorId] < t)
+    {
+        stepper[motorId].setHoldKVAL(t);
+        kvalHold[motorId] = t;
+    }
 }
-#ifdef HAVE_BRAKE
+
+void applyBrakeAction(uint8_t motorId, const BrakeAction &action) {
+    const BrakeState current = brakeStatus[motorId];
+    const bool wasReleased = brakeOutputReleased(current);
+    const bool willRelease = brakeOutputReleased(action.next);
+    // From HiZ (or engaging) back to energized, before the driver is energized: also
+    // after /free, where the brake is released already.
+    if (((current == BRAKE_ENGAGED) || (current == BRAKE_ENGAGING) || (current == BRAKE_FREE)) &&
+        ((action.next == BRAKE_RELEASING) || (action.next == BRAKE_RELEASED)))
+        ensureHoldingCurrent(motorId);
+    // Release the brake before the driver goes HiZ (/free), and stop the motor before
+    // the brake engages (/hardHiZ).
+    if (willRelease && !wasReleased)
+        setBrake(motorId, HIGH);
+    switch (action.driver) {
+    case BRAKE_DRIVER_HARD_STOP:
+        stepper[motorId].hardStop();
+        break;
+    case BRAKE_DRIVER_SOFT_STOP:
+        stepper[motorId].softStop();
+        break;
+    case BRAKE_DRIVER_HARD_HIZ:
+        stepper[motorId].hardHiZ();
+        break;
+    default:
+        break;
+    }
+    if (!willRelease && wasReleased)
+        setBrake(motorId, LOW);
+    if (action.startTimer)
+        brakeTransitionTrigTime[motorId] = millis();
+    if ((action.driver != BRAKE_DRIVER_NONE) || (action.next != current))
+        brakeStatusFresh[motorId] = false;
+    if (action.next != current) {
+        brakeStatus[motorId] = action.next;
+        PROBE_PULSE(6);
+        updateFaultBrakeWait();
+    }
+    if (action.cancelPending)
+        cancelPendingMotion(motorId);
+    switch (action.error) {
+    case BRAKE_ERROR_ENGAGED:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_ENGAGED);
+        break;
+    case BRAKE_ERROR_IGNORED:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_COMMAND_IGNORED);
+        break;
+    case BRAKE_ERROR_RELEASE_FAILED:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_RELEASE_FAILED);
+        break;
+    case BRAKE_ERROR_ENGAGED_ON_HIZ:
+        sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_BRAKE_ENGAGED_ON_HIZ);
+        break;
+    default:
+        break;
+    }
+}
+
+BrakeAction brakeCommand(uint8_t motorId, BrakeCommand command) {
+    const BrakeAction action = brakeOnCommand(brakeStatus[motorId], command);
+    applyBrakeAction(motorId, action);
+    return action;
+}
+
 void updateBrake(uint32_t _currentTimeMillis) {
+    static bool warned[NUM_OF_MOTOR] = {false};
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
-        if (electromagnetBrakeEnable[i]) {
-            if (brakeStatus[i] == BRAKE_DISENGAGE_WAITING) {
-                if ((uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i]) {
-                    setBrake(i, HIGH);
-                    brakeStatus[i] = BRAKE_DISENGAGED;
-                }
-            } else if (brakeStatus[i] == BRAKE_MOTORHIZ_WAITING) {
-                if ((uint32_t)(_currentTimeMillis - brakeTransitionTrigTime[i]) >= brakeTransitionDuration[i]) {
-                    stepper[i].hardHiZ();
-                    brakeStatus[i] = BRAKE_ENGAGED;
-                }
+        if (!electromagnetBrakeEnable[i])
+            continue;
+        BrakePollInput in;
+        in.hiz = HiZ[i];
+        in.stopped = (motorStatus[i] == 0);
+        in.statusFresh = brakeStatusFresh[i];
+        // The timer start can be later than the slot time if a future change starts it in
+        // this slot before here; it then elapses from the next slot on, not at once.
+        in.elapsed = millisElapsed(brakeTransitionTrigTime[i], _currentTimeMillis, brakeTransitionDuration[i]);
+        const BrakeAction action = brakeOnPoll(brakeStatus[i], in);
+        if (action.warn && !warned[i]) {
+            warned[i] = true;
+            dbgPrint("Warning: motor %d is %s while the brake state is %d\n", i + MOTOR_ID_FIRST,
+                     in.hiz ? "HiZ" : "energized", brakeStatus[i]);
+        }
+        applyBrakeAction(i, action);
+        if (homingAtStartupPending[i]) {
+            if (brakeStatus[i] == BRAKE_RELEASED) {
+                homingAtStartupPending[i] = false;
+                homing(i);
+            } else if (brakeStatus[i] == BRAKE_ENGAGED) {
+                // The release failed (BrakeReleaseFailed has been sent).
+                homingAtStartupPending[i] = false;
             }
         }
     }
 }
 #endif
 
-// When the stop commands are sent during a homing process, 
+bool brakeReleasedOrDisabled(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    return !electromagnetBrakeEnable[motorId] || (brakeStatus[motorId] == BRAKE_RELEASED);
+#else
+    return true;
+#endif
+}
+
+bool brakeAllowsMotion(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId]) {
+        const BrakeAction action = brakeOnCommand(brakeStatus[motorId], BRAKE_CMD_MOTION);
+        if (!action.execute) {
+            applyBrakeAction(motorId, action); // BrakeEngaged
+            return false;
+        }
+    }
+#endif
+    return true;
+}
+
+void commitMotionStart(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId])
+        brakeCommand(motorId, BRAKE_CMD_MOTION);
+#endif
+    // A goTo waiting for BUSY must not overwrite this command later.
+    busyClearWaitStatus[motorId] = NONE;
+}
+
+bool brakeAllowsStop(uint8_t motorId) {
+#ifdef HAVE_BRAKE
+    if (electromagnetBrakeEnable[motorId])
+        return brakeCommand(motorId, BRAKE_CMD_STOP).execute;
+#endif
+    return true;
+}
+
+void cancelPendingMotion(uint8_t motorId) {
+    busyClearWaitStatus[motorId] = NONE;
+    clearHomingStatus(motorId);
+    isServoMode[motorId] = false;
+#ifdef HAVE_BRAKE
+    homingAtStartupPending[motorId] = false;
+#endif
+}
+
+// When the stop commands are sent during a homing process,
 // clear the homing status as HOMING_UNDEFINED.
+// A /goUntil or /releaseSw sent directly (not /homing) is cleared without a report.
 void clearHomingStatus(uint8_t motorId)
 {
     if (bHoming[motorId])
@@ -261,18 +516,19 @@ void clearHomingStatus(uint8_t motorId)
         bHoming[motorId] = false;
         sendTwoData("/homingStatus", motorId + MOTOR_ID_FIRST, homingStatus[motorId]);
     }
+    else if ((homingStatus[motorId] == HOMING_GOUNTIL) || (homingStatus[motorId] == HOMING_RELEASESW))
+    {
+        homingStatus[motorId] = HOMING_UNDEFINED;
+    }
 }
 
 bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatus) {
     if (checkHomingStatus)
         clearHomingStatus(motorId);
-#ifdef HAVE_BRAKE
-    if (!isBrakeDisEngaged(motorId)) {
+    if (!brakeAllowsMotion(motorId)) {
         return false;
     }
-    else 
-#endif
-    if ( isServoMode[motorId] ) {
+    else if ( isServoMode[motorId] ) {
         sendCommandError(motorId + MOTOR_ID_FIRST, ERROR_IN_SERVO_MODE);
         return false;
     }
@@ -293,27 +549,186 @@ bool checkMotionStartConditions(uint8_t motorId, bool dir, bool checkHomingStatu
     return true;
 }
 
-void sendThreeInt(String address, int32_t data1, int32_t data2, int32_t data3) {
-    if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
-    newMes.add(data1).add(data2).add(data3);
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
+static SendBackoff sendBackoff;
+static ArpResolve arpResolve;
+static ArpRxRecord arpRx;
+static ArpLinkWatch arpLink;
+static bool heldDestIpUpdated; // the last argument of the held /destIp
+
+static void printSendBackoffEvent(SendBackoffEvent event, const IPAddress &ip) {
+    if (event == SEND_BACKOFF_PAUSED)
+        dbgPrint("Warning: destination %d.%d.%d.%d unreachable, sends paused\n", ip[0], ip[1], ip[2], ip[3]);
+    else if (event == SEND_BACKOFF_RESUMED)
+        dbgPrint("Destination %d.%d.%d.%d reachable, sends resumed\n", ip[0], ip[1], ip[2], ip[3]);
+}
+
+void sendOscMessage(const OscWriter &msg, const IPAddress &ip, uint16_t port) {
+    static uint8_t oscTxBuffer[OSC_TX_BUFFER_SIZE];
+    static bool warned = false;
+    const uint16_t len = msg.encode(oscTxBuffer, sizeof(oscTxBuffer));
+    if (len == 0) {
+        if (!warned) {
+            warned = true;
+            dbgPrint("Warning: OSC message too long, not sent\n");
+        }
+        return;
+    }
+    const uint32_t ipRaw = (uint32_t)ip;
+    if (!arpResolveShouldSend(arpResolve, ipRaw)) {
+        perfStats.arpDroppedCount++;
+        return;
+    }
+    if (!sendBackoffShouldSend(sendBackoff, ipRaw, millis())) {
+        perfStats.udpSendDroppedCount++;
+        return;
+    }
+    PROBE_HIGH(5);
+    Udp.beginPacket(ip, port);
+    Udp.write(oscTxBuffer, len);
+    const bool ok = Udp.endPacket(); // 0: timeout (no ARP reply), see sendBackoff.h
+    PROBE_LOW(5);
+    if (!ok)
+        perfStats.udpSendFailedCount++;
+    else
+        arpResolveSent(arpResolve, ipRaw);
+    printSendBackoffEvent(sendBackoffSent(sendBackoff, ipRaw, ok, millis()), ip);
     turnOnTXL();
 }
 
-void sendAllData(String address, int32_t *data) {
+void sendBackoffOnReceive(const IPAddress &ip) {
+    printSendBackoffEvent(sendBackoffReceived(sendBackoff, (uint32_t)ip), ip);
+}
+
+bool sendArpRefreshDummy() {
+    // 1 byte, not 0: a SEND of an empty datagram is not defined for the W5500 (WIZnet's
+    // ioLibrary refuses it), and socketSendUDP() would wait for SEND_OK or TIMEOUT
+    // forever. Not through sendBackoff: the broadcast needs no ARP.
+    static const uint8_t dummy = 0;
+    PROBE_HIGH(5);
+    Udp.beginPacket(broadcastIp, 9);
+    Udp.write(&dummy, 1);
+    const bool ok = Udp.endPacket();
+    PROBE_LOW(5);
+    return ok;
+}
+
+bool readDestMac(uint8_t out[6]) {
+    const uint8_t s = Udp.socketIndex();
+    if (s >= MAX_SOCK_NUM) {
+        memset(out, 0, 6);
+        return false;
+    }
+    // As the Ethernet library does: the W5500 is on SPI (SERCOM4), shared with the SD card
+    // only; both are used from loop() only.
+    SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+    W5100.readSnDHAR(s, out);
+    SPI.endTransaction();
+    return true;
+}
+
+static void sendDestIp(bool ipUpdated) {
+    OscWriter newMes("/destIp");
+    for (auto i = 0; i < 4; i++)
+        newMes.add(destIp[i]);
+    newMes.add((int32_t)ipUpdated);
+    sendOscMessage(newMes, destIp, outPort);
+}
+
+static void startArpResolve(bool holdDestIp, bool destIpUpdated) {
+    if (holdDestIp)
+        heldDestIpUpdated = destIpUpdated;
+    arpLink.startWanted = false; // this one does it
+    sendBackoffClear(sendBackoff); // the resolution manages the sends to destIp
+    arpResolveStart(arpResolve, (uint32_t)destIp, holdDestIp, millis());
+    perfStats.arpResolveCount++;
+    sendArpRefreshDummy();
+}
+
+void setDestIpReceived(const IPAddress &src, bool destIpWasSet, bool destIpUpdated) {
+    // Before destIp changes: judged against the packets from the destIp until now.
+    const bool start = !destIpWasSet || arpResolve.failed ||
+                       arpRxStartsResolution(arpRx, (uint32_t)src, (uint32_t)destIp, millis());
+    destIp = src;
+    isDestIpSet = true;
+    if (start) {
+        startArpResolve(true, destIpUpdated);
+        return;
+    }
+    heldDestIpUpdated = destIpUpdated;
+    if (!arpResolveHoldReply(arpResolve))
+        sendDestIp(destIpUpdated); // resolved: no ARP
+}
+
+void arpRxOnReceive(const IPAddress &src) {
+    arpRxReceived(arpRx, (uint32_t)src, (uint32_t)destIp, millis());
+}
+
+void requestArpResolveOnLink() {
+    arpLinkWatchRequest(arpLink);
+}
+
+void updateArpResolve() {
+    // As sendBootMsg(): the link state read at every housekeeping run.
+    const bool linkUp = Ethernet.linkStatus() != LinkOFF;
+    if (linkUp != arpLink.wasUp)
+        dbgPrint("Ethernet link %s\n", linkUp ? "up" : "down");
+    if (arpLinkWatchPoll(arpLink, linkUp, millis()) && isDestIpSet)
+        startArpResolve(false, false);
+    switch (arpResolvePoll(arpResolve, millis(), linkUp)) {
+    case ARP_RESOLVE_PROBE: {
+        // 1 byte to port 9 (discard), not through sendBackoff: the W5500 tries the ARP.
+        static const uint8_t probe = 0;
+        perfStats.arpProbeCount++;
+        PROBE_HIGH(5);
+        Udp.beginPacket(destIp, 9);
+        Udp.write(&probe, 1);
+        const bool ok = Udp.endPacket();
+        PROBE_LOW(5);
+        if (!arpResolveProbeResult(arpResolve, ok)) {
+            perfStats.arpProbeFailedCount++;
+            return;
+        }
+        perfStats.arpResolvedCount++;
+        break;
+    }
+    case ARP_RESOLVE_TIMEOUT:
+        perfStats.arpTimeoutCount++;
+        dbgPrint("Warning: destination %d.%d.%d.%d did not answer ARP in %lu ms\n",
+                 destIp[0], destIp[1], destIp[2], destIp[3], (unsigned long)ARP_RESOLVE_TIMEOUT_MS);
+        if (!arpResolve.replyHeld) {
+            // As after a failed send: the next message to destIp is tried 1 s later.
+            printSendBackoffEvent(sendBackoffSent(sendBackoff, (uint32_t)destIp, false, millis()), destIp);
+            return;
+        }
+        break;
+    default:
+        return;
+    }
+    // Resolved or given up. After the timeout the held /destIp is one more try of the
+    // ARP; a failure pauses the sends as usual (sendBackoff.h).
+    if (arpResolveTakeReply(arpResolve)) {
+        perfStats.arpDestIpSentCount++;
+        sendDestIp(heldDestIpUpdated);
+    }
+}
+
+bool isArpResolvePending() {
+    return arpResolve.pending;
+}
+
+void sendThreeInt(const char *address, int32_t data1, int32_t data2, int32_t data3) {
     if (!isDestIpSet) { return; }
-    OSCMessage newMes(address.c_str());
+    OscWriter newMes(address);
+    newMes.add(data1).add(data2).add(data3);
+    sendOscMessage(newMes, destIp, outPort);
+}
+
+void sendAllData(const char *address, int32_t *data) {
+    if (!isDestIpSet) { return; }
+    OscWriter newMes(address);
     for (uint8_t i = 0; i < NUM_OF_MOTOR; i++)
     {
         newMes.add(data[i]);
     }
-    Udp.beginPacket(destIp, outPort);
-    newMes.send(Udp);
-    Udp.endPacket();
-    newMes.empty();
-    turnOnTXL();
+    sendOscMessage(newMes, destIp, outPort);
 }

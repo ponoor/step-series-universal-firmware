@@ -15,7 +15,9 @@
 #include <SPI.h>
 
 // Products
-#define STEP400_R1
+// Arduino IDE: uncomment ONE line to select the board.
+// PlatformIO: pass the board as a build flag instead (e.g. -D STEP800_R1).
+// #define STEP400_R1
 // #define STEP800_R1
 
 // X-Nucleos
@@ -28,12 +30,20 @@
 // #define STEP800_PROTO_R3 // rev.2020-03-02
 // #define STEP800_PROTO_R1 // rev.2016-12-12
 
+// Default board: used only when no board macro is defined above or by a build flag.
+#if !defined(STEP400_R1) && !defined(STEP800_R1) && \
+    !defined(STEP100_R1) && !defined(STEP200_R1) && \
+    !defined(STEP400_PROTO_R4) && !defined(STEP400_PROTO_R3) && \
+    !defined(STEP800_PROTO_R3) && !defined(STEP800_PROTO_R1)
+    #define STEP400_R1
+#endif
+
 // Uncomment this line if the board is M0 with Zero bootloader (Swap D2 and D4) 
 // Only work for STEP100/STEP200
 // #define MZERO_WITH_ZERO_BOOTLOADER
 
 // Common version number
-const uint8_t firmwareVersion[3] = {2,1,0};
+const uint8_t firmwareVersion[3] = {2,2,0};
 
 #ifdef STEP400_R1
     #define PRODUCT_NAME    "STEP400"

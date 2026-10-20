@@ -2,7 +2,7 @@
 //
 //
 #include "loadConfig.h"
-#include <Adafruit_SleepyDog.h>
+#include "watchdog.h"
 #include <strings.h>
 
 static bool findFirstValidJson(JsonDocument& doc) {
@@ -20,6 +20,10 @@ static bool findFirstValidJson(JsonDocument& doc) {
         entry.getName(candidateName + 1, MAX_CONFIG_FILENAME - 1);
         entry.close();
 
+        // Hidden files: the AppleDouble files (._name.json) that macOS writes next to
+        // every file it copies to the card, .Trashes, ...
+        if (candidateName[1] == '.') continue;
+
         char* dot = strrchr(candidateName, '.');
         if (!dot || strcasecmp(dot, ".json") != 0) continue;
 
@@ -31,13 +35,21 @@ static bool findFirstValidJson(JsonDocument& doc) {
 
     if (bestName[0] == '\0') return false;
 
+    // On every failure below `doc` is cleared: the caller uses it for the defaults, and
+    // the values of a file that was not accepted must not be applied.
     File32 file;
     if (!file.open(bestName, O_RDONLY)) return false;
     DeserializationError err = deserializeJson(doc, file);
     file.close();
-    if (err) return false;
+    if (err) {
+        doc.clear();
+        return false;
+    }
 
-    if (doc["information"]["configVersion"].isNull()) return false;
+    if (doc["information"]["configVersion"].isNull()) {
+        doc.clear();
+        return false;
+    }
 
     strncpy(configFilename, bestName, MAX_CONFIG_FILENAME);
     return true;
@@ -79,6 +91,8 @@ void loadConfig() {
             if (findFirstValidJson(doc)) {
                 configFileOpenSucceeded = true;
                 configFileParseSucceeded = true;
+            } else {
+                doc.clear(); // a config.txt that failed to parse may have left values
             }
         }
     }
@@ -227,8 +241,9 @@ void loadConfig() {
         slewRate[i] = slewRateVal[slewRateNum[i]];
 #ifdef HAVE_BRAKE
         electromagnetBrakeEnable[i] = driverSettings_electromagnetBrakeEnable[i] | false;
-        brakeStatus[i] = 0;
-        bBrakeDecWaiting[i] = false;
+        brakeStatus[i] = BRAKE_ENGAGED;
+        brakeStatusFresh[i] = false;
+        homingAtStartupPending[i] = false;
         brakeTransitionDuration[i] = driverSettings_brakeTransitionDuration[i] | 100;
 #endif
     }

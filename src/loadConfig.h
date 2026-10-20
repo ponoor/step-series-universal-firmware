@@ -10,6 +10,7 @@
 #endif
 
 #include <ArduinoJson.h>
+#include "sdConfig.h"
 #include <SdFat.h>
 #include <SPI.h>
 #include "globals.h"

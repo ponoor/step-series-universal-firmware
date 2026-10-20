@@ -3,6 +3,7 @@
 //
 
 #include "globals.h"
+#include "sdConfig.h"
 #include <SdFat.h>
 
 // Reset cause, read at the beginning of setup()
